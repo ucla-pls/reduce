@@ -1,0 +1,86 @@
+name:                reduce
+version:             0.1.0.0
+#synopsis:
+#description:
+homepage:            https://github.com/kalhauge/reduce#readme
+license:             BSD3
+author:              Christian Gram Kalhauge
+maintainer:          kalhauge@cs.ucla.edu
+copyright:           MIT
+category:            Web
+extra-source-files:
+- README.md
+
+dependencies:
+  - base >= 4.7 && < 5
+  - containers
+  - vector
+  - mtl
+  - transformers
+
+default-extensions:
+  - AutoDeriveTypeable
+  - BangPatterns
+  - BinaryLiterals
+  - ConstraintKinds
+  - DataKinds
+  - DefaultSignatures
+  - DeriveDataTypeable
+  - DeriveFoldable
+  - DeriveFunctor
+  - DeriveGeneric
+  - DeriveTraversable
+  - DoAndIfThenElse
+  - EmptyDataDecls
+  - ExistentialQuantification
+  - FlexibleContexts
+  - FlexibleInstances
+  - FunctionalDependencies
+  - GADTs
+  - GeneralizedNewtypeDeriving
+  - InstanceSigs
+  - KindSignatures
+  - LambdaCase
+  - MonadFailDesugaring
+  - MultiParamTypeClasses
+  - MultiWayIf
+  - NamedFieldPuns
+  - OverloadedStrings
+  - PartialTypeSignatures
+  - PatternGuards
+  - PolyKinds
+  - RankNTypes
+  - RecordWildCards
+  - ScopedTypeVariables
+  - StandaloneDeriving
+  - TupleSections
+  - TypeFamilies
+  - TypeSynonymInstances
+
+library:
+  source-dirs:      src
+
+benchmarks:
+  reduce-count:
+    main: CountMain.hs
+    source-dirs: benchmark
+    dependencies:
+      - reduce
+
+tests:
+  reduce-test:
+    main: Main.hs
+    source-dirs: test
+    dependencies:
+      - reduce
+      - tasty
+      - tasty-hspec
+      - tasty-hunit
+      - tasty-discover
+      - tasty-quickcheck
+      - QuickCheck
+      - filepath
+      - directory
+      - text
+      - generic-random
+      - hspec-expectations-pretty-diff
