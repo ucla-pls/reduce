@@ -1,3 +1,4 @@
+{-# LANGUAGE ViewPatterns #-}
 {-|
 Module      : Control.Reduce
 Copyright   : (c) Christian Gram Kalhauge, 2018
@@ -15,6 +16,7 @@ import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Trans.Maybe
+import           Control.Monad.Trans.Reader
 
 import           Data.Functor
 import           Data.Monoid
@@ -64,7 +66,8 @@ ddmin' n test world =
   cases
     [ guard (L.length deltas <= 1) $> world
     , cases [ testrec 2 d | d <- deltas ]
-    , cases [ testrec (max (n - 1) 2) (world IS.\\ d) | d <- deltas ]
+    , guard (n > 2) >>
+      cases [ testrec (max (n - 1) 2) (world IS.\\ d) | d <- deltas ]
     , guard (n < size) >> ddmin' (min size (2*n)) test world
     , return world
     ]
@@ -75,9 +78,24 @@ ddmin' n test world =
 
 -- ** Binary Reduction
 
+-- | Linary reduction is just going through the list by hand and removing one
+-- element at a time
+linaryReduction :: Monad m => Reducer [e] m
+linaryReduction p xs =
+  runMaybeT (pred xs >> go [] xs)
+  where
+    pred = liftPredicate p
+    go !sol !es =
+      case es of
+        [] -> return sol
+        e:es' -> do
+          sol' <- ($ sol) <$> cases [ pred (sol ++ es') $> id, pure (++ [e])]
+          go sol' es'
+
+
 -- | Binary reduction is the simplest form of the set minimizing algorithm.
 -- As such it is fast, while still having the 1-minimality property.
-binaryReduction :: (Show e, Monad m) => Reducer [e] m
+binaryReduction :: Monad m => Reducer [e] m
 binaryReduction p es =
   runMaybeT . go [] $ L.length es
   where
@@ -90,27 +108,114 @@ binaryReduction p es =
         ]
       where range i = L.take i es ++ sol
 
--- | Reversing Binary reduction is like the binary reduction, except it
--- reveres the order of the list for each iteration.
-revBinaryReduction :: forall e m. (Show e, Monad m) => Reducer [e] m
-revBinaryReduction p es = do
-  runMaybeT $ go [] [0..(V.length ref - 1)]
+binaryReductions :: (Show e, Eq e, Monad m) => Predicate [e] m -> [e] -> m [[e]]
+binaryReductions p =
+  fmap (map (L.reverse)) . go []
   where
-    ref = V.fromList es
     pred = liftPredicate p
-    unwrap :: [Int] -> [e]
-    unwrap = map (V.unsafeIndex ref) . L.sort
-    go !sol sm = do
-      r <- binarySearch (pred . range) 0 (L.length sm)
+    go !sol !xs = do
+      mr <- runMaybeT $ binarySearch (pred . range) 0 (L.length xs)
+      case mr of
+        Just r
+          | r > 0 -> do
+              let e = xs L.!! (r - 1)
+              rs <- go  (e : sol) (L.take (r-1) xs)
+              case rs of
+                (m:_) ->
+                  (map (e:) rs ++) . concat <$> mapM (go sol . flip L.delete xs) m
+                [] ->
+                  return []
+          | otherwise ->
+            return [[]]
+        Nothing ->
+          return []
+      where range i = L.take i xs ++ sol
+
+
+-- * Generic Reducers
+-- A set reducer is able to take a list of sets, and then produce a
+-- smaller combined set such that a predicate is still unhold.
+--
+-- Set reducers only makes sense when the sets are overlapping or if there are
+-- multiple minima. In that case there is a big difference between
+-- returning a single set of size N or 2 sets of size 1. We want to strive to
+-- return as small final set as possible.
+--
+-- TODO: Find a definition that we want to achieve.
+
+
+genericBinaryReduction :: Monad m => ([a] -> Int) -> Reducer [a] m
+genericBinaryReduction cost p =
+  runMaybeT . go []
+  where
+    pred = liftPredicate p
+    go !sol (L.sortOn (cost . (:sol)) -> !as) = do
+      r <- binarySearch (pred . range) 0 (L.length as)
       cases
-        [ do
-            guard (r > 0)
-            let sol' = (sm L.!! (r - 1) : sol)
-            go sol' (L.reverse $ L.take (r - 1) sm)
+        [ do guard (r > 0)
+             let (as', rs:ys) = L.splitAt (r - 1) as
+             go (rs:sol) as'
         , return $ range r
         ]
+      where range i = L.take i as ++ sol
+
+generic2BinaryReduction :: Monad m => ([a] -> Int) -> Reducer [a] m
+generic2BinaryReduction cost p es  =
+  runMaybeT . go (cost es) [] $ es
+  where
+    pred = liftPredicate p
+    go k !sol as' = do
+      guard (cost sol <= k)
+      r <- binarySearch (pred . range) 0 (L.length as)
+      if (r > 0)
+        then do
+          let
+            (as', rs:ys) = L.splitAt (r - 1) as
+            sol' = rs:sol
+          cases
+            [ pred sol' >> return sol'
+            , do
+              x <- go k sol' as'
+              go (cost x - 1) sol (as' ++ ys) <|> return x
+            ]
+        else
+          return sol
       where
-        range i = (unwrap $ L.take i sm ++ sol)
+        range i = L.take i as ++ sol
+        as =
+          L.map snd
+          . L.sortOn fst
+          . L.filter ((<= k) . fst)
+          . L.map (\e -> (cost (e:sol), e))
+          $ as'
+
+
+-- | An 'ISetReducer' like a set reducer but uses slightly optimized
+-- data-structures.
+type ISetReducer m =
+  Predicate IS.IntSet m -> [IS.IntSet] -> m (Maybe [IS.IntSet])
+
+-- | SetBinaryReduction is much like regular binary reduction, but with
+-- one added feature. Since we want the smallest output set we have to
+-- continuously sort the list of set in size  to get the smallest
+-- possible set.
+setBinaryReduction :: Monad m => ISetReducer m
+setBinaryReduction (liftPredicate -> pred) = do
+  runMaybeT . go ([], IS.empty) . map (\a -> (a, a))
+  where
+    go !(sol, h) (L.sortOn (IS.size . snd) -> !as) = do
+      r <- binarySearch (pred . idx) 0 (V.length u)
+      if (r > 0)
+        then do
+          let (as', (rs, ru):_) = L.splitAt (r - 1) as
+          go (rs:sol, IS.union h ru) [ (a, s IS.\\ ru) | (a, s) <- as ]
+            <|> (return $ map fst as' ++ rs:sol)
+        else
+          return sol
+      where
+        u = V.fromList $ L.scanl (\a -> IS.union a . snd) h as
+        idx = V.unsafeIndex u
+
 
 -- * Utilities
 
@@ -187,4 +292,14 @@ liftReducer red pred es = do
   where
     refs = V.fromList es
     world = IS.fromAscList [0..(V.length refs - 1)]
+    unset = map (V.unsafeIndex refs) . IS.toAscList
+
+-- | Transform a ISetReducer to a Reducer
+liftISetReducer :: Monad m => ISetReducer m -> Reducer [e] m
+liftISetReducer red pred es = do
+  mr <- fmap IS.unions <$> red (pred . unset) world
+  return $ unset <$> mr
+  where
+    refs = V.fromList es
+    world = [ IS.singleton s | s <- [0..(V.length refs - 1)]]
     unset = map (V.unsafeIndex refs) . IS.toAscList

@@ -1,12 +1,172 @@
 
-import Control.Reduce
-import Control.Monad.Writer
-
-import Data.Monoid
+import           System.IO
+import           System.Environment
+import           System.Random
+import           Control.Monad.Writer
+import           Control.Monad.State
+import           Control.Monad
+import           Data.Monoid
+import           Data.Maybe (catMaybes)
 
 import qualified Data.List as L
+import qualified Data.IntSet as IS
+import qualified Data.IntMap as IM
+import qualified Data.Set as S
+import qualified Data.Vector as V
+import           Control.Monad.Trans.Maybe
+
+import           Control.Reduce
+
+import qualified Data.Graph.Inductive.Graph as F
+import           Data.Graph.Inductive.PatriciaTree
+import           Data.Graph.Inductive.Query.DFS
+
+import           Debug.Trace
 
 main = do
+  hSetBuffering stdout LineBuffering
+  cmd:xs <- getArgs
+  case cmd of
+    "base" ->
+      base xs
+    "setofsets" ->
+      setsofsets xs
+    "graph" ->
+      graph xs
+
+
+graph [(read -> n), (read -> maxe), (read -> s)] = do
+  putStrLn . L.intercalate "," $
+     "N":(concatMap (\(name,_) -> [name ++ "-steps", name ++ "-size"]) reds)
+  forever $ do
+    (graph, mini) <- getStdRandom . runState $ do
+      space <- forM [0..n-1] $ \i -> do
+        g <- randomSTR (0, min i maxe)
+        fmap toIS . takeN g S.empty $ randomSTR (0, i - 1)
+      let sV = V.fromList . IS.toList $ IS.unions space
+      minimum <- fmap toIS . takeN s S.empty $ randomSTR (0, n - 1)
+      return (mkGraph space, minimum)
+
+    let x = flip concatMap reds $ \(name,red) ->
+          let (Just f, x) = red (closures graph) mini
+          in [ show x
+             , show (IS.size f)
+             ]
+    putStrLn $ L.intercalate "," ((show $ n):x)
+
+setsofsets [(read -> n), (read -> setsize), (read -> s)] = do
+  putStrLn . L.intercalate "," $
+     "N":(concatMap (\(name,_) -> [name ++ "-steps", name ++ "-size"]) reds)
+  forever $ do
+    (space, sV, mini) <- getStdRandom . runState $ do
+      space <- fmap S.toList . takeN n S.empty $ do
+        g <- randomSTR (0, setsize)
+        fmap toIS . takeN g S.empty $ randomSTR (0, n - 1)
+      let sV = V.fromList . IS.toList $ IS.unions space
+      minimum <- takeN s S.empty $ randomSTR (0, n - 1)
+      return (space, sV, foldMap (IS.singleton . V.unsafeIndex sV) minimum)
+
+    let x = flip concatMap reds $ \(name,red) ->
+          let (Just f, x) = red space mini
+          in [ show x
+             , show (IS.size f)
+             ]
+    putStrLn $ L.intercalate "," ((show $ V.length sV):x)
+
+reds =
+  [ ("ddmin", runSetCase ddmin)
+  , ("BiRed", runSetCase binaryReduction)
+  , ("GBiRed", runSetCase $ genericBinaryReduction (IS.size . IS.unions))
+  ]
+  where
+    runSetCase ::
+      Reducer [IS.IntSet] (State Int)
+      -> [IS.IntSet]
+      -> IS.IntSet
+      -> (Maybe IS.IntSet, Int)
+    runSetCase red space mini =
+      let (Just x, i) = runState (red pred space) 0
+      in (Just (IS.unions x), i)
+      where
+        pred r = do
+          modify (+1)
+          return $ mini `IS.isSubsetOf` (IS.unions r)
+
+base xs = do
+  let mkBenchmark = parseArgs xs
+  putStrLn $  L.intercalate "," ["N", "S", "ddmin", "LiRed", "BiRed"]
+  forever $ do
+    r <- runBenchCase <$> mkBenchmark
+    putStrLn . L.intercalate "," . map show $ r
+  where
+    parseArgs ("N":[(read -> maxn), (read -> s)]) =
+      mkRandomScaleN maxn s
+    parseArgs ("SeqN":[(read -> maxn), (read -> s)]) =
+      mkRandomScaleSeqN maxn s
+    parseArgs ("S":[(read -> maxs), (read -> n)]) =
+      mkRandomScaleS maxs n
+    parseArgs ("SeqS":[(read -> maxs), (read -> n)]) =
+      mkRandomScaleSeqS maxs n
+    parseArgs args =
+      error $ "Could not parse " ++ show args
+
+runBenchCase b = do
+  ([bcN b,bcS b] ++)
+    . map (\r -> if resMinimal r then L.length (resTries r) else -1)
+    . map (\x -> runCase x [0..(bcN b)] (bcMinima b))
+    $ [ddmin, linaryReduction, binaryReduction]
+
+
+data BenchmarkCase = BenchmarkCase
+  { bcN :: Int
+  , bcS :: Int
+  , bcMinima :: [[Int]]
+  }
+
+mkRandomScaleN ::
+  Int ->
+  Int ->
+  IO BenchmarkCase
+mkRandomScaleN maxn s =
+  getStdRandom . runState $ do
+    n :: Int <- randomSTR (s, maxn)
+    set <- takeN s S.empty $ randomSTR (0, n)
+    return $! BenchmarkCase n s [S.toList set]
+
+randomSTR = state . randomR
+
+mkRandomScaleS ::
+  Int ->
+  Int ->
+  IO BenchmarkCase
+mkRandomScaleS maxs n =
+  getStdRandom . runState $ do
+    s :: Int <- randomSTR (0, maxs)
+    set <- takeN s S.empty $ randomSTR (0, n)
+    return $! BenchmarkCase n s [S.toList set]
+
+mkRandomScaleSeqN ::
+  Int ->
+  Int ->
+  IO BenchmarkCase
+mkRandomScaleSeqN maxn s =
+  getStdRandom . runState $ do
+    n :: Int <- randomSTR (s, maxn)
+    sstart <- randomSTR (0, n-s)
+    return $! BenchmarkCase n s [[sstart..sstart+s]]
+
+mkRandomScaleSeqS ::
+  Int ->
+  Int ->
+  IO BenchmarkCase
+mkRandomScaleSeqS maxs n =
+  getStdRandom . runState $ do
+    s :: Int <- randomSTR (0, maxs)
+    sstart <- randomSTR (0, n-s)
+    return $! BenchmarkCase n s [[sstart..sstart+s]]
+
+
+basic = do
   runWithAll "one" all [0..99] [[54]]
   runWithAll "two" all [0..99] [[23, 74]]
   runWithAll "three" all [0..99] [[23, 50, 74]]
@@ -16,8 +176,10 @@ main = do
   runWithAll "all" all [0..99] [[0..99]]
   where
     all = [ ("ddmin", ddmin)
-          , ("bred", binaryReduction)
-          , ("rbred", revBinaryReduction)]
+          , ("bired", binaryReduction)
+          , ("bireds", (\p i -> fmap fst . L.uncons <$> binaryReductions p i ))
+          , ("lired", linaryReduction)
+          ]
 
 runWithAll ::
   String
@@ -62,3 +224,49 @@ runCase red space minima =
       tell (Endo ((t, L.length xs):))
       return t
     hasMinima xs = any (flip L.isSubsequenceOf xs) minima
+
+
+takeN :: (Monad m, Ord a) => Int -> S.Set a -> m a -> m (S.Set a)
+takeN n set mx
+  | S.size set >= n =
+    return set
+  | otherwise = do
+    x <- mx
+    takeN n (S.insert x set) mx
+
+toIS :: S.Set Int -> IS.IntSet
+toIS = IS.fromAscList . S.toAscList
+
+
+mkGraph :: [IS.IntSet] -> Gr () ()
+mkGraph adj =
+  F.mkGraph [ (i, ()) | i <- [0..(L.length adj -1)]] (concat edges)
+  where
+    edges = zipWith (\i -> map (i,,()) . IS.toList) [0..] adj
+
+
+closures :: Gr v e -> [ IS.IntSet ]
+closures graph =
+  catMaybes . V.toList $ cv
+  where
+    sccs = scc graph
+    iscc :: [(Int,[Int])]
+    iscc = zip [0..] sccs
+    vMap = IM.fromList . concatMap (\(i,xs) -> map (,i) xs) $ iscc
+
+    edges = map (\(i, ls) -> IS.unions . map (IS.delete i . getEdges) $ ls) iscc
+
+    cv = V.fromList (zipWith getNode sccs edges)
+
+    getEdges =
+      IS.fromList
+      . map (\(_,b,_) -> vMap IM.! b)
+      . F.out graph
+
+    getNode :: [Int] -> IS.IntSet -> Maybe IS.IntSet
+    getNode s t = do
+      let
+        Just before = sequence [ cv V.! b | b <- IS.toList t ]
+        s'  = IS.fromList s
+        closure = IS.unions (s':before)
+      return closure
