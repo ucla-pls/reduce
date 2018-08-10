@@ -225,17 +225,16 @@ setBinaryReduction (liftPredicate -> pred) = do
 -- the predicate. It requires that if p is monotone.
 -- $p n = true then p n-1 = true$. fails if no such number exists.
 binarySearch :: (MonadPlus m) => MPredicate Int m -> Int -> Int -> m Int
-binarySearch p lw hg = do
-  x <- go lw hg
-  x `onlyifM` p
-  where
-    go !lw !hg = do
-      let pivot = lw + ((hg - lw) `quot` 2)
-      cases
-        [ lw `onlyif` (== hg)
-        , p pivot >> go lw pivot
-        , go (pivot + 1) hg
-        ]
+binarySearch p !lw !hg = do
+  let pivot = lw + ((hg - lw) `quot` 2)
+  cases
+    [ p pivot
+      >> if lw == pivot
+          then return lw
+          else binarySearch p lw pivot
+    , guard (pivot < hg)
+      >> binarySearch p (pivot + 1) hg
+    ]
 
 -- | Splits a set into at most n almost same sized sets.
 --
