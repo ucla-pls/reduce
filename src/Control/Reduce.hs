@@ -203,7 +203,6 @@ setBinaryReduction (liftPredicate -> pred) = do
   runMaybeT . go ([], IS.empty) . map (\a -> (a, a))
   where
     go !(sol, h) (L.sortOn (IS.size . snd) -> !as) = do
-      -- traceShowM ("set", map snd as)
       let u = V.fromList $ L.scanl (\a -> IS.union a . snd) h as
       r <- binarySearch (pred . V.unsafeIndex u) 0 (V.length u - 1)
       if (r > 0)
@@ -234,8 +233,8 @@ binarySearch p lw hg = do
       let pivot = lw + ((hg - lw) `quot` 2)
       cases
         [ lw `onlyif` (== hg)
-        , p pivot >> binarySearch p lw pivot
-        , binarySearch p (pivot + 1) hg
+        , p pivot >> go lw pivot
+        , go (pivot + 1) hg
         ]
 
 -- | Splits a set into at most n almost same sized sets.
@@ -301,3 +300,13 @@ liftReducer red pred es = do
 toSetReducer :: Monad m => Reducer [IS.IntSet] m -> ISetReducer m
 toSetReducer red pred es = do
   red (pred . IS.unions) es
+
+-- | Transform a ISetReducer to a Reducer
+liftISetReducer :: Monad m => ISetReducer m -> Reducer [a] m
+liftISetReducer red pred es = do
+  mr <- red (pred . unset) world
+  return $ unset . IS.unions <$> mr
+  where
+    refs = V.fromList es
+    world = [IS.singleton i | i <- [0..(V.length refs - 1)]]
+    unset = map (V.unsafeIndex refs) . IS.toAscList
