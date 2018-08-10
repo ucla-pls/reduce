@@ -208,10 +208,15 @@ setBinaryReduction (liftPredicate -> pred) = do
       r <- binarySearch (pred . V.unsafeIndex u) 0 (V.length u - 1)
       if (r > 0)
         then do
-          let (as', (rs, ru):_) = L.splitAt (r - 1) as
-          go (rs:sol, IS.union h ru)
-             [(a, s') | (a, s) <- as', let s' = s IS.\\ ru, not (IS.null s')]
-            <|> (return $ map fst as' ++ rs:sol)
+          let
+            (as', (rs, ru):_) = L.splitAt (r - 1) as
+            h' = IS.union h ru
+          cases
+            [ pred h' >> return (rs:sol)
+            , go (rs:sol, IS.union h ru)
+                [(a, s') | (a, s) <- as', let s' = s IS.\\ ru, not (IS.null s')]
+                <|> (return $ map fst as' ++ rs:sol)
+            ]
         else
           return sol
 
