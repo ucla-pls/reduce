@@ -25,6 +25,8 @@ import qualified Data.IntSet as IS
 import qualified Data.Vector as V
 import qualified Data.List as L
 
+import Debug.Trace
+
 -- * Reducers
 
 -- | A predicate is a function from a list of elements to
@@ -143,21 +145,18 @@ binaryReductions p =
 --
 -- TODO: Find a definition that we want to achieve.
 
-
-genericBinaryReduction :: Monad m => ([a] -> Int) -> Reducer [a] m
-genericBinaryReduction cost p =
+genericBinaryReduction :: (Monad m, Show a) => ([a] -> Int) -> Reducer [a] m
+genericBinaryReduction cost (liftPredicate -> pred) =
   runMaybeT . go []
   where
-    pred = liftPredicate p
     go !sol (L.sortOn (cost . (:sol)) -> !as) = do
-      r <- binarySearch (pred . range) 0 (L.length as)
-      cases
-        [ do guard (r > 0)
-             let (as', rs:ys) = L.splitAt (r - 1) as
-             go (rs:sol) as'
-        , return $ range r
-        ]
-      where range i = L.take i as ++ sol
+      r <- binarySearch (pred . (\i -> L.take i as ++ sol)) 0 (L.length as)
+      if r > 0
+        then do
+          let (as', rs:ys) = L.splitAt (r - 1) as
+          go (rs:sol) as' <|> (return $ as' ++ rs:sol)
+        else
+          return sol
 
 generic2BinaryReduction :: Monad m => ([a] -> Int) -> Reducer [a] m
 generic2BinaryReduction cost p es  =
@@ -190,7 +189,7 @@ generic2BinaryReduction cost p es  =
           $ as'
 
 
--- | An 'ISetReducer' like a set reducer but uses slightly optimized
+-- | An 'ISetReducer' like a generic reducer but uses slightly optimized
 -- data-structures.
 type ISetReducer m =
   Predicate IS.IntSet m -> [IS.IntSet] -> m (Maybe [IS.IntSet])
@@ -204,18 +203,17 @@ setBinaryReduction (liftPredicate -> pred) = do
   runMaybeT . go ([], IS.empty) . map (\a -> (a, a))
   where
     go !(sol, h) (L.sortOn (IS.size . snd) -> !as) = do
-      r <- binarySearch (pred . idx) 0 (V.length u)
+      -- traceShowM ("set", map snd as)
+      let u = V.fromList $ L.scanl (\a -> IS.union a . snd) h as
+      r <- binarySearch (pred . V.unsafeIndex u) 0 (V.length u - 1)
       if (r > 0)
         then do
           let (as', (rs, ru):_) = L.splitAt (r - 1) as
-          go (rs:sol, IS.union h ru) [ (a, s IS.\\ ru) | (a, s) <- as ]
+          go (rs:sol, IS.union h ru)
+             [(a, s') | (a, s) <- as', let s' = s IS.\\ ru, not (IS.null s')]
             <|> (return $ map fst as' ++ rs:sol)
         else
           return sol
-      where
-        u = V.fromList $ L.scanl (\a -> IS.union a . snd) h as
-        idx = V.unsafeIndex u
-
 
 -- * Utilities
 
@@ -295,11 +293,6 @@ liftReducer red pred es = do
     unset = map (V.unsafeIndex refs) . IS.toAscList
 
 -- | Transform a ISetReducer to a Reducer
-liftISetReducer :: Monad m => ISetReducer m -> Reducer [e] m
-liftISetReducer red pred es = do
-  mr <- fmap IS.unions <$> red (pred . unset) world
-  return $ unset <$> mr
-  where
-    refs = V.fromList es
-    world = [ IS.singleton s | s <- [0..(V.length refs - 1)]]
-    unset = map (V.unsafeIndex refs) . IS.toAscList
+toSetReducer :: Monad m => Reducer [IS.IntSet] m -> ISetReducer m
+toSetReducer red pred es = do
+  red (pred . IS.unions) es

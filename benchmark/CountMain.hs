@@ -3,7 +3,7 @@ import           System.IO
 import           System.Environment
 import           System.Random
 import           Control.Monad.Writer
-import           Control.Monad.State
+import           Control.Monad.Trans.State
 import           Control.Monad
 import           Data.Monoid
 import           Data.Maybe (catMaybes)
@@ -47,11 +47,11 @@ graph [(read -> n), (read -> maxe), (read -> s)] = do
       minimum <- fmap toIS . takeN s S.empty $ randomSTR (0, n - 1)
       return (mkGraph space, minimum)
 
-    let x = flip concatMap reds $ \(name,red) ->
-          let (Just f, x) = red (closures graph) mini
-          in [ show x
-             , show (IS.size f)
-             ]
+    x <- fmap concat . forM reds $ \(name,red) -> do
+          (Just f, x) <- red (closures graph) mini
+          return [ show x
+                 , show (IS.size . IS.unions $ f)
+                 ]
     putStrLn $ L.intercalate "," ((show $ n):x)
 
 setsofsets [(read -> n), (read -> setsize), (read -> s)] = do
@@ -63,34 +63,35 @@ setsofsets [(read -> n), (read -> setsize), (read -> s)] = do
         g <- randomSTR (0, setsize)
         fmap toIS . takeN g S.empty $ randomSTR (0, n - 1)
       let sV = V.fromList . IS.toList $ IS.unions space
-      minimum <- takeN s S.empty $ randomSTR (0, n - 1)
+      minimum <- takeN s S.empty $ randomSTR (0, V.length sV - 1)
       return (space, sV, foldMap (IS.singleton . V.unsafeIndex sV) minimum)
 
-    let x = flip concatMap reds $ \(name,red) ->
-          let (Just f, x) = red space mini
-          in [ show x
-             , show (IS.size f)
-             ]
+    x <- fmap concat . forM reds $ \(name,red) -> do
+          (Just f, x) <- red space mini
+          return $ [ show x
+                   , show (IS.size . IS.unions $ f)
+                   ]
     putStrLn $ L.intercalate "," ((show $ V.length sV):x)
 
 reds =
-  [ ("ddmin", runSetCase ddmin)
-  , ("BiRed", runSetCase binaryReduction)
-  , ("GBiRed", runSetCase $ genericBinaryReduction (IS.size . IS.unions))
+  [ ("ddmin", runSetCase "ddmin" . toSetReducer $ ddmin)
+  , ("BiRed", runSetCase "bired" . toSetReducer $ binaryReduction)
+  , ("GBiRed", runSetCase "GBiRed" . toSetReducer $ genericBinaryReduction (IS.size . IS.unions))
+  , ("sBiRed", runSetCase "sBiRed" setBinaryReduction)
   ]
   where
     runSetCase ::
-      Reducer [IS.IntSet] (State Int)
+      String
+      -> ISetReducer (StateT Int IO)
       -> [IS.IntSet]
       -> IS.IntSet
-      -> (Maybe IS.IntSet, Int)
-    runSetCase red space mini =
-      let (Just x, i) = runState (red pred space) 0
-      in (Just (IS.unions x), i)
+      -> IO (Maybe [IS.IntSet], Int)
+    runSetCase str red space mini = do
+      runStateT (red pred space) 0
       where
         pred r = do
           modify (+1)
-          return $ mini `IS.isSubsetOf` (IS.unions r)
+          return $ mini `IS.isSubsetOf` r
 
 base xs = do
   let mkBenchmark = parseArgs xs
