@@ -55,12 +55,18 @@ ddmin p es = do
   if t'
     then return $ Just []
     else do
-      mx <- liftReducer (ddmin' 2) p es
+      mx <- unsafeDdmin p es
       case mx of
         Just x -> do
           t <- p x
           return $ if t then Just x else Nothing
         Nothing -> return Nothing
+
+-- | A slightly faster ddmin, but does not check the predicate for the empty set first and
+-- the result of the ddmin. So this assumes that P [] = false and P U = true.
+unsafeDdmin :: Monad m => Reducer [e] m
+unsafeDdmin =
+  liftReducer (ddmin' 2)
 
 -- | The implementation of delta debugging.
 ddmin' :: Monad m => Int -> IReducer m
