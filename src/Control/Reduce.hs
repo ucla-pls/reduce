@@ -237,7 +237,7 @@ binarySearch p !lw !hg = do
     [ p pivot
       >> if lw == pivot
           then return lw
-          else binarySearch p lw pivot
+          else binarySearch p lw (pivot -1) <|> (return pivot)
     , guard (pivot < hg)
       >> binarySearch p (pivot + 1) hg
     ]
@@ -304,7 +304,7 @@ liftReducer red pred es = do
 -- | Transform a ISetReducer to a Reducer
 toSetReducer :: Monad m => Reducer [IS.IntSet] m -> ISetReducer m
 toSetReducer red pred es = do
-  red (pred . IS.unions) es
+  red (pred . IS.unions) $ L.sortOn IS.size es
 
 -- | Transform a ISetReducer to a Reducer
 liftISetReducer :: Monad m => ISetReducer m -> Reducer [a] m
