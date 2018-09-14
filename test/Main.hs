@@ -29,8 +29,6 @@ tests =
           (baseTests (liftISetReducer setBinaryReduction ))
       , testSpec "genericBinaryReduction"
           (baseTests (genericBinaryReduction (const 1)))
-      , testSpec "generic2BinaryReduction"
-          (baseTests (generic2BinaryReduction (const 1)))
       ]
     , testSpec "reduction" $ reductionsTests
     , testGroup "sets" <$> sequence

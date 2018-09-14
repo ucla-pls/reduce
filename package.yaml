@@ -2,7 +2,7 @@ name:                reduce
 version:             0.1.0.0
 #synopsis:
 #description:
-homepage:            https://github.com/kalhauge/reduce#readme
+homepage:            https://github.com/ucla-pls/reduce#readme
 license:             BSD3
 author:              Christian Gram Kalhauge
 maintainer:          kalhauge@cs.ucla.edu

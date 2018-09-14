@@ -1,4 +1,3 @@
-{-# LANGUAGE ViewPatterns #-}
 {-|
 Module      : Control.Reduce
 Copyright   : (c) Christian Gram Kalhauge, 2018
@@ -116,9 +115,10 @@ binaryReduction p es =
         ]
       where range i = L.take i es ++ sol
 
+-- | Find all possible minimas.
 binaryReductions :: (Show e, Eq e, Monad m) => Predicate [e] m -> [e] -> m [[e]]
 binaryReductions p =
-  fmap (map (L.reverse)) . go []
+  fmap (map L.reverse) . go []
   where
     pred = liftPredicate p
     go !sol !xs = do
@@ -149,7 +149,6 @@ binaryReductions p =
 -- returning a single set of size N or 2 sets of size 1. We want to strive to
 -- return as small final set as possible.
 --
--- TODO: Find a definition that we want to achieve.
 
 genericBinaryReduction :: (Monad m, Show a) => ([a] -> Int) -> Reducer [a] m
 genericBinaryReduction cost (liftPredicate -> pred) =
@@ -160,40 +159,9 @@ genericBinaryReduction cost (liftPredicate -> pred) =
       if r > 0
         then do
           let (as', rs:ys) = L.splitAt (r - 1) as
-          go (rs:sol) as' <|> (return $ as' ++ rs:sol)
+          go (rs:sol) as' <|> return (as' ++ rs:sol)
         else
           return sol
-
-generic2BinaryReduction :: Monad m => ([a] -> Int) -> Reducer [a] m
-generic2BinaryReduction cost p es  =
-  runMaybeT . go (cost es) [] $ es
-  where
-    pred = liftPredicate p
-    go k !sol as' = do
-      guard (cost sol <= k)
-      r <- binarySearch (pred . range) 0 (L.length as)
-      if (r > 0)
-        then do
-          let
-            (as', rs:ys) = L.splitAt (r - 1) as
-            sol' = rs:sol
-          cases
-            [ pred sol' >> return sol'
-            , do
-              x <- go k sol' as'
-              go (cost x - 1) sol (as' ++ ys) <|> return x
-            ]
-        else
-          return sol
-      where
-        range i = L.take i as ++ sol
-        as =
-          L.map snd
-          . L.sortOn fst
-          . L.filter ((<= k) . fst)
-          . L.map (\e -> (cost (e:sol), e))
-          $ as'
-
 
 -- | An 'ISetReducer' like a generic reducer but uses slightly optimized
 -- data-structures.
@@ -205,13 +173,13 @@ type ISetReducer m =
 -- continuously sort the list of set in size  to get the smallest
 -- possible set.
 setBinaryReduction :: Monad m => ISetReducer m
-setBinaryReduction (liftPredicate -> pred) = do
+setBinaryReduction (liftPredicate -> pred) =
   runMaybeT . go ([], IS.empty) . map (\a -> (a, a))
   where
-    go !(sol, h) (L.sortOn (IS.size . snd) -> !as) = do
+    go (sol, h) (L.sortOn (IS.size . snd) -> !as) = do
       let u = V.fromList $ L.scanl (\a -> IS.union a . snd) h as
       r <- binarySearch (pred . V.unsafeIndex u) 0 (V.length u - 1)
-      if (r > 0)
+      if r > 0
         then do
           let
             (as', (rs, ru):_) = L.splitAt (r - 1) as
@@ -220,7 +188,7 @@ setBinaryReduction (liftPredicate -> pred) = do
             [ pred h' >> return (rs:sol)
             , go (rs:sol, IS.union h ru)
                 [(a, s') | (a, s) <- as', let s' = s IS.\\ ru, not (IS.null s')]
-                <|> (return $ map fst as' ++ rs:sol)
+                <|> return (map fst as' ++ rs:sol)
             ]
         else
           return sol
@@ -237,7 +205,7 @@ binarySearch p !lw !hg = do
     [ p pivot
       >> if lw == pivot
           then return lw
-          else binarySearch p lw (pivot -1) <|> (return pivot)
+          else binarySearch p lw (pivot -1) <|> return pivot
     , guard (pivot < hg)
       >> binarySearch p (pivot + 1) hg
     ]
@@ -303,7 +271,7 @@ liftReducer red pred es = do
 
 -- | Transform a ISetReducer to a Reducer
 toSetReducer :: Monad m => Reducer [IS.IntSet] m -> ISetReducer m
-toSetReducer red pred es = do
+toSetReducer red pred es =
   red (pred . IS.unions) $ L.sortOn IS.size es
 
 -- | Transform a ISetReducer to a Reducer
