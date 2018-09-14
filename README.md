@@ -12,7 +12,7 @@ main = do
   writeFile "output" (unlines result)
   
   where 
-   run cmd lines = do
+   run cmd result = do
      writeFile "output" (unlines result)
      -- run cmd on output
      -- if 0 return True else return False
