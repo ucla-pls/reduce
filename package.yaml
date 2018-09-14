@@ -64,7 +64,15 @@ library:
 executables:
   reduce-count:
     main: CountMain.hs
-    source-dirs: benchmark
+    source-dirs: benchmark/count
+    dependencies:
+      - reduce
+      - random
+      - fgl
+  
+  reduce-list:
+    main: ListMain.hs
+    source-dirs: benchmark/list
     dependencies:
       - reduce
       - random

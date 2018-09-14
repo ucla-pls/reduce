@@ -3,7 +3,8 @@ import           System.IO
 import           System.Environment
 import           System.Random
 import           Control.Monad.Writer
-import           Control.Monad.Trans.State
+import           Control.Monad.Trans.State (StateT, runStateT, runState)
+import           Control.Monad.State.Class
 import           Control.Monad
 import           Data.Monoid
 import           Data.Maybe (catMaybes)
@@ -95,9 +96,10 @@ reds =
 
 base xs = do
   let mkBenchmark = parseArgs xs
-  putStrLn $  L.intercalate "," ["N", "S", "ddmin", "LiRed", "BiRed"]
+  putStrLn $  L.intercalate "," ["N", "S", "ddmin", "BiRed"]
   forever $ do
-    r <- runBenchCase <$> mkBenchmark
+    b <- mkBenchmark
+    let r = runBenchCase b
     putStrLn . L.intercalate "," . map show $ r
   where
     parseArgs ("N":[(read -> maxn), (read -> s)]) =
@@ -108,6 +110,8 @@ base xs = do
       mkRandomScaleS maxs n
     parseArgs ("SeqS":[(read -> maxs), (read -> n)]) =
       mkRandomScaleSeqS maxs n
+    parseArgs ("Dist":[(read -> n), (read -> s)]) =
+      mkRandomScaleDist s n
     parseArgs args =
       error $ "Could not parse " ++ show args
 
@@ -115,14 +119,14 @@ runBenchCase b = do
   ([bcN b,bcS b] ++)
     . map (\r -> if resMinimal r then L.length (resTries r) else -1)
     . map (\x -> runCase x [0..(bcN b)] (bcMinima b))
-    $ [ddmin, linaryReduction, binaryReduction]
+    $ [ddmin, binaryReduction]
 
 
 data BenchmarkCase = BenchmarkCase
   { bcN :: Int
   , bcS :: Int
   , bcMinima :: [[Int]]
-  }
+  } deriving (Show, Eq)
 
 mkRandomScaleN ::
   Int ->
@@ -134,7 +138,13 @@ mkRandomScaleN maxn s =
     set <- takeN s S.empty $ randomSTR (0, n)
     return $! BenchmarkCase n s [S.toList set]
 
+randomSTR :: (MonadState StdGen m, Random a) => (a, a) -> m a
 randomSTR = state . randomR
+
+randomSTRs :: (MonadState StdGen m, Random a) => (a, a) -> Int -> m [a]
+randomSTRs r 0 = return []
+randomSTRs r n =
+  (:) <$> randomSTR r <*> randomSTRs r (n - 1)
 
 mkRandomScaleS ::
   Int ->
@@ -166,6 +176,30 @@ mkRandomScaleSeqS maxs n =
     sstart <- randomSTR (0, n-s)
     return $! BenchmarkCase n s [[sstart..sstart+s]]
 
+mkRandomScaleDist ::
+  Int ->
+  Int ->
+  IO BenchmarkCase
+mkRandomScaleDist s n = do
+  (cuts, items, ini:rest) <- getStdRandom . runState $ do
+    cuts :: Int <- randomSTR (1, s)
+    items <- distribute (s - cuts) cuts
+    spaces <- distribute (n - s - cuts + 1) (cuts + 1)
+    return (cuts, items, spaces)
+
+  let res = scanl (\(off, _) (i, space) -> (off + i + 1 + space + 1, [off..off+i+1])) (ini, [])
+              $ zip items rest
+
+  return $! BenchmarkCase n cuts [concatMap snd res]
+
+distribute n c = do
+   pieces <- randomSTRs (0, 1) c
+   let ps :: [Double] = [ fromIntegral n * (p / sum pieces) | p <- pieces ]
+   return . map snd.  tail $
+      L.scanl
+        (\(v, _) p -> let x = floor (v + p) in (v + p - fromIntegral x, x))
+        (0, 0)
+        ps
 
 basic = do
   runWithAll "one" all [0..99] [[54]]
