@@ -4,11 +4,45 @@ Copyright   : (c) Christian Gram Kalhauge, 2018
 License     : MIT
 Maintainer  : kalhauge@cs.ucla.edu
 
-This module contains functions to reduce a set to a smaller set given a
-predicate.
+This module defines a set of reducers. A reducer is a function that 
+given a predicate reduces a set of items to a smaller set of items.
 
-8|-}
-module Control.Reduce where
+-}
+module Control.Reduce 
+  ( Predicate
+  , Reducer
+
+  -- ** Delta Debugging
+  -- | Delta debugging as per Zeller and Hildebrandt 2002.
+  --
+  --  Zeller, Andreas, and Ralf Hildebrandt. "Simplifying and isolating
+  --  failure-inducing input." IEEE Transactions on Software Engineering 28, no. 2
+  --  (2002): 183-200.
+  , ddmin
+  , unsafeDdmin
+  -- , ddmin'
+  
+  -- ** Linear Reduction
+
+  , linearReduction
+
+  -- ** Binary Reduction
+  , binaryReduction
+  , binaryReductions
+
+  -- *** Generic Binary Reduction
+  , genericBinaryReduction
+  
+  -- *** Set Binary Reduction
+  , ISetReducer 
+  , setBinaryReduction
+  , toSetReducer
+
+  -- -- ** Helpers
+  -- , MPredicate
+  -- , IReducer
+ 
+  ) where
 
 import           Control.Applicative
 
@@ -39,15 +73,18 @@ type Predicate e m =
 type Reducer s m =
   Predicate s m -> s -> m (Maybe s)
 
+-- | An predicate is like a 'Predicate', but the success of the predicate is
+-- now encoded in the monad itself.
+type MPredicate e m =
+  e -> m ()
+
+-- | Like a 'Reducer', but uses an 'IS.IntSet' instead for performance gain.
+type IReducer m =
+  MPredicate IS.IntSet (MaybeT m) -> IS.IntSet -> MaybeT m IS.IntSet
 
 -- ** Delta Debugging
--- Delta debugging as per Zeller and Hildebrandt 2002.
---
---  Zeller, Andreas, and Ralf Hildebrandt. "Simplifying and isolating
---  failure-inducing input." IEEE Transactions on Software Engineering 28, no. 2
---  (2002): 183-200.
 
--- | An easy to call interface.
+-- | An implmentation of ddmin. 
 ddmin :: Monad m => Reducer [e] m
 ddmin p es = do
   t' <- p []
@@ -83,12 +120,12 @@ ddmin' n test world =
     deltas = splitSet n world
     size = IS.size world
 
--- ** Binary Reduction
-
--- | Linary reduction is just going through the list by hand and removing one
--- element at a time
-linaryReduction :: Monad m => Reducer [e] m
-linaryReduction p xs =
+-- | Linary reduction is just going through the set, event by event and 
+-- remove an element at a time.
+--
+-- Runtime: \( O(n) \)
+linearReduction :: Monad m => Reducer [e] m
+linearReduction p xs =
   runMaybeT (pred xs >> go [] xs)
   where
     pred = liftPredicate p
@@ -99,9 +136,10 @@ linaryReduction p xs =
           sol' <- ($ sol) <$> cases [ pred (sol ++ es') $> id, pure (++ [e])]
           go sol' es'
 
-
 -- | Binary reduction is the simplest form of the set minimizing algorithm.
 -- As such it is fast, while still having the 1-minimality property.
+-- 
+-- Runtime: \(O(s \log n)\)
 binaryReduction :: Monad m => Reducer [e] m
 binaryReduction p es =
   runMaybeT . go [] $ L.length es
@@ -115,8 +153,8 @@ binaryReduction p es =
         ]
       where range i = L.take i es ++ sol
 
--- | Find all possible minimas.
-binaryReductions :: (Show e, Eq e, Monad m) => Predicate [e] m -> [e] -> m [[e]]
+-- | Find all possible minimas. Worst-case exponential.
+binaryReductions :: (Eq e, Monad m) => Predicate [e] m -> [e] -> m [[e]]
 binaryReductions p =
   fmap (map L.reverse) . go []
   where
@@ -140,7 +178,7 @@ binaryReductions p =
       where range i = L.take i xs ++ sol
 
 
--- * Generic Reducers
+-- $GenericReducers
 -- A set reducer is able to take a list of sets, and then produce a
 -- smaller combined set such that a predicate is still unhold.
 --
@@ -150,6 +188,8 @@ binaryReductions p =
 -- return as small final set as possible.
 --
 
+-- | Like a the binary reductor, but uses a generic cost function. Is functionally 
+-- equivilent to 'binaryReduction' if the const function is 'List.length'.
 genericBinaryReduction :: (Monad m, Show a) => ([a] -> Int) -> Reducer [a] m
 genericBinaryReduction cost (liftPredicate -> pred) =
   runMaybeT . go []
@@ -244,15 +284,6 @@ cases :: MonadPlus m => [m a] -> m a
 cases = msum
 
 -- ** Conversion
-
--- | An predicate is like a ''Predicate', but the success of the predicate is
--- now encoded in the monad itself.
-type MPredicate e m =
-  e -> m ()
-
--- | Like a 'Reducer', but uses an 'IS.IntSet' instead for performance gain.
-type IReducer m =
-  MPredicate IS.IntSet (MaybeT m) -> IS.IntSet -> MaybeT m IS.IntSet
 
 -- | Transform a Predicate to a MPredicate
 liftPredicate :: Monad m => Predicate e m -> MPredicate e (MaybeT m)

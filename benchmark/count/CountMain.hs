@@ -213,7 +213,7 @@ basic = do
     all = [ ("ddmin", ddmin)
           , ("bired", binaryReduction)
           , ("bireds", (\p i -> fmap fst . L.uncons <$> binaryReductions p i ))
-          , ("lired", linaryReduction)
+          , ("lired", linearReduction)
           ]
 
 runWithAll ::
