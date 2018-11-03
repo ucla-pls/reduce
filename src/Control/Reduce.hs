@@ -4,11 +4,11 @@ Copyright   : (c) Christian Gram Kalhauge, 2018
 License     : MIT
 Maintainer  : kalhauge@cs.ucla.edu
 
-This module defines a set of reducers. A reducer is a function that 
+This module defines a set of reducers. A reducer is a function that
 given a predicate reduces a set of items to a smaller set of items.
 
 -}
-module Control.Reduce 
+module Control.Reduce
   ( Predicate
   , Reducer
 
@@ -20,8 +20,6 @@ module Control.Reduce
   --  (2002): 183-200.
   , ddmin
   , unsafeDdmin
-  -- , ddmin'
-  
   -- ** Linear Reduction
 
   , linearReduction
@@ -32,16 +30,11 @@ module Control.Reduce
 
   -- *** Generic Binary Reduction
   , genericBinaryReduction
-  
+
   -- *** Set Binary Reduction
-  , ISetReducer 
+  , ISetReducer
   , setBinaryReduction
   , toSetReducer
-
-  -- -- ** Helpers
-  -- , MPredicate
-  -- , IReducer
- 
   ) where
 
 import           Control.Applicative
@@ -84,7 +77,7 @@ type IReducer m =
 
 -- ** Delta Debugging
 
--- | An implmentation of ddmin. 
+-- | An implmentation of ddmin.
 ddmin :: Monad m => Reducer [e] m
 ddmin p es = do
   t' <- p []
@@ -120,7 +113,7 @@ ddmin' n test world =
     deltas = splitSet n world
     size = IS.size world
 
--- | Linary reduction is just going through the set, event by event and 
+-- | Linary reduction is just going through the set, event by event and
 -- remove an element at a time.
 --
 -- Runtime: \( O(n) \)
@@ -138,7 +131,7 @@ linearReduction p xs =
 
 -- | Binary reduction is the simplest form of the set minimizing algorithm.
 -- As such it is fast, while still having the 1-minimality property.
--- 
+--
 -- Runtime: \(O(s \log n)\)
 binaryReduction :: Monad m => Reducer [e] m
 binaryReduction p es =
@@ -188,7 +181,7 @@ binaryReductions p =
 -- return as small final set as possible.
 --
 
--- | Like a the binary reductor, but uses a generic cost function. Is functionally 
+-- | Like a the binary reductor, but uses a generic cost function. Is functionally
 -- equivilent to 'binaryReduction' if the const function is 'List.length'.
 genericBinaryReduction :: (Monad m, Show a) => ([a] -> Int) -> Reducer [a] m
 genericBinaryReduction cost (liftPredicate -> pred) =
