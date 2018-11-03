@@ -1,3 +1,4 @@
 resolver: lts-12.11
 packages:
 - reduce
+- reduce-util
