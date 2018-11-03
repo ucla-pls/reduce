@@ -20,8 +20,8 @@ module Control.Reduce
   --  (2002): 183-200.
   , ddmin
   , unsafeDdmin
-  -- ** Linear Reduction
 
+  -- ** Linear Reduction
   , linearReduction
 
   -- ** Binary Reduction
@@ -35,6 +35,10 @@ module Control.Reduce
   , ISetReducer
   , setBinaryReduction
   , toSetReducer
+
+  -- ** Utils
+  , binarySearch
+  , liftISetReducer
   ) where
 
 import           Control.Applicative
@@ -57,28 +61,28 @@ import Debug.Trace
 
 -- | A predicate is a function from a list of elements to
 -- a monadic action that either succeeds or fails.
-type Predicate e m =
+type Predicate m e =
   e -> m Bool
 
 -- | A 'Reducer' is now a function that takes a list of elements and returns
 -- the smallest list of elements such that the predicate is still satisfied.
 -- The reducer will return nothing if no subset satisfies the predicate.
-type Reducer s m =
-  Predicate s m -> s -> m (Maybe s)
+type Reducer m s =
+  Predicate m s -> s -> m (Maybe s)
 
 -- | An predicate is like a 'Predicate', but the success of the predicate is
 -- now encoded in the monad itself.
-type MPredicate e m =
+type MPredicate m e =
   e -> m ()
 
 -- | Like a 'Reducer', but uses an 'IS.IntSet' instead for performance gain.
 type IReducer m =
-  MPredicate IS.IntSet (MaybeT m) -> IS.IntSet -> MaybeT m IS.IntSet
+  MPredicate (MaybeT m) IS.IntSet -> IS.IntSet -> MaybeT m IS.IntSet
 
 -- ** Delta Debugging
 
 -- | An implmentation of ddmin.
-ddmin :: Monad m => Reducer [e] m
+ddmin :: Monad m => Reducer m [e]
 ddmin p es = do
   t' <- p []
   if t'
@@ -93,7 +97,7 @@ ddmin p es = do
 
 -- | A slightly faster ddmin, but does not check the predicate for the empty set first and
 -- the result of the ddmin. So this assumes that P [] = false and P U = true.
-unsafeDdmin :: Monad m => Reducer [e] m
+unsafeDdmin :: Monad m => Reducer m [e]
 unsafeDdmin =
   liftReducer (ddmin' 2)
 
@@ -117,7 +121,7 @@ ddmin' n test world =
 -- remove an element at a time.
 --
 -- Runtime: \( O(n) \)
-linearReduction :: Monad m => Reducer [e] m
+linearReduction :: Monad m => Reducer m [e]
 linearReduction p xs =
   runMaybeT (pred xs >> go [] xs)
   where
@@ -133,7 +137,7 @@ linearReduction p xs =
 -- As such it is fast, while still having the 1-minimality property.
 --
 -- Runtime: \(O(s \log n)\)
-binaryReduction :: Monad m => Reducer [e] m
+binaryReduction :: Monad m => Reducer m [e]
 binaryReduction p es =
   runMaybeT . go [] $ L.length es
   where
@@ -147,7 +151,7 @@ binaryReduction p es =
       where range i = L.take i es ++ sol
 
 -- | Find all possible minimas. Worst-case exponential.
-binaryReductions :: (Eq e, Monad m) => Predicate [e] m -> [e] -> m [[e]]
+binaryReductions :: (Eq e, Monad m) => Predicate m [e] -> [e] -> m [[e]]
 binaryReductions p =
   fmap (map L.reverse) . go []
   where
@@ -183,7 +187,7 @@ binaryReductions p =
 
 -- | Like a the binary reductor, but uses a generic cost function. Is functionally
 -- equivilent to 'binaryReduction' if the const function is 'List.length'.
-genericBinaryReduction :: (Monad m, Show a) => ([a] -> Int) -> Reducer [a] m
+genericBinaryReduction :: (Monad m, Show a) => ([a] -> Int) -> Reducer m [a]
 genericBinaryReduction cost (liftPredicate -> pred) =
   runMaybeT . go []
   where
@@ -199,7 +203,7 @@ genericBinaryReduction cost (liftPredicate -> pred) =
 -- | An 'ISetReducer' like a generic reducer but uses slightly optimized
 -- data-structures.
 type ISetReducer m =
-  Predicate IS.IntSet m -> [IS.IntSet] -> m (Maybe [IS.IntSet])
+  Predicate m IS.IntSet -> [IS.IntSet] -> m (Maybe [IS.IntSet])
 
 -- | SetBinaryReduction is much like regular binary reduction, but with
 -- one added feature. Since we want the smallest output set we have to
@@ -231,7 +235,7 @@ setBinaryReduction (liftPredicate -> pred) =
 -- | binarySearch, returns a number between lw and hg that satisfies
 -- the predicate. It requires that if p is monotone.
 -- $p n = true then p n-1 = true$. fails if no such number exists.
-binarySearch :: (MonadPlus m) => MPredicate Int m -> Int -> Int -> m Int
+binarySearch :: (MonadPlus m) => MPredicate m Int -> Int -> Int -> m Int
 binarySearch p !lw !hg = do
   let pivot = lw + ((hg - lw) `quot` 2)
   cases
@@ -279,12 +283,12 @@ cases = msum
 -- ** Conversion
 
 -- | Transform a Predicate to a MPredicate
-liftPredicate :: Monad m => Predicate e m -> MPredicate e (MaybeT m)
+liftPredicate :: Monad m => Predicate m e -> MPredicate (MaybeT m) e
 liftPredicate pred =
   lift . pred >=> guard
 
 -- | Transform a IReducer to a Reducer
-liftReducer :: Monad m => IReducer m -> Reducer [e] m
+liftReducer :: Monad m => IReducer m -> Reducer m [e]
 liftReducer red pred es = do
   mr <- runMaybeT $ red (liftPredicate pred . unset) world
   return $ unset <$> mr
@@ -294,12 +298,12 @@ liftReducer red pred es = do
     unset = map (V.unsafeIndex refs) . IS.toAscList
 
 -- | Transform a ISetReducer to a Reducer
-toSetReducer :: Monad m => Reducer [IS.IntSet] m -> ISetReducer m
+toSetReducer :: Monad m => Reducer m [IS.IntSet] -> ISetReducer m
 toSetReducer red pred es =
   red (pred . IS.unions) $ L.sortOn IS.size es
 
 -- | Transform a ISetReducer to a Reducer
-liftISetReducer :: Monad m => ISetReducer m -> Reducer [a] m
+liftISetReducer :: Monad m => ISetReducer m -> Reducer m [a]
 liftISetReducer red pred es = do
   mr <- red (pred . unset) world
   return $ unset . IS.unions <$> mr

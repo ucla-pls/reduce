@@ -61,7 +61,7 @@ default-extensions:
 library:
   source-dirs:      src
 
-executables:
+benchmarks:
   reduce-count:
     main: CountMain.hs
     source-dirs: benchmark/count

@@ -22,7 +22,7 @@ tests =
     , testGroup "base" <$> sequence
       [ testSpec "ddmin" (baseTests ddmin)
       , testSpec "binaryReduction" (baseTests binaryReduction)
-      , testSpec "linaryReduction" (baseTests linaryReduction)
+      , testSpec "linearReduction" (baseTests linearReduction)
       , testSpec "binaryReductions"
          (baseTests (\p i -> fmap fst . L.uncons <$> binaryReductions p i ))
       , testSpec "setBinaryReduction"
@@ -37,7 +37,7 @@ tests =
         ]
     ]
 
-baseTests :: (forall m. Monad m => Reducer [Int] m) -> Spec
+baseTests :: (forall m. Monad m => Reducer m [Int]) -> Spec
 baseTests red = do
   it "returns Nothing, if the predicate is false for all inputs" $ do
     x <- red (\i -> return False) [0..10]
