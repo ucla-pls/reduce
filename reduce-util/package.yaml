@@ -27,6 +27,8 @@ dependencies:
 - bytestring
 - typed-process
 - cryptohash-sha256
+- async
+- stm
 
 library:
   source-dirs: src
