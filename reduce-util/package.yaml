@@ -29,6 +29,7 @@ dependencies:
 - cryptohash-sha256
 - async
 - stm
+- mtl
 
 library:
   source-dirs: src
