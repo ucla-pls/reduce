@@ -1,6 +1,6 @@
 {-# language Rank2Types #-}
 {-# language BangPatterns #-}
-module Data.Functor.Contravariant.PredicateT where
+module Data.Functor.Contravariant.PredicateM where
 
 -- contravariant
 import           Data.Functor.Contravariant
@@ -14,29 +14,39 @@ import           Control.Monad.Trans.Maybe
 import           Control.Monad
 import           Control.Applicative
 
-class CoTransMonad t where
-  under :: (forall a. m a -> n a) -> t m b -> t n b
-  mash :: Monad m => (a -> m b) -> t m b -> t m a
 
-newtype PredicateT m a =
-  PredicateT { runPredicateT :: a -> m Bool }
+-- | A functor over the category of monads.
+class MonadFunctor t where
+  mmap :: (forall a. m a -> n a) -> t m b -> t n b
 
-instance Applicative m => Semigroup (PredicateT m a) where
-  (<>) f g = PredicateT $
-    \a -> (&&) <$> runPredicateT f a <*> runPredicateT f a
+-- m a >>= (a -> m b) -> m b
+-- m a >=< (b -> m a) -> m b
+
+class ContravariantM t where
+  -- | Performs actions forward but
+  contramapM ::
+    Monad m => (a -> m b) -> t m b -> t m a
+
+newtype PredicateM m a =
+  PredicateM { runPredicateM :: a -> m Bool }
+
+instance Applicative m => Semigroup (PredicateM m a) where
+  (<>) f g = PredicateM $
+    \a -> (&&) <$> runPredicateM f a <*> runPredicateM f a
   {-# inline (<>) #-}
 
-instance Applicative m => Monoid (PredicateT m a) where
+instance Applicative m => Monoid (PredicateM m a) where
   mappend = (<>)
-  mempty = PredicateT ( const . pure $ True )
+  mempty = PredicateM ( const . pure $ True )
   {-# inline mappend #-}
   {-# inline mempty #-}
 
-instance Contravariant (PredicateT m) where
-  contramap f g = PredicateT $ runPredicateT g . f
+
+instance Contravariant (PredicateM m) where
+  contramap f g = PredicateM $ runPredicateM g . f
   {-# inline contramap #-}
 
-instance Applicative m => Divisible (PredicateT m) where
+instance Applicative m => Divisible (PredicateM m) where
   -- divide :: (a -> (b, c)) -> f b -> f c -> f a
   divide split fb fc =
     contramap split (contramap fst fb <> contramap snd fc)
@@ -44,11 +54,14 @@ instance Applicative m => Divisible (PredicateT m) where
   {-# inline divide #-}
   {-# inline conquer #-}
 
-instance CoTransMonad PredicateT where
-  under fn pred =
-    PredicateT $ \a -> fn $ runPredicateT pred a
-  mash fn pred =
-    PredicateT $ fn >=> runPredicateT pred
+
+instance MonadFunctor PredicateM where
+  mmap fn pred =
+    PredicateM $ \a -> fn $ runPredicateM pred a
+
+instance ContravariantM PredicateM where
+  contramapM fn pred =
+    PredicateM $ fn >=> runPredicateM pred
 
 newtype GuardT m a =
   GuardT { runGuardT :: a -> m () }
@@ -75,15 +88,17 @@ instance Applicative m => Divisible (GuardT m) where
   {-# inline divide #-}
   {-# inline conquer #-}
 
-instance CoTransMonad GuardT where
-  under fn pred =
+instance MonadFunctor GuardT where
+  mmap fn pred =
     GuardT $ \a -> fn $ runGuardT pred a
-  mash fn pred =
+
+instance ContravariantM GuardT where
+  contramapM fn pred =
     GuardT $ fn >=> runGuardT pred
 
 -- | Predicates are predicates.
-ifTrueT :: Applicative m => PredicateT m Bool
-ifTrueT = PredicateT $ pure
+ifTrueT :: Applicative m => PredicateM m Bool
+ifTrueT = PredicateM $ pure
 {-# inline ifTrueT #-}
 
 -- | Get a basic guard
@@ -92,17 +107,17 @@ guardT = GuardT guard
 {-# inline guardT #-}
 
 -- | Create A GuardT from a Predicate T
-asGuard :: MonadPlus m => PredicateT m a -> GuardT m a
+asGuard :: MonadPlus m => PredicateM m a -> GuardT m a
 asGuard pred =
-  mash (runPredicateT pred) guardT
+  contramapM (runPredicateM pred) guardT
 {-# inline asGuard #-}
 
 liftUnder ::
-  (Monad m, MonadTrans t, CoTransMonad c)
+  (Monad m, MonadTrans t, MonadFunctor c)
   => c m a
   -> c (t m) a
-liftUnder = under lift
+liftUnder = mmap lift
 
 -- | Create A GuardT from a Predicate T
-asMaybeGuard :: Monad m => PredicateT m a -> GuardT (MaybeT m) a
+asMaybeGuard :: Monad m => PredicateM m a -> GuardT (MaybeT m) a
 asMaybeGuard = asGuard . liftUnder

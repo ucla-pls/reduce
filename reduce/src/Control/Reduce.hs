@@ -11,7 +11,7 @@ given a predicate reduces a set of items to a smaller set of items.
 
 -}
 module Control.Reduce
-  ( PredicateT (..)
+  ( PredicateM (..)
   , Reducer
 
   -- ** Delta Debugging
@@ -54,7 +54,7 @@ import           Control.Monad.Trans.Reader
 import           Data.Functor
 import           Data.Monoid
 
-import Data.Functor.Contravariant.PredicateT
+import Data.Functor.Contravariant.PredicateM
 
 import Data.Functor.Contravariant hiding (Predicate)
 
@@ -71,7 +71,7 @@ import Debug.Trace
 -- the smallest list of elements such that the predicate is still satisfied.
 -- The reducer will return nothing if no subset satisfies the predicate.
 type Reducer m s =
-  PredicateT m s -> s -> m (Maybe s)
+  PredicateM m s -> s -> m (Maybe s)
 
 -- | Like a 'Reducer', but uses an 'IS.IntSet' instead for performance gain.
 type IReducer m =
@@ -82,14 +82,14 @@ type IReducer m =
 -- | An implmentation of ddmin.
 ddmin :: Monad m => Reducer m [e]
 ddmin p es = do
-  t' <- runPredicateT p []
+  t' <- runPredicateM p []
   if t'
     then return $ Just []
     else do
       mx <- unsafeDdmin p es
       case mx of
         Just x -> do
-          t <- runPredicateT p x
+          t <- runPredicateM p x
           return $ if t then Just x else Nothing
         Nothing -> return Nothing
 
@@ -149,7 +149,7 @@ binaryReduction p es =
       where range i = L.take i es ++ sol
 
 -- | Find all possible minimas. Worst-case exponential.
-binaryReductions :: (Eq e, Monad m) => PredicateT m [e] -> [e] -> m [[e]]
+binaryReductions :: (Eq e, Monad m) => PredicateM m [e] -> [e] -> m [[e]]
 binaryReductions p =
   fmap (map L.reverse) . go []
   where
@@ -201,7 +201,7 @@ genericBinaryReduction cost (asMaybeGuard -> pred) =
 -- | An 'ISetReducer' like a generic reducer but uses slightly optimized
 -- data-structures.
 type ISetReducer m =
-  PredicateT m IS.IntSet -> [IS.IntSet] -> m (Maybe [IS.IntSet])
+  PredicateM m IS.IntSet -> [IS.IntSet] -> m (Maybe [IS.IntSet])
 
 -- | SetBinaryReduction is much like regular binary reduction, but with
 -- one added feature. Since we want the smallest output set we have to

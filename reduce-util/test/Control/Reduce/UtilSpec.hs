@@ -16,21 +16,21 @@ spec = do
       pred <- mkCliPredicate
         . setTest [Status ExitSuccess]
         <$> mkCliOptions "true"
-      b <- runPredicateT pred "hello"
+      b <- runPredicateM pred "hello"
       b `shouldBe` True
 
     it "should find that false does not return ExitSuccess" $ do
       pred <- mkCliPredicate
         . setTest [Status ExitSuccess]
         <$> mkCliOptions "false"
-      b <- runPredicateT pred "hello"
+      b <- runPredicateM pred "hello"
       b `shouldBe` False
 
     it "should find that false does not return ExitFailure" $ do
       pred <- mkCliPredicate
         . setTest [Status (ExitFailure 1)]
         <$> mkCliOptions "false"
-      b <- runPredicateT pred "hello"
+      b <- runPredicateM pred "hello"
       b `shouldBe` True
 
     it "should find that echo both print the results and exit with success" $ do
@@ -40,5 +40,5 @@ spec = do
         , StdOutHash (hashlazyAndLength "hello\n")
         ]
         <$> mkCliOptions "echo"
-      b <- runPredicateT pred "hello"
+      b <- runPredicateM pred "hello"
       b `shouldBe` True

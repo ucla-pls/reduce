@@ -74,7 +74,7 @@ import System.Process.Consume
 
 -- reduce
 import Control.Reduce
-import Data.Functor.Contravariant.PredicateT
+import Data.Functor.Contravariant.PredicateM
 
 -- | The options to build a command-line reducer.
 data ReducerOptions a = ReducerOptions
@@ -119,10 +119,8 @@ data CliOptions = CliOptions
 
 getExecutable :: String -> IO FilePath
 getExecutable exec = do
-  findExecutable exec >>= \case
-    Just fp -> return fp
-    Nothing ->
-      canonicalizePath exec
+  findExecutable exec >>=
+    maybe (canonicalizePath exec) return
 
 mkCliOptions :: FilePath -> IO CliOptions
 mkCliOptions fp = do
@@ -148,7 +146,7 @@ data Test
   | StdErrHash SHA256
 
 -- | We can create a 'FilePathPredicate' from a command.
-mkCliPredicate :: CliOptions -> PredicateT IO FilePath
+mkCliPredicate :: CliOptions -> PredicateM IO FilePath
 mkCliPredicate CliOptions {..} =
   contramap fileNameToProc $ testCommand test
   where
@@ -157,18 +155,18 @@ mkCliPredicate CliOptions {..} =
       $ proc cmd (args ++ [filepath])
 
 -- | We can create a 'FilePathPredicate' from a command.
-fromCommand :: [Test] -> FilePath -> [String] -> PredicateT IO FilePath
+fromCommand :: [Test] -> FilePath -> [String] -> PredicateM IO FilePath
 fromCommand test cmd args = do
   mkCmdPredicate (\filepath -> return $ proc cmd (args ++ [filepath])) test
 
-mkCmdPredicate :: (a -> IO (ProcessConfig () () ())) -> [Test] -> PredicateT IO a
+mkCmdPredicate :: (a -> IO (ProcessConfig () () ())) -> [Test] -> PredicateM IO a
 mkCmdPredicate fn test  = do
-  mash fn (testCommand test)
+  contramapM fn (testCommand test)
 
-testCommand :: [Test] -> PredicateT IO (ProcessConfig () () ())
+testCommand :: [Test] -> PredicateM IO (ProcessConfig () () ())
 testCommand test =
   consumeWithHash ignoreConsumer ignoreConsumer
-  `mash` contramap testp ifTrueT
+  `contramapM` contramap testp ifTrueT
   where
     testp (ec, ((), out), ((), err)) =
       flip all test $ \case

@@ -30,6 +30,7 @@ dependencies:
 - async
 - stm
 - mtl
+- contravariant
 
 library:
   source-dirs: src
