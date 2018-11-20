@@ -1,0 +1,46 @@
+name:                red
+version:             0.1.0.0
+github:              "kalhauge/reduce"
+license:             BSD3
+author:              "Christian Gram Kalhauge"
+maintainer:          "kalhauge@cs.ucla.edu"
+copyright:           "MIT"
+
+extra-source-files:
+- README.md
+  # - ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/kalhauge/reduce#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- reduce
+- reduce-util
+  # - filepath
+  # - directory
+  # - bytestring
+  # - typed-process
+  # - cryptohash-sha256
+  # - async
+  # - stm
+  # - mtl
+
+executables:
+  red:
+    main:                Red.hs
+    source-dirs:         .
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - reduce-util
+    - reduce
+    - optparse-applicative
