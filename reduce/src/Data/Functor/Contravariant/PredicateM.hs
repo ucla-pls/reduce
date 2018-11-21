@@ -63,38 +63,38 @@ instance ContravariantM PredicateM where
   contramapM fn pred =
     PredicateM $ fn >=> runPredicateM pred
 
-newtype GuardT m a =
-  GuardT { runGuardT :: a -> m () }
+newtype GuardM m a =
+  GuardM { runGuardM :: a -> m () }
 
-instance Applicative m => Semigroup (GuardT m a) where
-  (<>) f g = GuardT $
-    \a -> (const $ const ()) <$> runGuardT f a <*> runGuardT f a
+instance Applicative m => Semigroup (GuardM m a) where
+  (<>) f g = GuardM $
+    \a -> (const $ const ()) <$> runGuardM f a <*> runGuardM f a
   {-# inline (<>) #-}
 
-instance Applicative m => Monoid (GuardT m a) where
+instance Applicative m => Monoid (GuardM m a) where
   mappend = (<>)
-  mempty = GuardT ( const . pure $ ())
+  mempty = GuardM ( const . pure $ ())
   {-# inline mappend #-}
   {-# inline mempty #-}
 
-instance Contravariant (GuardT m) where
-  contramap f g = GuardT $ runGuardT g . f
+instance Contravariant (GuardM m) where
+  contramap f g = GuardM $ runGuardM g . f
   {-# inline contramap #-}
 
-instance Applicative m => Divisible (GuardT m) where
+instance Applicative m => Divisible (GuardM m) where
   divide split fb fc =
     contramap split (contramap fst fb <> contramap snd fc)
   conquer = mempty
   {-# inline divide #-}
   {-# inline conquer #-}
 
-instance MonadFunctor GuardT where
+instance MonadFunctor GuardM where
   mmap fn pred =
-    GuardT $ \a -> fn $ runGuardT pred a
+    GuardM $ \a -> fn $ runGuardM pred a
 
-instance ContravariantM GuardT where
+instance ContravariantM GuardM where
   contramapM fn pred =
-    GuardT $ fn >=> runGuardT pred
+    GuardM $ fn >=> runGuardM pred
 
 -- | Predicates are predicates.
 ifTrueT :: Applicative m => PredicateM m Bool
@@ -102,12 +102,12 @@ ifTrueT = PredicateM $ pure
 {-# inline ifTrueT #-}
 
 -- | Get a basic guard
-guardT :: Alternative m => GuardT m Bool
-guardT = GuardT guard
+guardT :: Alternative m => GuardM m Bool
+guardT = GuardM guard
 {-# inline guardT #-}
 
--- | Create A GuardT from a Predicate T
-asGuard :: MonadPlus m => PredicateM m a -> GuardT m a
+-- | Create A GuardM from a Predicate T
+asGuard :: MonadPlus m => PredicateM m a -> GuardM m a
 asGuard pred =
   contramapM (runPredicateM pred) guardT
 {-# inline asGuard #-}
@@ -118,6 +118,6 @@ liftUnder ::
   -> c (t m) a
 liftUnder = mmap lift
 
--- | Create A GuardT from a Predicate T
-asMaybeGuard :: Monad m => PredicateM m a -> GuardT (MaybeT m) a
+-- | Create A GuardM from a Predicate T
+asMaybeGuard :: Monad m => PredicateM m a -> GuardM (MaybeT m) a
 asMaybeGuard = asGuard . liftUnder

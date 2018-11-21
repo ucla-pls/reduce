@@ -12,16 +12,22 @@ import qualified Data.Text as Text
 -- bytestring
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
+import qualified Data.ByteString.Lazy.Char8 as BLC
 
 -- optparse-applicative
 import Options.Applicative
+
 
 -- reduce-util
 import Control.Reduce.Util
 import System.Process.Consume
 
+-- contravariant
+import Data.Functor.Contravariant
+
 -- reduce
 import Control.Reduce
+import Data.Functor.Contravariant.PredicateM
 
 -- base
 import Control.Applicative
@@ -38,6 +44,7 @@ data Format = Format
 data Config = Config
   { format :: !Format
   , checkOptions :: !CheckOptions
+  , reducerOptions :: !ReducerOptions
   , cmdOptionsWithInput :: !CmdOptionWithInput
   } deriving (Show)
 
@@ -46,13 +53,14 @@ getConfigParser formats =
   cfg
   <$> asum (map formatAsOpt formats)
   <*> parseCheckOptions
+  <*> parseReducerOptions
   <*> parseCmdOptionsWithInput
   where
     formatAsOpt fmt@(Format f desc) =
       flag' fmt (short f <> help desc)
 
-    cfg fmt check cmd =
-      Config fmt check <$> cmd
+    cfg fmt check rd cmd =
+      Config fmt check rd <$> cmd
 
 main = do
   let configParser = getConfigParser formats
@@ -63,6 +71,7 @@ main = do
     <> progDesc "A command line tool for reducing almost anything."
     )
 
+  print (config)
   loggers <- mkLoggers
   runReaderT (run config) loggers
   where
@@ -77,10 +86,40 @@ run Config {..} = do
     StreamOptions a cmdOptions -> do
       mp <- toPredicateM checkOptions cmdOptions a
       case mp of
-        Just p -> liftIO . print =<< runPredicateM p a
-        Nothing -> liftIO $print "failed"
+        Just pred ->
+          case formatFlag format of
+            'c' -> do
+              x <- reduce reducerOptions (BLC.pack `contramap` pred) (BLC.unpack a)
+              case x of
+                Just f ->
+                  liftIO $ BLC.putStrLn (BLC.pack f)
+                Nothing ->
+                  error "predicate was not reduceable"
+            'l' -> do
+              x <- reduce reducerOptions (BLC.unlines `contramap` pred) (BLC.lines a)
+              case x of
+                Just f ->
+                  liftIO $ BLC.putStrLn (BLC.unlines f)
+                Nothing ->
+                  error "predicate was not reduceable"
+        Nothing -> error "predicate was not valid"
     ArgumentOptions a cmdOptions -> do
       mp <- toPredicateM checkOptions cmdOptions a
       case mp of
-        Just p -> liftIO . print =<< runPredicateM p a
-        Nothing -> liftIO $print "failed"
+        Just pred ->
+          case formatFlag format of
+            'c' -> do
+              x <- reduce reducerOptions pred a
+              case x of
+                Just f ->
+                  liftIO $ putStrLn f
+                Nothing ->
+                  error "predicate was not reduceable"
+            'l' -> do
+              x <- reduce reducerOptions (unlines `contramap` pred) (lines a)
+              case x of
+                Just f ->
+                  liftIO $ putStrLn (unlines f)
+                Nothing ->
+                  error "predicate was not reduceable"
+        Nothing -> error "predicate was not valid"

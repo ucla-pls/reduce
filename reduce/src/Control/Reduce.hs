@@ -25,6 +25,7 @@ module Control.Reduce
 
   -- ** Linear Reduction
   , linearReduction
+  , unsafeLinearReduction
 
   -- ** Binary Reduction
   , binaryReduction
@@ -34,7 +35,7 @@ module Control.Reduce
   , genericBinaryReduction
 
   -- *** Set Binary Reduction
-  , GuardT (..)
+  , GuardM (..)
   , ISetReducer
   , setBinaryReduction
   , toSetReducer
@@ -75,7 +76,7 @@ type Reducer m s =
 
 -- | Like a 'Reducer', but uses an 'IS.IntSet' instead for performance gain.
 type IReducer m =
-  GuardT (MaybeT m) IS.IntSet -> IS.IntSet -> MaybeT m IS.IntSet
+  GuardM (MaybeT m) IS.IntSet -> IS.IntSet -> MaybeT m IS.IntSet
 
 -- ** Delta Debugging
 
@@ -111,7 +112,7 @@ ddmin' n test world =
     , return world
     ]
   where
-    testrec n d = runGuardT test d >> ddmin' n test d
+    testrec n d = runGuardM test d >> ddmin' n test d
     deltas = splitSet n world
     size = IS.size world
 
@@ -121,9 +122,13 @@ ddmin' n test world =
 -- Runtime: \( O(n) \)
 linearReduction :: Monad m => Reducer m [e]
 linearReduction p xs =
-  runMaybeT (pred xs >> go [] xs)
+  runMaybeT (runGuardM pred xs >> unsafeLinearReduction pred xs)
   where
-    pred = runGuardT . asMaybeGuard $ p
+    pred = asMaybeGuard $ p
+
+unsafeLinearReduction :: MonadPlus m => GuardM m [e] -> [e] -> m [e]
+unsafeLinearReduction (runGuardM -> pred) = go []
+  where
     go !sol !es =
       case es of
         [] -> return sol
@@ -220,7 +225,7 @@ setBinaryReduction (asMaybeGuard -> pred) =
             (as', (rs, ru):_) = L.splitAt (r - 1) as
             h' = IS.union h ru
           cases
-            [ runGuardT pred h' >> return (rs:sol)
+            [ runGuardM pred h' >> return (rs:sol)
             , go (rs:sol, IS.union h ru)
                 [(a, s') | (a, s) <- as', let s' = s IS.\\ ru, not (IS.null s')]
                 <|> return (map fst as' ++ rs:sol)
@@ -233,11 +238,11 @@ setBinaryReduction (asMaybeGuard -> pred) =
 -- | binarySearch, returns a number between lw and hg that satisfies
 -- the predicate. It requires that if p is monotone.
 -- $p n = true then p n-1 = true$. fails if no such number exists.
-binarySearch :: (MonadPlus m) => GuardT m Int -> Int -> Int -> m Int
+binarySearch :: (MonadPlus m) => GuardM m Int -> Int -> Int -> m Int
 binarySearch p !lw !hg = do
   let pivot = lw + ((hg - lw) `quot` 2)
   cases
-    [ runGuardT p pivot
+    [ runGuardM p pivot
       >> if lw == pivot
           then return lw
           else binarySearch p lw (pivot -1) <|> return pivot

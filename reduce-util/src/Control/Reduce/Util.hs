@@ -32,6 +32,10 @@ module Control.Reduce.Util
     , parseCheckOptions
     , toPredicateM
 
+    , ReducerOptions (..)
+    , parseReducerOptions
+    , reduce
+
   -- , mkCmdOptionsPredicate
   -- , parseCmdOptions
 
@@ -71,6 +75,7 @@ import Control.Concurrent.STM
 
 -- mtl
 import Control.Monad.Reader.Class
+import Control.Monad.Trans.Maybe
 
 -- base
 import System.Exit
@@ -229,113 +234,39 @@ toPredicateM CheckOptions {..} cmd a = do
       && (not preserveStderr || eh' == eh)
 
 
--- doStream :: Bool -> InputFormat a
--- doStream True = StreamInput
--- doStream False = ArgsInput
+data ReducerOptions = ReducerOptions
+  { reducer :: ReducerName
+  } deriving (Show)
 
+data ReducerName
+  = Ddmin
+  | Linear
+  | Binary
+  deriving (Show)
 
+fromString :: String -> ReducerName
+fromString = \case
+  "ddmin" -> Ddmin
+  "linear" -> Linear
+  "binary" -> Binary
 
+parseReducerOptions :: Parser ReducerOptions
+parseReducerOptions =
+  ReducerOptions . fromString <$>
+    strOption
+    ( long "reducer"
+      <> short 'R'
+      <> help "the reducing algorithm to use."
+      <> value "binary"
+      <> showDefault
+    )
 
--- -- data Check
--- --   = Status ExitCode
--- --   | StdOutHash SHA256
--- --   | StdErrHash SHA256
--- --   deriving (Show, Eq)
-
--- -- -- | We can create a 'FilePathPredicate' from a command.
--- -- mkCmdOptionsPredicate :: CmdOptions a -> IO (PredicateM IO a)
--- -- mkCmdOptionsPredicate CmdOptions {..} = do
--- --   return ( resolve `contramap` testCmd [Status ExitSuccess] )
--- --   where
--- --     resolve =
--- --       case inputFormat of
--- --         ArgsInput ->
--- --           \a -> proc cmd (args ++ a)
--- --         StreamInput ->
--- --           \a -> setStdin (byteStringInput a) $ proc cmd args
-
--- -- mkCmdPredicate :: (a -> IO (ProcessConfig () () ())) -> [Check] -> PredicateM IO a
--- -- mkCmdPredicate fn test  = do
--- --   contramapM fn (testCmd test)
-
--- -- testCmd :: [Check] -> PredicateM IO (ProcessConfig () () ())
--- -- testCmd test =
--- --   consumeWithHash ignoreConsumer ignoreConsumer
--- --   `contramapM` contramap testp ifTrueT
--- --   where
--- --     testp (ec, ((), out), ((), err)) =
--- --       flip all test $ \case
--- --         Status ec' -> ec == ec'
--- --         StdOutHash hash -> hash == out
--- --         StdErrHash hash -> hash == err
-
-
--- data CheckConfig = CheckConfig
---   { expectStatus   :: ExitCode
---   , perserveStdout :: Bool
---   , perserveStderr :: Bool
---   , checkCheck :: Bool
---   } deriving (Show, Eq)
-
--- parseCmdOptions :: Parser (IO (CmdOptions a))
--- parseCmdOptions =
---   getOptions
---   <$> ( CheckConfig
---         <$> ( exitCodeFromInt
---               <$> option auto
---               ( long "exit-code"
---                 <> short 'E'
---                 <> help "preserve exit-code"
---                 <> value 0
---                 <> metavar "CODE"
---                 <> showDefault)
---             )
---         <*> flag False True (long "stdout" <> help "preserve stdout.")
---         <*> flag False True (long "stderr" <> help "preserve stderr.")
---         <*> flag True False (long "no-check" <> help "don't check the property on the initial input.")
---       )
---   <*> flag False True (long "stream" <> help "stream the input")
---   <*> strArgument (metavar "CMD" <> help "the command to run")
---   <*> many (strArgument (metavar "ARG.." <> help "arguments to the command"))
---   where
---     exitCodeFromInt :: Int -> ExitCode
---     exitCodeFromInt 0 = ExitSuccess
---     exitCodeFromInt n = ExitFailure n
-
---     getOptions x cc c args = do
---       mkCmdOptions x cc c args
-
--- -- -- | The options to build a command-line reducer.
--- -- data ReducerOptions a = ReducerOptions
--- --   {
--- --     -- | The underlying reducer to be used to reduce the item.
--- --     reducer :: Reducer IO a
-
--- --     -- | Cmd Line Options
--- --   , cliOptions :: CmdOptions
--- --   }
-
--- -- -- | Runs the reducer is the IO monad
--- -- reduce :: ReducerOptions FilePath -> a -> IO (Maybe a)
--- -- reduce ReducerOptions {..} a = do
--- --   absoluteCmd <- canonicalizePath command
--- --   ref <- newIORef (0 :: Int)
--- --   reducer ( predicate absoluteCmd ref ) a
--- --   where
--- --     predicate absoluteCmd ref simpl = do
--- --       i <- atomicModifyIORef' ref (\i -> ( succ i, i))
-
--- --       let folder = workFolder </> printf "%04o" i
-
--- --       createDirectoryIfMissing True folder
-
--- --       success <- withCurrentDirectory folder $ do
--- --         file <- toFile simpl
--- --         (ec, _, _ ) <- readProcess ( proc absoluteCmd ( args ++ [file] ) )
--- --         return (ec == ExitSuccess)
-
--- --       when
--- --         ( not $ keepIterations )
--- --         ( removePathForcibly folder )
-
--- --       return success
+reduce :: Monad m => ReducerOptions -> PredicateM m [a] -> [a] -> m (Maybe [a])
+reduce ReducerOptions {..} pred ls =
+  case reducer of
+    Ddmin ->
+      unsafeDdmin pred ls
+    Linear ->
+      runMaybeT (unsafeLinearReduction (asMaybeGuard pred) ls)
+    Binary ->
+      binaryReduction pred ls

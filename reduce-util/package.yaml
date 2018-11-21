@@ -30,6 +30,7 @@ dependencies:
 - async
 - stm
 - mtl
+- transformers
 - contravariant
 - optparse-applicative
 

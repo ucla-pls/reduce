@@ -27,6 +27,7 @@ dependencies:
 - text
 - mtl
 - bytestring
+- contravariant
   # - filepath
   # - directory
   # - bytestring
