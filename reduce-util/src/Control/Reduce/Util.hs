@@ -230,7 +230,7 @@ toPredicateM CheckOptions {..} cmd a = do
   where
     testp oh eh (ec', oh', eh') =
       ec' == expectedStatus
-      && (not preserveStderr || oh' == oh)
+      && (not preserveStdout || oh' == oh)
       && (not preserveStderr || eh' == eh)
 
 
