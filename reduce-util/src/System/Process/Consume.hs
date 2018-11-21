@@ -1,7 +1,8 @@
-{-# LANGUAGE BangPatterns    #-}
-{-# LANGUAGE LambdaCase      #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TupleSections   #-}
+{-# LANGUAGE BangPatterns      #-}
+{-# LANGUAGE LambdaCase        #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE TupleSections     #-}
 {-|
 Module      : System.Process.Consume
 Copyright   : (c) Christian Gram Kalhauge, 2018
@@ -31,19 +32,19 @@ import           System.FilePath
 import           System.Directory
 
 -- bytestring
-import qualified Data.ByteString.Lazy     as BL
---import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8    as BS
+import qualified Data.ByteString            as BS
+import qualified Data.ByteString.Char8      as BSC
+import qualified Data.ByteString.Lazy       as BL
 
 -- cryptohash-sha256
-import           Crypto.Hash.SHA256       as Sha256
+import           Crypto.Hash.SHA256         as Sha256
 
 -- stm
 import           Control.Concurrent.STM
 
 -- mtl
-import           Control.Monad.Writer
 import           Control.Monad.Reader.Class
+import           Control.Monad.Writer
 
 -- base
 import           Control.Monad
@@ -109,7 +110,7 @@ perLine (consumer, i) = do
             consumer a Nothing
       | otherwise = do
           left <- readIORef ref
-          let cont:rest = BS.split '\n' bs
+          let cont:rest = BSC.split '\n' bs
           (a', left') <-
             foldM (\(a, bs') bs -> (,bs) <$> consumer i (Just bs'))
                   (a, left `BS.append` cont) rest
@@ -151,6 +152,26 @@ logProcess pc = do
 
   (ec,_, _) <- liftIO $ consume olog elog pc
   return ec
+
+data Loggers = Loggers !(Logger BS.ByteString) !(Logger BS.ByteString)
+
+instance HasLoggers Loggers where
+  stdoutLog (Loggers o _) = o
+  stderrLog (Loggers _ e) = e
+
+mkLoggers :: IO Loggers
+mkLoggers =
+  Loggers
+  <$> perLineLogger
+  (\case
+      Just x -> BSC.hPutStrLn stderr ("[stdout]: " <> x)
+      Nothing -> return ()
+  )
+  <*> perLineLogger
+  (\case
+      Just x -> BSC.hPutStrLn stderr ("[stderr]: " <> x)
+      Nothing -> return ()
+  )
 
 -- ** HashConsumer
 

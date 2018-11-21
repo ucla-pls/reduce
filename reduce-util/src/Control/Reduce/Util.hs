@@ -28,6 +28,10 @@ module Control.Reduce.Util
     , CmdOptionWithInput (..)
     , parseCmdOptionsWithInput
 
+    , CheckOptions
+    , parseCheckOptions
+    , toPredicateM
+
   -- , mkCmdOptionsPredicate
   -- , parseCmdOptions
 
@@ -143,46 +147,86 @@ data CmdOptionWithInput
   | StreamOptions !BL.ByteString !(CmdOptions BL.ByteString)
   deriving (Show)
 
+data InputFrom
+  = FromString String
+  | FromFile FilePath
+  deriving (Show, Eq)
+
 parseCmdOptionsWithInput :: Parser (IO CmdOptionWithInput)
 parseCmdOptionsWithInput =
   getOptions
-  <$> strOption (long "input" <> short 'I' <> help "the input to code")
+  <$> ( asum
+       [ FromString <$> strOption (long "input" <> short 'i' <> help "the input to code")
+       , FromFile <$> strOption (long "file" <> short 'f' <> help "read input from file or folder")
+       ])
   <*> flag False True (long "stream" <> short 'S' <> help "stream the input to the process")
   <*> strArgument (metavar "CMD" <> help "the command to run")
   <*> many (strArgument (metavar "ARG.." <> help "arguments to the command"))
   where
-    getOptions str useStream c args = do
+    getOptions input useStream c args = do
       if useStream
         then do
         s <- mkCmdOptions (StreamInput) c args
-        return $ StreamOptions (BLC.pack str) s
+        case input of
+          FromFile fp -> do
+            rf <- BLC.fromStrict <$> BS.readFile fp
+            return $ StreamOptions rf s
+          FromString str ->
+            return $ StreamOptions (BLC.pack str) s
         else do
         s <- mkCmdOptions (ArgsInput) c args
-        return $ ArgumentOptions str s
+        case input of
+          FromFile fp -> do
+            return $ ArgumentOptions fp s
+          FromString str ->
+            return $ ArgumentOptions str s
 
 
 
+data CheckOptions = CheckOptions
+  { expectedStatus   :: ExitCode
+  , preserveStdout :: Bool
+  , preserveStderr :: Bool
+  } deriving (Show, Eq)
 
--- <$> ( CheckConfig
---       <$> ( exitCodeFromInt
---             <$> option auto
---             ( long "exit-code"
---               <> short 'E'
---               <> help "preserve exit-code"
---               <> value 0
---               <> metavar "CODE"
---               <> showDefault)
---           )
---       <*> flag False True (long "stdout" <> help "preserve stdout.")
---       <*> flag False True (long "stderr" <> help "preserve stderr.")
---       <*> flag True False (long "no-check" <> help "don't check the property on the initial input.")
---     )
+parseCheckOptions :: Parser CheckOptions
+parseCheckOptions =
+  CheckOptions
+      <$> ( exitCodeFromInt
+            <$> option auto
+            ( long "exit-code"
+              <> short 'E'
+              <> help "preserve exit-code"
+              <> value 0
+              <> metavar "CODE"
+              <> showDefault)
+          )
+      <*> switch (long "stdout" <> help "preserve stdout.")
+      <*> switch (long "stderr" <> help "preserve stderr.")
+  where
+    exitCodeFromInt :: Int -> ExitCode
+    exitCodeFromInt 0 = ExitSuccess
+    exitCodeFromInt n = ExitFailure n
 
--- exitCodeFromInt :: Int -> ExitCode
--- exitCodeFromInt 0 = ExitSuccess
--- exitCodeFromInt n = ExitFailure n
-
-
+-- | Creates a predicate from the CheckOptions and CmdOptions.
+toPredicateM ::
+ (HasLoggers env, MonadReader env m, MonadIO m)
+ => CheckOptions
+ -> CmdOptions a
+ -> a
+ -> m (Maybe (PredicateM m a))
+toPredicateM CheckOptions {..} cmd a = do
+  (ec, oh, eh) <- runCmd cmd a
+  if ec /= expectedStatus
+    then
+    return Nothing
+    else
+    return $ Just (runCmd cmd `contramapM` ( testp oh eh `contramap` ifTrueT ))
+  where
+    testp oh eh (ec', oh', eh') =
+      ec' == expectedStatus
+      && (not preserveStderr || oh' == oh)
+      && (not preserveStderr || eh' == eh)
 
 
 -- doStream :: Bool -> InputFormat a

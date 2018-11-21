@@ -37,6 +37,7 @@ data Format = Format
 
 data Config = Config
   { format :: !Format
+  , checkOptions :: !CheckOptions
   , cmdOptionsWithInput :: !CmdOptionWithInput
   } deriving (Show)
 
@@ -44,13 +45,14 @@ getConfigParser :: [ Format ] -> Parser (IO Config)
 getConfigParser formats =
   cfg
   <$> asum (map formatAsOpt formats)
+  <*> parseCheckOptions
   <*> parseCmdOptionsWithInput
   where
     formatAsOpt fmt@(Format f desc) =
       flag' fmt (short f <> help desc)
 
-    cfg fmt x =
-      Config fmt <$> x
+    cfg fmt check cmd =
+      Config fmt check <$> cmd
 
 main = do
   let configParser = getConfigParser formats
@@ -69,31 +71,16 @@ main = do
       , Format 'l' "see the input as a list of lines"
       ]
 
-
-data Loggers = Loggers !(Logger BS.ByteString) !(Logger BS.ByteString)
-
-instance HasLoggers Loggers where
-  stdoutLog (Loggers o _) = o
-  stderrLog (Loggers _ e) = e
-
-mkLoggers :: IO Loggers
-mkLoggers =
-  Loggers
-  <$> perLineLogger (\case
-                        Just x -> BSC.hPutStrLn stderr ("[stdout]: '" <> x <> "'")
-                        Nothing -> return ()
-                    )
-  <*> perLineLogger (\case
-                        Just x -> BSC.hPutStrLn stderr ("[stderr]: '" <> x <> "'")
-                        Nothing -> return ()
-                    )
-
 run :: Config -> ReaderT Loggers IO ()
 run Config {..} = do
   case cmdOptionsWithInput of
     StreamOptions a cmdOptions -> do
-      a <- runCmd cmdOptions a
-      liftIO $ print a
+      mp <- toPredicateM checkOptions cmdOptions a
+      case mp of
+        Just p -> liftIO . print =<< runPredicateM p a
+        Nothing -> liftIO $print "failed"
     ArgumentOptions a cmdOptions -> do
-      a <- runCmd cmdOptions a
-      liftIO $ print a
+      mp <- toPredicateM checkOptions cmdOptions a
+      case mp of
+        Just p -> liftIO . print =<< runPredicateM p a
+        Nothing -> liftIO $print "failed"
