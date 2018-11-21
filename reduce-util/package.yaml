@@ -31,6 +31,7 @@ dependencies:
 - stm
 - mtl
 - contravariant
+- optparse-applicative
 
 library:
   source-dirs: src

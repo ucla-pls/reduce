@@ -43,6 +43,7 @@ import           Control.Concurrent.STM
 
 -- mtl
 import           Control.Monad.Writer
+import           Control.Monad.Reader.Class
 
 -- base
 import           Control.Monad
@@ -54,27 +55,13 @@ import           System.Exit
 import           System.IO
 import           System.IO.Error
 
--- data ConsumerOptions out err = ConsumerOptions
---   { outLogger     :: Consumer out
---   , errLogger     :: Consumer err
---   , workingFolder :: (Maybe FilePath)
---   }
-
--- defaultConsumerOptions =
---   ConsumerOptions
---     (const . const $ return (), ())
---     (const . const $ return (), ())
---     Nothing
 
 type SHA256 = (BS.ByteString, Word64)
--- data Sha256
-  -- = Sha256Fun (Ctx -> Ctx)
-
 
 -- | Consumes the output of a command and condenses it into a sha256
 consume ::
-  Consumer stdout
-  -> Consumer stderr
+  Consumer BS.ByteString stdout
+  -> Consumer BS.ByteString stderr
   -> ProcessConfig a b c
   -> IO (ExitCode, stdout, stderr)
 consume outLogger errLogger cfg = do
@@ -88,10 +75,13 @@ consume outLogger errLogger cfg = do
 -- * Consumer
 
 -- | A consumer, is a fold over a handle.
-type Consumer a = (a -> BS.ByteString -> IO a, a)
+type Consumer b a = (a -> b -> IO a, a)
+
+-- | A logger is a consumer with no side effects
+type Logger b = Consumer b ()
 
 -- | Fold over a handle using a consumer
-hFoldM :: Int -> Handle -> Consumer a -> IO a
+hFoldM :: Int -> Handle -> Consumer BS.ByteString a -> IO a
 hFoldM size handle consumer = go (snd consumer)
   where
     go !acc = do
@@ -103,7 +93,7 @@ hFoldM size handle consumer = go (snd consumer)
 {-# inline hFoldM #-}
 
 -- | Turn a logger of lines into a LogFunc
-perLine :: Consumer a -> IO (Consumer a)
+perLine :: Consumer (Maybe BS.ByteString) a -> IO (Consumer BS.ByteString a)
 perLine (consumer, i) = do
   ref <- newIORef BS.empty
   return (go ref, i)
@@ -111,49 +101,70 @@ perLine (consumer, i) = do
     go ref a bs
       | BS.null bs = do
           left <- readIORef ref
-          consumer a left
+          if BS.null left
+            then
+            consumer a (Nothing )
+            else do
+            consumer a (Just left)
+            consumer a Nothing
       | otherwise = do
           left <- readIORef ref
           let cont:rest = BS.split '\n' bs
           (a', left') <-
-            foldM (\i bs -> (,bs) <$> uncurry consumer i)
+            foldM (\(a, bs') bs -> (,bs) <$> consumer i (Just bs'))
                   (a, left `BS.append` cont) rest
           writeIORef ref left'
           return a'
 
--- | Build an unpure consumer. The unpure comsumer ignores the
--- accumulator
-unpureConsumer :: (BS.ByteString -> IO ()) -> Consumer ()
-unpureConsumer fn = ((\() -> fn), ())
-{-# inline unpureConsumer #-}
-
 -- | Build a pure consumer. A pure consumer does not use the IO monad.
-pureConsumer :: (a -> BS.ByteString -> a) -> a -> Consumer a
+pureConsumer :: (a -> b -> a) -> a -> Consumer b a
 pureConsumer fn a = ((\a' bs -> return $ fn a' bs), a)
 {-# inline pureConsumer #-}
 
 -- | Ignores the arguments
-ignoreConsumer :: Consumer ()
-ignoreConsumer = unpureConsumer (const $ return ())
+ignoreConsumer :: Consumer b ()
+ignoreConsumer = logger (const $ return ())
 
-
-combineConsumers :: Consumer a -> Consumer b -> Consumer (a, b)
+combineConsumers :: Consumer c a -> Consumer c b -> Consumer c (a, b)
 combineConsumers (fna, ia) (fnb, ib) =
   ((\(a, b) bs -> (,) <$> fna a bs <*> fnb b bs), (ia, ib))
+
+
+-- ** Loggers
+
+-- | Build a logger
+logger :: (b -> IO ()) -> Logger b
+logger fn = ((\() -> fn), ())
+{-# inline logger #-}
+
+perLineLogger :: (Maybe BS.ByteString -> IO ()) -> IO (Logger BS.ByteString)
+perLineLogger = perLine . logger
+
+class HasLoggers env where
+  stdoutLog :: env -> Logger BS.ByteString
+  stderrLog :: env -> Logger BS.ByteString
+
+logProcess :: (HasLoggers env, MonadReader env m, MonadIO m) => ProcessConfig a b c -> m ExitCode
+logProcess pc = do
+  olog <- asks stdoutLog
+  elog <- asks stderrLog
+
+  (ec,_, _) <- liftIO $ consume olog elog pc
+  return ec
 
 -- ** HashConsumer
 
 type Sha256 = (BS.ByteString, Word64)
 
-hashConsumer :: Consumer (Sha256.Ctx)
+hashConsumer :: Consumer BS.ByteString (Sha256.Ctx)
 hashConsumer = (\ctx bs -> return $ Sha256.update ctx bs, Sha256.init)
 
 getHash :: Sha256.Ctx -> Sha256
 getHash = Sha256.finalizeAndLength
 
 consumeWithHash ::
-  Consumer stdout
-  -> Consumer stderr
+  Consumer BS.ByteString stdout
+  -> Consumer BS.ByteString stderr
   -> ProcessConfig a b c
   -> IO (ExitCode, (stdout, Sha256), (stderr, Sha256))
 consumeWithHash stdout stderr =
@@ -162,3 +173,14 @@ consumeWithHash stdout stderr =
   . consume
     (combineConsumers stdout hashConsumer)
     (combineConsumers stderr hashConsumer)
+
+logWithHash ::
+ (HasLoggers env, MonadReader env m, MonadIO m)
+  => ProcessConfig a b c
+  -> m (ExitCode, Sha256, Sha256)
+logWithHash pc = do
+  olog <- asks stdoutLog
+  elog <- asks stderrLog
+
+  (ec,(_,ho),(_,he)) <- liftIO $ consumeWithHash olog elog pc
+  return (ec, ho, he)

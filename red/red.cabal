@@ -2,7 +2,7 @@
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 924484c4cb568ac664da82a87f8faf2f71a9fe5e81aec5f6267198880d585f00
+-- hash: 2a6f63dcd02d7ef54eb26510adb4c8ff0622a532ebfc7b872149799c1a07d065
 
 name:           red
 version:        0.1.0.0
@@ -32,7 +32,10 @@ executable red
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
+    , bytestring
+    , mtl
     , optparse-applicative
     , reduce
     , reduce-util
+    , text
   default-language: Haskell2010
