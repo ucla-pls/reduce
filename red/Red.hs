@@ -60,7 +60,7 @@ getConfigParser formats =
       flag' fmt (short f <> help desc)
 
     cfg fmt check rd cmd =
-      Config fmt check rd <$> cmd
+      Config fmt check <$> rd <*> cmd
 
 main = do
   let configParser = getConfigParser formats
@@ -84,19 +84,19 @@ run :: Config -> ReaderT Loggers IO ()
 run Config {..} = do
   case cmdOptionsWithInput of
     StreamOptions a cmdOptions -> do
-      mp <- toPredicateM checkOptions cmdOptions a
+      mp <- toPredicateM checkOptions cmdOptions (workFolder $ reducerOptions) a
       case mp of
         Just pred ->
           case formatFlag format of
             'c' -> do
-              x <- reduce reducerOptions (BLC.pack `contramap` pred) (BLC.unpack a)
+              x <- reduce reducerOptions "chars" (BLC.pack `contramap` pred) (BLC.unpack a)
               case x of
                 Just f ->
                   liftIO $ BLC.putStrLn (BLC.pack f)
                 Nothing ->
                   error "predicate was not reduceable"
             'l' -> do
-              x <- reduce reducerOptions (BLC.unlines `contramap` pred) (BLC.lines a)
+              x <- reduce reducerOptions "lines" (BLC.unlines `contramap` pred) (BLC.lines a)
               case x of
                 Just f ->
                   liftIO $ BLC.putStrLn (BLC.unlines f)
@@ -104,19 +104,19 @@ run Config {..} = do
                   error "predicate was not reduceable"
         Nothing -> error "predicate was not valid"
     ArgumentOptions a cmdOptions -> do
-      mp <- toPredicateM checkOptions cmdOptions a
+      mp <- toPredicateM checkOptions cmdOptions (workFolder $ reducerOptions) a
       case mp of
         Just pred ->
           case formatFlag format of
             'c' -> do
-              x <- reduce reducerOptions pred a
+              x <- reduce reducerOptions "chars" pred a
               case x of
                 Just f ->
                   liftIO $ putStrLn f
                 Nothing ->
                   error "predicate was not reduceable"
             'l' -> do
-              x <- reduce reducerOptions (unlines `contramap` pred) (lines a)
+              x <- reduce reducerOptions "lines" (unlines `contramap` pred) (lines a)
               case x of
                 Just f ->
                   liftIO $ putStrLn (unlines f)

@@ -28,8 +28,8 @@ import           System.Process.Typed
 -- filepath
 import           System.FilePath
 
--- directory
-import           System.Directory
+-- unliftio
+import           UnliftIO.Directory
 
 -- bytestring
 import qualified Data.ByteString            as BS
@@ -172,6 +172,9 @@ mkLoggers =
       Just x -> BSC.hPutStrLn stderr ("[stderr]: " <> x)
       Nothing -> return ()
   )
+
+handlerLogger :: Handle -> Logger BS.ByteString
+handlerLogger h = logger (BS.hPutStr h)
 
 -- ** HashConsumer
 

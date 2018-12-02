@@ -23,7 +23,6 @@ dependencies:
 - base >= 4.7 && < 5
 - reduce
 - filepath
-- directory
 - bytestring
 - typed-process
 - cryptohash-sha256
@@ -33,6 +32,10 @@ dependencies:
 - transformers
 - contravariant
 - optparse-applicative
+- directory
+- unliftio
+- process
+- time
 
 library:
   source-dirs: src

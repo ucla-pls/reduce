@@ -97,19 +97,19 @@ instance ContravariantM GuardM where
     GuardM $ fn >=> runGuardM pred
 
 -- | Predicates are predicates.
-ifTrueT :: Applicative m => PredicateM m Bool
-ifTrueT = PredicateM $ pure
-{-# inline ifTrueT #-}
+yes :: Applicative m => PredicateM m Bool
+yes = PredicateM $ pure
+{-# inline yes #-}
 
 -- | Get a basic guard
-guardT :: Alternative m => GuardM m Bool
-guardT = GuardM guard
-{-# inline guardT #-}
+guardM :: Alternative m => GuardM m Bool
+guardM = GuardM guard
+{-# inline guardM #-}
 
 -- | Create A GuardM from a Predicate T
 asGuard :: MonadPlus m => PredicateM m a -> GuardM m a
 asGuard pred =
-  contramapM (runPredicateM pred) guardT
+  contramapM (runPredicateM pred) guardM
 {-# inline asGuard #-}
 
 liftUnder ::
