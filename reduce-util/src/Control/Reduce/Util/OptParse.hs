@@ -1,4 +1,6 @@
+{-# LANGUAGE GADTs               #-}
 {-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-|
 Module      : Control.Reduce.Util.OptParse
@@ -15,6 +17,9 @@ module Control.Reduce.Util.OptParse where
 -- optparse-applicative
 import           Options.Applicative
 
+-- filepath
+import           System.FilePath
+
 -- directory
 import           System.Directory
 
@@ -24,7 +29,6 @@ import           Data.Foldable
 import qualified Data.List                  as List
 
 -- bytestring
-import qualified Data.ByteString.Char8      as BS
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BLC
 
@@ -42,9 +46,12 @@ data CmdOptionWithInput
   | StreamOptions !BL.ByteString !(CmdOptions BL.ByteString)
   deriving (Show)
 
-parseCmdOptions :: Parser (InputFormat a -> IO (CmdOptions a))
+data CmdOptionWithoutFormat =
+  CmdOptionWithoutFormat { withFormat :: forall a. InputFormat a -> IO (CmdOptions a)}
+
+parseCmdOptions :: Parser CmdOptionWithoutFormat
 parseCmdOptions =
-  (\t c as fmt -> mkCmdOptions fmt t c as)
+  (\t c as -> CmdOptionWithoutFormat $ \fmt -> mkCmdOptions fmt t c as)
   <$> option auto
   ( long "timelimit"
     <> short 'T'
@@ -65,47 +72,34 @@ parseCmdOptions =
 parseCmdOptionsWithInput :: Parser (IO CmdOptionWithInput)
 parseCmdOptionsWithInput =
   getOptions
-  <$> ( asum
-       [ FromString <$> strOption
-         (long "input" <> short 'i' <> help "the input to reduce.")
-       , FromFile <$> strOption
-         (long "file" <> short 'f' <> help "read input from file or folder.")
-       ])
+  <$> parseInputFrom
   <*> flag False True
   (long "stream" <> short 'S' <> help "stream the input to the process.")
-  <*> option auto
-  ( long "timelimit"
-    <> short 'T'
-    <> metavar "SECS"
-    <> value (-1)
-    <> showDefault
-    <> help (
-        "the maximum number of seconds to run the process,"
-        ++ " negative means no timelimit.")
-  )
-  <*> strArgument
-  ( metavar "CMD" <> help "the command to run"
-  )
-  <*> many
-  ( strArgument (metavar "ARG.." <> help "arguments to the command.")
-  )
+  <*> parseCmdOptions
   where
-    getOptions input useStream tl c args' = do
-      if useStream
-        then do
-        s <- mkCmdOptions (StreamInput) tl c args'
-        case input of
-          FromFile fp -> do
-            rf <- BLC.fromStrict <$> BS.readFile fp
-            return $ StreamOptions rf s
-          FromString str' ->
-            return $ StreamOptions (BLC.pack str') s
-        else do
-        s <- mkCmdOptions (ArgsInput) tl c args'
-        case input of
-          FromFile fp -> do
-            return $ ArgumentOptions fp s
-          FromString str' ->
+    parseInputFrom = asum
+      [ FromString <$> strOption
+        (long "input" <> short 'i' <> help "the input to reduce.")
+      , FromFile <$> strOption
+        (long "file" <> short 'f' <> help "read input from file or folder.")
+      ]
+
+    getOptions :: InputFrom -> Bool -> CmdOptionWithoutFormat -> IO CmdOptionWithInput
+    getOptions input useStream fn =
+      case input of
+        FromFile fp -> do
+          rf <- BL.readFile fp
+          s <- if useStream
+            then withFormat fn StreamInput
+            else withFormat fn $ FileInput (takeFileName fp)
+          return $ StreamOptions rf s
+        FromString str' ->
+          if useStream
+            then do
+              s <- withFormat fn StreamInput
+              return $ StreamOptions (BLC.pack str') s
+            else do
+            s <- withFormat fn ArgsInput
             return $ ArgumentOptions str' s
 
 parseCheckOptions :: Parser CheckOptions

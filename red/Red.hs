@@ -59,7 +59,6 @@ main = do
     <> header "red"
     <> progDesc "A command line tool for reducing almost anything."
     )
-  print config
   runReaderT (run config) $ cnfLogger config
   where
     formats =

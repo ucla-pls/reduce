@@ -87,8 +87,9 @@ import           Data.Functor.Contravariant.PredicateM
 
 -- | InputFormat describe ways to interact with the command.
 data InputFormat a where
-  ArgsInput :: InputFormat String
+  ArgsInput   :: InputFormat String
   StreamInput :: InputFormat BL.ByteString
+  FileInput   :: FilePath -> InputFormat BL.ByteString
 deriving instance Show (InputFormat a)
 
 -- | CmdOptions is a data structure that holds enough information to run a
@@ -121,14 +122,17 @@ toProcessConfig ::
 toProcessConfig CmdOptions {..} =
   case inputFormat of
     ArgsInput -> \a ->
-      mkProc cmd (args ++ [a])
+      mkProc (args ++ [a])
     StreamInput -> \a ->
-      setStdinLog a =<< mkProc cmd args
+      setStdinLog a =<< mkProc args
+    FileInput fn -> \a -> do
+      BL.writeFile fn a
+      mkProc (args ++ [fn])
 
   where
-    mkProc c' a'= do
-      writeFile "cmd" $ showCommandForUser c' a'
-      return $ proc cmd args
+    mkProc args'= do
+      writeFile "cmd" $ showCommandForUser cmd args'
+      return $ proc cmd args'
 
     setStdinLog a p = do
       BLC.writeFile "stdin" $ a
