@@ -1,8 +1,8 @@
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE Rank2Types          #-}
 {-# LANGUAGE RecordWildCards     #-}
-{-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving  #-}
 {-# LANGUAGE ViewPatterns        #-}
@@ -16,7 +16,6 @@ This module provides utils, so that it is easier to write command-line reducers.
 
 * TODO
 
-- Move logging to its own module
 - Improve interface for inputs to the CmdOptions
 - Add support for file-trees (folders)
 - Add support for JSON
@@ -29,34 +28,24 @@ Lists, Trees, Graphs.
 
 -}
 module Control.Reduce.Util
-  ( -- reduce
-    CmdOptions (..)
-    , mkCmdOptions
-    , toProcessConfig
-    , runCmd
+  ( CmdOptions (..)
+  , InputFormat (..)
+  , mkCmdOptions
+  , toProcessConfig
+  , runCmd
 
-    , CmdOptionWithInput (..)
-    , parseCmdOptionsWithInput
+  , CmdOptionWithInput (..)
 
-    , CheckOptions
-    , parseCheckOptions
-    , toPredicateM
+  , CheckOptions (..)
+  , toPredicateM
 
-    , ReducerOptions (..)
-    , parseReducerOptions
-    , reduce
+  , ReducerOptions (..)
+  , ReducerName (..)
+  , reduce
 
-  -- | Re-export Control.Reduce for convenience:
-    , L.SimpleLogger (..)
-    , L.defaultLogger
-    , L.LogLevel (..)
-    , parseSimpleLogger
-
-    , module Control.Reduce
-    ) where
-
--- optparse-applicative
-import           Options.Applicative
+  , exitCodeFromInt
+  , exitCodeToInt
+  ) where
 
 -- typed-process
 import           System.Process.Typed
@@ -65,8 +54,8 @@ import           System.Process.Typed
 import           System.FilePath
 
 -- text
-import qualified Data.Text.Lazy.Encoding as Text
-import qualified Data.Text.Lazy.Builder as Builder
+import qualified Data.Text.Lazy.Builder                as Builder
+import qualified Data.Text.Lazy.Encoding               as Text
 
 -- unliftio
 import           UnliftIO
@@ -82,9 +71,6 @@ import           Control.Monad.Reader
 import           Control.Monad.Trans.Maybe
 
 -- base
-import           Data.Foldable
-import           Data.Char (toLower)
-import qualified Data.List as List
 import           System.Exit
 import           Text.Printf
 
@@ -92,8 +78,8 @@ import           Text.Printf
 import           System.Process                        (showCommandForUser)
 
 -- reduce-util
+import           Control.Reduce.Util.Logger            as L
 import           System.Process.Consume
-import           Control.Logger as L
 
 -- reduce
 import           Control.Reduce
@@ -213,84 +199,12 @@ data CmdOptionWithInput
   | StreamOptions !BL.ByteString !(CmdOptions BL.ByteString)
   deriving (Show)
 
-data InputFrom
-  = FromString String
-  | FromFile FilePath
-  deriving (Show, Eq)
-
-parseCmdOptionsWithInput :: Parser (IO CmdOptionWithInput)
-parseCmdOptionsWithInput =
-  getOptions
-  <$> ( asum
-       [ FromString <$> strOption
-         (long "input" <> short 'i' <> help "the input to code.")
-       , FromFile <$> strOption
-         (long "file" <> short 'f' <> help "read input from file or folder.")
-       ])
-  <*> flag False True
-  (long "stream" <> short 'S' <> help "stream the input to the process.")
-  <*> option auto
-  (long "timelimit"
-   <> short 'T'
-   <> metavar "SECS"
-   <> value (-1)
-   <> showDefault
-   <> help (
-      "the maximum number of seconds to run the process,"
-      ++ " negative means no timelimit."))
-  <*> strArgument
-  (metavar "CMD" <> help "the command to run")
-  <*> many
-  (strArgument (metavar "ARG.." <> help "arguments to the command."))
-  where
-    getOptions input useStream tl c args = do
-      if useStream
-        then do
-        s <- mkCmdOptions (StreamInput) tl c args
-        case input of
-          FromFile fp -> do
-            rf <- BLC.fromStrict <$> BS.readFile fp
-            return $ StreamOptions rf s
-          FromString str' ->
-            return $ StreamOptions (BLC.pack str') s
-        else do
-        s <- mkCmdOptions (ArgsInput) tl c args
-        case input of
-          FromFile fp -> do
-            return $ ArgumentOptions fp s
-          FromString str' ->
-            return $ ArgumentOptions str' s
-
-
-
 data CheckOptions = CheckOptions
   { expectedStatus :: ExitCode
   , preserveStdout :: Bool
   , preserveStderr :: Bool
   } deriving (Show, Eq)
 
-parseCheckOptions :: Parser CheckOptions
-parseCheckOptions =
-  CheckOptions
-      <$> ( exitCodeFromInt
-            <$> option auto
-            ( long "exit-code"
-              <> short 'E'
-              <> help "preserve exit-code"
-              <> value 0
-              <> metavar "CODE"
-              <> showDefault)
-          )
-      <*> switch (long "stdout" <> help "preserve stdout.")
-      <*> switch (long "stderr" <> help "preserve stderr.")
-  where
-    exitCodeFromInt :: Int -> ExitCode
-    exitCodeFromInt 0 = ExitSuccess
-    exitCodeFromInt n = ExitFailure n
-
-exitCodeToInt :: ExitCode -> Int
-exitCodeToInt ExitSuccess     = 0
-exitCodeToInt (ExitFailure n) = n
 
 -- | Creates a predicate from the CheckOptions and CmdOptions.
 toPredicateM ::
@@ -339,49 +253,6 @@ data ReducerName
   | Binary
   deriving (Show)
 
-reducerNameFromString :: String -> Maybe ReducerName
-reducerNameFromString = \case
-  "ddmin" -> Just Ddmin
-  "linear" -> Just Linear
-  "binary" -> Just Binary
-  _ -> Nothing
-
-parseReducerOptions :: Parser (IO ReducerOptions)
-parseReducerOptions =
-  mkReduceOptions
-  <$> (
-  option (maybeReader (reducerNameFromString . map toLower))
-    ( long "reducer"
-      <> short 'R'
-      <> help "the reducing algorithm to use."
-      <> value Binary
-      <> showDefault
-    )
-  )
-
-  <*> (
-  Just <$> strOption
-    ( long "work-folder"
-      <> short 'W'
-      <> help "the work folder."
-      <> showDefault
-    )
-    <|> pure Nothing
-  )
-
-  <*> switch
-  ( long "keep-folders"
-    <> short 'K'
-    <> help "keep the work folders after use?"
-  )
-  where
-    mkReduceOptions red (mfolder :: Maybe FilePath) n = do
-      case mfolder of
-        Just folder -> do
-          createDirectory folder
-          return $ ReducerOptions red folder n
-        Nothing ->
-          error "please set the work folder for now."
 
 -- | Reduce using the reducer options.
 reduce ::
@@ -421,32 +292,12 @@ reduce ReducerOptions {..} name p ls = do
           binaryReduction p' ls
 
 
-parseSimpleLogger :: Parser (SimpleLogger)
-parseSimpleLogger =
-  mklogger
-  <$> ( parseLogLevel
-        <$> (length <$> many (flag' () (short 'v' <> help "make it more verbose.")))
-        <*> (length <$> many (flag' () (short 'q' <> help "make it more quiet.")))
-      )
-  <*> option auto
-  ( short 'D'
-    <> long "log-depth"
-    <> help "set the log depth."
-    <> value (-1)
-    <> showDefault
-  )
-  where
-    mklogger logLevel depth =
-      defaultLogger { logLevel = logLevel, maxDepth = depth }
+exitCodeFromInt :: Int -> ExitCode
+exitCodeFromInt = \case
+  0 -> ExitSuccess
+  n -> ExitFailure n
 
-    parseLogLevel lvl quiet =
-      boundedToEnum (1 - lvl + quiet)
-
-
-boundedToEnum :: (Bounded a, Enum a) => Int -> a
-boundedToEnum i =
-  maybe maxBound id
-  . fmap fst
-  . List.uncons
-  . drop i
-  $ enumFrom minBound
+exitCodeToInt :: ExitCode -> Int
+exitCodeToInt = \case
+  ExitSuccess -> 0
+  ExitFailure n -> n

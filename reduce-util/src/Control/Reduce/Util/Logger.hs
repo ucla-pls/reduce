@@ -2,7 +2,7 @@
 {-# LANGUAGE Rank2Types        #-}
 {-# LANGUAGE RecordWildCards   #-}
 {-|
-Module      : Control.Logger
+Module      : Control.Reduce.Util.Logger
 Copyright   : (c) Christian Gram Kalhauge, 2018
 License     : MIT
 Maintainer  : kalhauge@cs.ucla.edu
@@ -10,7 +10,7 @@ Maintainer  : kalhauge@cs.ucla.edu
 This module contains a logger implementation.
 -}
 
-module Control.Logger where
+module Control.Reduce.Util.Logger where
 
 -- text
 import qualified Data.Text.Lazy             as Text

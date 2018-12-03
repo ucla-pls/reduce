@@ -10,10 +10,12 @@ import Control.Monad.Reader
 import qualified Data.ByteString.Lazy.Char8 as BLC
 
 -- optparse-applicative
-import Options.Applicative
+import Options.Applicative as A
 
 -- reduce-util
 import Control.Reduce.Util
+import Control.Reduce.Util.Logger as L
+import Control.Reduce.Util.OptParse
 
 -- contravariant
 import Data.Functor.Contravariant
@@ -53,7 +55,7 @@ main :: IO ()
 main = do
   let configParser = getConfigParser formats
   config <- join . execParser $
-    info (configParser <**> helper)
+    A.info (configParser <**> helper)
     ( fullDesc
     <> header "red"
     <> progDesc "A command line tool for reducing almost anything."
