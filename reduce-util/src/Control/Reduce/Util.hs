@@ -50,6 +50,7 @@ module Control.Reduce.Util
     , L.SimpleLogger (..)
     , L.defaultLogger
     , L.LogLevel (..)
+    , parseSimpleLogger
 
   -- , mkCmdOptionsPredicate
   -- , parseCmdOptions
@@ -106,6 +107,7 @@ import           Data.Functor
 import           Data.Functor.Identity
 import           Data.Int
 import           Data.Word
+import qualified Data.List as List
 import           System.Exit
 import           System.IO.Error
 import           Text.Printf
@@ -225,7 +227,7 @@ runCmd options a = do
 
 
     showHash :: BS.ByteString -> String
-    showHash = concatMap (printf "%02x") . BS.unpack
+    showHash = take 8 . concatMap (printf "%02x") . BS.unpack
 
     runCommandInTimelimit =
       (if timelimit options > 0 then timeout (ceiling $ timelimit options * 1e6) else fmap Just)
@@ -255,8 +257,8 @@ parseCmdOptionsWithInput =
   <*> option auto
   (long "timelimit"
    <> short 'T'
-   <> metavar "seconds"
-   <> value 60.0
+   <> metavar "SECS"
+   <> value (-1)
    <> showDefault
    <> help (
       "the maximum number of seconds to run the process,"
@@ -327,20 +329,26 @@ toPredicateM CheckOptions {..} cmd workFolder a = do
   phase "Initial run" $ do
     let initial = workFolder </> "initial"
     liftIO $ createDirectoryIfMissing True initial
-    (withCurrentDirectory initial $ runCmd cmd a) >>= \case
+    withCurrentDirectory initial (runCmd cmd a) >>= \case
       Just (ec, oh, eh)
         | ec /= expectedStatus ->
           return $ Nothing
         | otherwise ->
           return . Just $
-            runCmd cmd `contramapM`
-            ( testp oh eh `contramap`
-              ((\x -> (L.info $ if x then "success" else "failure") >> return x)
-                `contramapM` yes ))
+            (runCmd cmd >=> testM oh eh) `contramapM` yes
       Nothing ->
         return $ Nothing
   where
-    testp oh eh  = \case
+    testM oh eh x = do
+      let p = testp oh eh x
+      printSuccess p
+      return p
+
+    printSuccess x = do
+      L.info $ if x then "success" else "failure"
+      return x
+
+    testp oh eh = \case
       Just (ec', oh', eh') ->
         ec' == expectedStatus
         && (not preserveStdout || oh' == oh)
@@ -439,3 +447,34 @@ reduce ReducerOptions {..} name pred ls = do
           runMaybeT (unsafeLinearReduction (asMaybeGuard pred) ls)
         Binary ->
           binaryReduction pred ls
+
+
+parseSimpleLogger :: Parser (SimpleLogger)
+parseSimpleLogger =
+  mklogger
+  <$> ( parseLogLevel
+        <$> (length <$> many (flag' () (short 'v' <> help "make it more verbose.")))
+        <*> (length <$> many (flag' () (short 'q' <> help "make it more quiet.")))
+      )
+  <*> option auto
+  ( short 'D'
+    <> long "log-depth"
+    <> help "set the log depth."
+    <> value (-1)
+    <> showDefault
+  )
+  where
+    mklogger logLevel depth =
+      defaultLogger { logLevel = logLevel, maxDepth = depth }
+
+    parseLogLevel lvl quiet =
+      boundedToEnum (1 - lvl + quiet)
+
+
+boundedToEnum :: (Bounded a, Enum a) => Int -> a
+boundedToEnum i =
+  maybe maxBound id
+  . fmap fst
+  . List.uncons
+  . drop i
+  $ enumFrom minBound

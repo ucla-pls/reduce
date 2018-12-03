@@ -41,7 +41,7 @@ data LogLevel
   | INFO
   | WARN
   | ERROR
-  deriving (Show, Eq, Ord, Enum)
+  deriving (Show, Eq, Ord, Enum, Bounded)
 
 -- | Has logger is a class, It allows two functions: `phase` and `log`.
 -- `log` logs information, and `phase` logs a phase of information.
@@ -88,23 +88,28 @@ simpleLogMessage ::
 simpleLogMessage SimpleLogger {..} lvl bldr = do
   t <- liftIO $ getZonedTime
   return $
-    displayf "[%5s]" lvl
-    <-> Builder.fromString
-      (formatTime defaultTimeLocale (iso8601DateFormat (Just "%H:%M:%S")) t)
-    <-> indentation currentDepth (straight indent)
-    <> bldr
+    case logLevel of
+      DEBUG ->
+        displayf "[%5s]" lvl
+        <-> Builder.fromString
+          (formatTime defaultTimeLocale (iso8601DateFormat (Just "%H:%M:%S")) t)
+      INFO ->
+          Builder.fromString ((formatTime defaultTimeLocale "%H:%M:%S") t)
+      _ ->
+          mempty
+    <-> indentation currentDepth (straight indent) <> bldr
 
 instance HasLogger SimpleLogger where
   log curLvl bldr = do
     sl@SimpleLogger {..} <- ask
-    when (curLvl >= logLevel && currentDepth <= maxDepth ) $ do
+    when (curLvl >= logLevel && (currentDepth <= maxDepth || maxDepth < 0)) $ do
        sPutStrLn sl $ simpleLogMessage sl (show curLvl)
          (Builder.fromLazyText (new indent) <> bldr)
 
   timedPhase' bldr ma = do
     sl@SimpleLogger {..} <- ask
     let runMa = local (\sl -> sl { currentDepth = currentDepth + 1 } ) ma
-    case currentDepth `compare` maxDepth of
+    case currentDepth `compare` (if maxDepth < 0 then currentDepth + 1 else maxDepth) of
       LT -> do
         sPutStrLn sl $ simpleLogMessage sl "START"
            (Builder.fromLazyText (new indent) <> bldr)
@@ -115,7 +120,8 @@ instance HasLogger SimpleLogger where
             <> displayf "%.3fs" t )
         return (t, a)
       EQ -> do
-        sPutStr sl $ simpleLogMessage sl "PHASE" bldr
+        sPutStr sl . simpleLogMessage sl "PHASE" $
+           Builder.fromLazyText (new indent) <> bldr
         (t, a) <- runMa
         sPutStrLn sl . return $ displayf " (%.3fs)" t
         return (t, a)
@@ -160,78 +166,6 @@ err ::
   -> m ()
 err = log ERROR
 
-
-  -- log_ :: env -> Builder.Builder -> IO ()
-  -- direct :: env -> Builder.Builder -> IO ()
-  -- logLevelL :: Functor f => (Int -> f Int) -> (env -> f env)
-  -- maxLogLevelL :: Functor f => (Int -> f Int) -> (env -> f env)
-
-
--- data SimpleLogger = SimpleLogger !Int !Int
-
--- mkSimpleLogger = SimpleLogger 0
-
--- instance HasLogger SimpleLogger where
---   log_ env@(SimpleLogger i mx) bldr =
---     direct env $ Builder.fromLazyText (Text.replicate (fromIntegral i) "│ ") <> bldr
---   direct (SimpleLogger i mx) bldr
---     | i <= mx =
---       Text.hPutStr stderr . Builder.toLazyText $ bldr
---     | otherwise =
---       return ()
---   logLevelL fn (SimpleLogger i mx) = (\j -> SimpleLogger j mx) <$> fn i
---   maxLogLevelL fn (SimpleLogger i mx) = (\mx' -> SimpleLogger i mx') <$> fn mx
-
--- lg ::
---   (HasLogger env, MonadReader env m, MonadIO m)
---   => Builder.Builder
---   -> m ()
--- lg bldr = do
---   fn <- asks log_
---   liftIO $ fn (bldr <> Builder.singleton '\n')
-
--- lgc ::
---   (HasLogger env, MonadReader env m, MonadIO m)
---   => Builder.Builder
---   -> m (Builder.Builder -> m ())
--- lgc bldr = do
---   env <- ask
---   liftIO $ log_ env bldr
---   return (liftIO . direct env . (<> "\n"))
-
--- withIncreasedLevel ::
---   (HasLogger env, MonadReader env m, MonadIO m)
---   => m a
---   -> m a
--- withIncreasedLevel =
---   local (update logLevelL succ)
-
--- timePhase ::
---   (HasLogger env, MonadReader env m, MonadIO m)
---   => Builder.Builder
---   -> m a
---   -> m (Double, a)
--- timePhase bldr m = do
---   mx <- view maxLogLevelL
---   lvl <- view logLevelL
---   if lvl == mx
---     then do
---       after <- lgc bldr
---       (t, x) <- timeProcess $ withIncreasedLevel m
---       after $ displayf " [%.3fs]" t
---       return (t, x)
---     else do
---       lg $ bldr
---       (t, x) <- timeProcess $ withIncreasedLevel m
---       lg $ "└" <-> displayf "[%.3fs]" t
---       return (t, x)
-
--- phase ::
---   (HasLogger env, MonadReader env m, MonadIO m)
---   => Builder.Builder
---   -> m a
---   -> m a
--- phase bldr m = snd <$> timePhase bldr m
 
 -- * Builder helpers
 
