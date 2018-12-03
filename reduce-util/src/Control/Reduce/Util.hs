@@ -47,8 +47,9 @@ module Control.Reduce.Util
     , parseReducerOptions
     , reduce
 
-    , SimpleLogger (..)
-    , mkSimpleLogger
+    , L.SimpleLogger (..)
+    , L.defaultLogger
+    , L.LogLevel (..)
 
   -- , mkCmdOptionsPredicate
   -- , parseCmdOptions
@@ -78,9 +79,6 @@ import qualified Data.Text.Lazy.Builder as Builder
 -- unliftio
 import           UnliftIO
 import           UnliftIO.Directory
-
--- time
-import           Data.Time.Clock (getCurrentTime, diffUTCTime)
 
 -- bytestring
 import qualified Data.ByteString.Char8                 as BS
@@ -120,6 +118,7 @@ import           Data.Functor.Contravariant
 
 -- reduce-util
 import           System.Process.Consume
+import           Control.Logger as L
 
 -- reduce
 import           Control.Reduce
@@ -183,9 +182,9 @@ runCmd ::
   -> a
   -> m (Maybe (ExitCode, Sha256, Sha256))
 runCmd options a = do
-  (tp, p) <- timePhase "setup" . liftIO $
+  (tp, p) <- timedPhase "setup" . liftIO $
     toProcessConfig options a
-  (tm, m) <- timePhase "run" $ do
+  (tm, m) <- timedPhase "run" $ do
     olog <- getLogger "+"
     elog <- getLogger "-"
     liftIO . withFile "stdout" WriteMode $
@@ -201,12 +200,12 @@ runCmd options a = do
     Just (ec, (_, ho@(showHash-> hos, olen)), (_, he@(showHash -> hes, elen))) -> do
       liftIO $ appendFile "process.csv" $
         printf "%.3f,%.3f,%d,%s,%d,%s,%d\n" tp tm (exitCodeToInt ec) hos olen hes elen
-      lg $ "exitcode:" <-> displayf "%3d" (exitCodeToInt ec)
-      lg $ "stdout" <-> displayf "(bytes: %05d):" olen <-> Builder.fromString hos
-      lg $ "stderr" <-> displayf "(bytes: %05d):" elen <-> Builder.fromString hes
+      L.info $ "exitcode:" <-> displayf "%3d" (exitCodeToInt ec)
+      L.info $ "stdout" <-> displayf "(bytes: %05d):" olen <-> Builder.fromString hos
+      L.info $ "stderr" <-> displayf "(bytes: %05d):" elen <-> Builder.fromString hes
       return $ Just (ec, ho, he)
     Nothing -> do
-      lg $ "timeout"
+      L.warn $ "timeout"
       liftIO $appendFile "process.csv" $ "N/A,N/A,N/A,N/A\n"
       return Nothing
 
@@ -216,11 +215,13 @@ runCmd options a = do
       => Builder.Builder -> m (Logger BS.ByteString)
     getLogger name = do
       env <- ask
-      liftIO . perLine . logger . maybe (return ())
-        $ log_ env . (\n -> name <-> n <> "\n")
-        . Builder.fromLazyText
-        . Text.decodeUtf8
-        . BLC.fromStrict
+      liftIO . perLine . logger $ maybe (return ()) (x env)
+      where
+        x env bs =
+          runReaderT (L.log L.DEBUG (name <-> bsToBuilder bs)) env
+
+        bsToBuilder =
+          Builder.fromLazyText . Text.decodeUtf8 . BLC.fromStrict
 
 
     showHash :: BS.ByteString -> String
@@ -229,12 +230,6 @@ runCmd options a = do
     runCommandInTimelimit =
       (if timelimit options > 0 then timeout (ceiling $ timelimit options * 1e6) else fmap Just)
 
-timeProcess :: MonadIO m => m a -> m (Double, a)
-timeProcess m = do
-  start <- liftIO getCurrentTime
-  a <- m
-  end <- liftIO getCurrentTime
-  return (realToFrac $ diffUTCTime end start, a)
 
 data CmdOptionWithInput
   = ArgumentOptions !String !(CmdOptions String)
@@ -263,7 +258,9 @@ parseCmdOptionsWithInput =
    <> metavar "seconds"
    <> value 60.0
    <> showDefault
-   <> help "the maximum number of seconds to run the process, negative means no timelimit.")
+   <> help (
+      "the maximum number of seconds to run the process,"
+      ++ " negative means no timelimit."))
   <*> strArgument
   (metavar "CMD" <> help "the command to run")
   <*> many
@@ -338,7 +335,7 @@ toPredicateM CheckOptions {..} cmd workFolder a = do
           return . Just $
             runCmd cmd `contramapM`
             ( testp oh eh `contramap`
-              ((\x -> (if x then lg "success" else lg "failure") >> return x)
+              ((\x -> (L.info $ if x then "success" else "failure") >> return x)
                 `contramapM` yes ))
       Nothing ->
         return $ Nothing
@@ -442,95 +439,3 @@ reduce ReducerOptions {..} name pred ls = do
           runMaybeT (unsafeLinearReduction (asMaybeGuard pred) ls)
         Binary ->
           binaryReduction pred ls
-
-
-class HasLogger env where
-  log_ :: env -> Builder.Builder -> IO ()
-  direct :: env -> Builder.Builder -> IO ()
-  logLevelL :: Functor f => (Int -> f Int) -> (env -> f env)
-  maxLogLevelL :: Functor f => (Int -> f Int) -> (env -> f env)
-
-
-data SimpleLogger = SimpleLogger !Int !Int
-
-mkSimpleLogger = SimpleLogger 0
-
-instance HasLogger SimpleLogger where
-  log_ env@(SimpleLogger i mx) bldr =
-    direct env $ Builder.fromLazyText (Text.replicate (fromIntegral i) "│ ") <> bldr
-  direct (SimpleLogger i mx) bldr
-    | i <= mx =
-      Text.hPutStr stderr . Builder.toLazyText $ bldr
-    | otherwise =
-      return ()
-  logLevelL fn (SimpleLogger i mx) = (\j -> SimpleLogger j mx) <$> fn i
-  maxLogLevelL fn (SimpleLogger i mx) = (\mx' -> SimpleLogger i mx') <$> fn mx
-
-lg ::
-  (HasLogger env, MonadReader env m, MonadIO m)
-  => Builder.Builder
-  -> m ()
-lg bldr = do
-  fn <- asks log_
-  liftIO $ fn (bldr <> Builder.singleton '\n')
-
-lgc ::
-  (HasLogger env, MonadReader env m, MonadIO m)
-  => Builder.Builder
-  -> m (Builder.Builder -> m ())
-lgc bldr = do
-  env <- ask
-  liftIO $ log_ env bldr
-  return (liftIO . direct env . (<> "\n"))
-
-withIncreasedLevel ::
-  (HasLogger env, MonadReader env m, MonadIO m)
-  => m a
-  -> m a
-withIncreasedLevel =
-  local (update logLevelL succ)
-
-timePhase ::
-  (HasLogger env, MonadReader env m, MonadIO m)
-  => Builder.Builder
-  -> m a
-  -> m (Double, a)
-timePhase bldr m = do
-  mx <- view maxLogLevelL
-  lvl <- view logLevelL
-  if lvl == mx
-    then do
-      after <- lgc bldr
-      (t, x) <- timeProcess $ withIncreasedLevel m
-      after $ displayf " [%.3fs]" t
-      return (t, x)
-    else do
-      lg $ bldr
-      (t, x) <- timeProcess $ withIncreasedLevel m
-      lg $ "└" <-> displayf "[%.3fs]" t
-      return (t, x)
-
-phase ::
-  (HasLogger env, MonadReader env m, MonadIO m)
-  => Builder.Builder
-  -> m a
-  -> m a
-phase bldr m = snd <$> timePhase bldr m
-
-(<->) :: Builder.Builder -> Builder.Builder -> Builder.Builder
-(<->) a b = a <> " " <> b
-
-display :: Show a => a -> Builder.Builder
-display = Builder.fromString . show
-
-displayf :: PrintfArg a => String -> a -> Builder.Builder
-displayf fmt = Builder.fromString . printf fmt
-
--- Lens boilerplate
-type Lens s t a b = forall f. Functor f => (a -> f b) -> (s -> f t)
-
-view :: MonadReader s m => Lens s s a a -> m a
-view lens = getConst . lens Const <$> ask
-
-update :: Lens s t a b -> (a -> b) -> (s -> t)
-update lens f = runIdentity . lens (Identity . f)

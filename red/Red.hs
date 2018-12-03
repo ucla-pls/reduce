@@ -72,7 +72,8 @@ main = do
     <> header "red"
     <> progDesc "A command line tool for reducing almost anything."
     )
-  runReaderT (run config) (mkSimpleLogger (verbosity config))
+  runReaderT (run config) $
+    defaultLogger { maxDepth = verbosity config, logLevel = DEBUG }
   where
     formats =
       [ Format 'c' "see the input as a list of chars"
