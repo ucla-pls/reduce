@@ -1,3 +1,5 @@
+{-# LANGUAGE RankNTypes #-}
+
 import Test.Tasty
 import Test.Tasty.HUnit
 import Test.Hspec.Expectations.Pretty
@@ -9,7 +11,7 @@ import Control.Monad.Identity
 import Control.Monad.Trans.State
 import Control.Monad.IO.Class
 
-import Data.Functor.Contravariant.PredicateT
+import Data.Functor.Contravariant.PredicateM
 import Data.Functor.Contravariant
 
 import Control.Reduce
@@ -43,23 +45,23 @@ tests =
 baseTests :: (forall m. Monad m => Reducer m [Int]) -> Spec
 baseTests red = do
   it "returns Nothing, if the predicate is false for all inputs" $ do
-    x <- red (False >$ ifTrueT) [0..10]
+    x <- red (False >$ yes) [0..10]
     x `shouldBe` Nothing
   it "returns Just [], if the predicate is true for the empty list" $ do
-    x <- red (True >$ ifTrueT) [0..10]
+    x <- red (True >$ yes) [0..10]
     x `shouldBe` Just []
   it "can find a single element" $ do
-    x <- red (L.elem 5 >$< ifTrueT) [0..10]
+    x <- red (L.elem 5 >$< yes) [0..10]
     x `shouldBe` Just [5]
   it "can find two elements" $ do
-    x <- red (L.isSubsequenceOf [3, 5] >$< ifTrueT) [0..10]
+    x <- red (L.isSubsequenceOf [3, 5] >$< yes) [0..10]
     x `shouldBe` Just [3, 5]
   it "can find three elements" $ do
-    x <- red (L.isSubsequenceOf [3, 5, 9] >$< ifTrueT) [0..10]
+    x <- red (L.isSubsequenceOf [3, 5, 9] >$< yes) [0..10]
     x `shouldBe` Just [3, 5, 9]
   it "can find a minimum " $ do
     let minima = [[3, 5, 9], [5,8,9], [1,2]]
-    Just x <- red ((\i -> any (flip L.isSubsequenceOf i) minima) >$< ifTrueT) [0..10]
+    Just x <- red ((\i -> any (flip L.isSubsequenceOf i) minima) >$< yes) [0..10]
     x `shouldSatisfy` (flip L.elem) minima
 
 setsTests :: (forall m. Monad m => ISetReducer m) -> Spec
@@ -108,12 +110,12 @@ setsTests red = do
           ,IS.fromList [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,20,22,23,24,25,27,28,29,39,40,41,42,43,44,65,86,87,88,89,90,91,92,93,94,95,97,98,102,103,104,105,106,107,108]
           ,IS.fromList [2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,20,22,23,24,25,27,28,29,39,40,41,42,43,44,63,65,86,87,88,89,90,91,92,93,94,95,97,98,102,103,104,105,106,107,108]
           ]
-    x <- red (IS.isSubsetOf big >$< ifTrueT) space
+    x <- red (IS.isSubsetOf big >$< yes) space
     x `shouldBe` Just [big]
 
 reductionsTests :: Spec
 reductionsTests = do
-  let mp m = PredicateT $ \i -> return (any (`L.isSubsequenceOf` i) m)
+  let mp m = PredicateM $ \i -> return (any (`L.isSubsequenceOf` i) m)
   it "can find all mimima" $ do
     let minima = [[3, 5, 9], [5,8,9], [1,2]]
     x <- binaryReductions (mp minima) [0..10]
@@ -121,13 +123,13 @@ reductionsTests = do
 
 specBinarySearch :: Spec
 specBinarySearch = do
-  let binarySearch' = binarySearch . GuardT
+  let binarySearch' = binarySearch . GuardM
 
   it "can find 5 in the range [0, 10]" $ do
     i <- binarySearch' (\i -> guard (i >= 5)) 0 10
     i `shouldBe` 5
   it "can't find 11 in the range [0, 10]" $ do
-    i <- runMaybeT $ binarySearch (GuardT (\i -> guard (i >= 11))) 0 10
+    i <- runMaybeT $ binarySearch (GuardM (\i -> guard (i >= 11))) 0 10
     i `shouldBe` Nothing
   it "returns the smallest element if all is true" $ do
     i <- binarySearch' (\_ -> guard True) 0 10

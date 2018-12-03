@@ -1,38 +1,37 @@
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
--- The red application
+{-# LANGUAGE RecordWildCards   #-}
 
 -- mtl
-import Control.Monad.Reader
+import           Control.Monad.Reader
 
 -- bytestring
-import qualified Data.ByteString.Lazy.Char8 as BLC
+import qualified Data.ByteString.Lazy.Char8   as BLC
 
 -- optparse-applicative
-import Options.Applicative as A
+import           Options.Applicative          as A
 
 -- reduce-util
-import Control.Reduce.Util
-import Control.Reduce.Util.Logger as L
-import Control.Reduce.Util.OptParse
+import           Control.Reduce.Util
+import           Control.Reduce.Util.Logger   as L
+import           Control.Reduce.Util.OptParse
 
 -- contravariant
-import Data.Functor.Contravariant
+import           Data.Functor.Contravariant
 
 -- base
-import Data.Foldable
+import           Data.Foldable
 
 data Format = Format
-  { formatFlag :: !Char
+  { formatFlag        :: !Char
   , formatDescription :: !String
   } deriving (Show, Eq)
 
 data Config = Config
-  { format :: !Format
-  , cnfLogger :: !SimpleLogger
-  , checkOptions :: !CheckOptions
-  , reducerOptions :: !ReducerOptions
+  { format              :: !Format
+  , cnfLogger           :: !SimpleLogger
+  , checkOptions        :: !CheckOptions
+  , reducerOptions      :: !ReducerOptions
   , cmdOptionsWithInput :: !CmdOptionWithInput
   } deriving (Show)
 

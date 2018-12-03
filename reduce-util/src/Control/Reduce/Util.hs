@@ -34,8 +34,6 @@ module Control.Reduce.Util
   , toProcessConfig
   , runCmd
 
-  , CmdOptionWithInput (..)
-
   , CheckOptions (..)
   , toPredicateM
 
@@ -194,10 +192,6 @@ runCmd options a = do
       (if timelimit options > 0 then timeout (ceiling $ timelimit options * 1e6) else fmap Just)
 
 
-data CmdOptionWithInput
-  = ArgumentOptions !String !(CmdOptions String)
-  | StreamOptions !BL.ByteString !(CmdOptions BL.ByteString)
-  deriving (Show)
 
 data CheckOptions = CheckOptions
   { expectedStatus :: ExitCode

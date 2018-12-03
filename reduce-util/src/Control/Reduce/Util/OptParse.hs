@@ -16,15 +16,16 @@ module Control.Reduce.Util.OptParse where
 import           Options.Applicative
 
 -- directory
-import System.Directory
+import           System.Directory
 
 -- base
+import           Data.Char                  (toLower)
 import           Data.Foldable
-import           Data.Char (toLower)
 import qualified Data.List                  as List
 
 -- bytestring
 import qualified Data.ByteString.Char8      as BS
+import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BLC
 
 -- reduce-util
@@ -36,30 +37,58 @@ data InputFrom
   | FromFile FilePath
   deriving (Show, Eq)
 
+data CmdOptionWithInput
+  = ArgumentOptions !String !(CmdOptions String)
+  | StreamOptions !BL.ByteString !(CmdOptions BL.ByteString)
+  deriving (Show)
+
+parseCmdOptions :: Parser (InputFormat a -> IO (CmdOptions a))
+parseCmdOptions =
+  (\t c as fmt -> mkCmdOptions fmt t c as)
+  <$> option auto
+  ( long "timelimit"
+    <> short 'T'
+    <> metavar "SECS"
+    <> value (-1)
+    <> showDefault
+    <> help (
+        "the maximum number of seconds to run the process,"
+        ++ " negative means no timelimit.")
+  )
+  <*> strArgument
+  ( metavar "CMD" <> help "the command to run"
+  )
+  <*> many
+  ( strArgument (metavar "ARG.." <> help "arguments to the command.")
+  )
+
 parseCmdOptionsWithInput :: Parser (IO CmdOptionWithInput)
 parseCmdOptionsWithInput =
   getOptions
   <$> ( asum
        [ FromString <$> strOption
-         (long "input" <> short 'i' <> help "the input to code.")
+         (long "input" <> short 'i' <> help "the input to reduce.")
        , FromFile <$> strOption
          (long "file" <> short 'f' <> help "read input from file or folder.")
        ])
   <*> flag False True
   (long "stream" <> short 'S' <> help "stream the input to the process.")
   <*> option auto
-  (long "timelimit"
-   <> short 'T'
-   <> metavar "SECS"
-   <> value (-1)
-   <> showDefault
-   <> help (
-      "the maximum number of seconds to run the process,"
-      ++ " negative means no timelimit."))
+  ( long "timelimit"
+    <> short 'T'
+    <> metavar "SECS"
+    <> value (-1)
+    <> showDefault
+    <> help (
+        "the maximum number of seconds to run the process,"
+        ++ " negative means no timelimit.")
+  )
   <*> strArgument
-  (metavar "CMD" <> help "the command to run")
+  ( metavar "CMD" <> help "the command to run"
+  )
   <*> many
-  (strArgument (metavar "ARG.." <> help "arguments to the command."))
+  ( strArgument (metavar "ARG.." <> help "arguments to the command.")
+  )
   where
     getOptions input useStream tl c args' = do
       if useStream

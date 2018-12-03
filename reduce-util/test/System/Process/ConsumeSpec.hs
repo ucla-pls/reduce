@@ -13,7 +13,7 @@ import Control.Monad
 
 import System.Process.Consume
 
-foldTest :: Consumer m -> [ByteString] -> IO m
+foldTest :: Consumer ByteString m -> [ByteString] -> IO m
 foldTest =
   uncurry foldM
 
@@ -23,13 +23,13 @@ spec = do
     it "should log lines" $ do
       logger <- perLine $ pureConsumer (flip (:)) []
       x <- foldTest logger ["Hello\nThis\nIs\nA\nString\n", ""]
-      reverse x `shouldBe` ["Hello", "This", "Is", "A", "String",""]
+      reverse x `shouldBe` fmap Just ["Hello", "This", "Is", "A", "String"] ++ [Nothing]
 
     it "can be interupted" $ do
       logger <- perLine $ pureConsumer (flip (:)) []
       x <- foldTest logger
         [ "Hel", "lo", "\n", "This\nIs\n", "A\nString\n", "" ]
-      reverse x `shouldBe` ["Hello", "This", "Is", "A", "String",""]
+      reverse x `shouldBe` fmap Just ["Hello", "This", "Is", "A", "String"] ++ [Nothing]
 
   describe "consume" $ do
     it "can run echo" $ do
