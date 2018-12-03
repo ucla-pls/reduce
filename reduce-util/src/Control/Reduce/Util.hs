@@ -30,7 +30,6 @@ Lists, Trees, Graphs.
 -}
 module Control.Reduce.Util
   ( -- reduce
-
     CmdOptions (..)
     , mkCmdOptions
     , toProcessConfig
@@ -47,20 +46,14 @@ module Control.Reduce.Util
     , parseReducerOptions
     , reduce
 
+  -- | Re-export Control.Reduce for convenience:
     , L.SimpleLogger (..)
     , L.defaultLogger
     , L.LogLevel (..)
     , parseSimpleLogger
 
-  -- , mkCmdOptionsPredicate
-  -- , parseCmdOptions
-
-  -- , Check (..)
-
-  -- , consume
-  -- | Re-export Control.Reduce for convenience:
-  , module Control.Reduce
-  ) where
+    , module Control.Reduce
+    ) where
 
 -- optparse-applicative
 import           Options.Applicative
@@ -72,9 +65,7 @@ import           System.Process.Typed
 import           System.FilePath
 
 -- text
-import qualified Data.Text.Lazy as Text
 import qualified Data.Text.Lazy.Encoding as Text
-import qualified Data.Text.Lazy.IO as Text
 import qualified Data.Text.Lazy.Builder as Builder
 
 -- unliftio
@@ -86,37 +77,19 @@ import qualified Data.ByteString.Char8                 as BS
 import qualified Data.ByteString.Lazy                  as BL
 import qualified Data.ByteString.Lazy.Char8            as BLC
 
--- cryptohash-sha256
-import qualified Crypto.Hash.SHA256                    as SHA256
-
--- stm
-import           Control.Concurrent.STM
-
 -- mtl
 import           Control.Monad.Reader
-import           Control.Monad.Reader.Class
 import           Control.Monad.Trans.Maybe
 
 -- base
-import           Control.Applicative
-import           Control.Exception
-import           Control.Monad
-import           Control.Monad.IO.Class
 import           Data.Foldable
-import           Data.Functor
-import           Data.Functor.Identity
-import           Data.Int
-import           Data.Word
+import           Data.Char (toLower)
 import qualified Data.List as List
 import           System.Exit
-import           System.IO.Error
 import           Text.Printf
 
 -- process
 import           System.Process                        (showCommandForUser)
-
--- contravariant
-import           Data.Functor.Contravariant
 
 -- reduce-util
 import           System.Process.Consume
@@ -169,8 +142,8 @@ toProcessConfig CmdOptions {..} =
       setStdinLog a =<< mkProc cmd args
 
   where
-    mkProc cmd args = do
-      writeFile "cmd" $ showCommandForUser cmd args
+    mkProc c' a'= do
+      writeFile "cmd" $ showCommandForUser c' a'
       return $ proc cmd args
 
     setStdinLog a p = do
@@ -203,8 +176,10 @@ runCmd options a = do
       liftIO $ appendFile "process.csv" $
         printf "%.3f,%.3f,%d,%s,%d,%s,%d\n" tp tm (exitCodeToInt ec) hos olen hes elen
       L.info $ "exitcode:" <-> displayf "%3d" (exitCodeToInt ec)
-      L.info $ "stdout" <-> displayf "(bytes: %05d):" olen <-> Builder.fromString hos
-      L.info $ "stderr" <-> displayf "(bytes: %05d):" elen <-> Builder.fromString hes
+      L.info $ "stdout" <-> displayf "(bytes: %05d):" olen
+        <-> Builder.fromString (take 8 hos )
+      L.info $ "stderr" <-> displayf "(bytes: %05d):" elen
+        <-> Builder.fromString (take 8 hes)
       return $ Just (ec, ho, he)
     Nothing -> do
       L.warn $ "timeout"
@@ -227,7 +202,7 @@ runCmd options a = do
 
 
     showHash :: BS.ByteString -> String
-    showHash = take 8 . concatMap (printf "%02x") . BS.unpack
+    showHash = concatMap (printf "%02x") . BS.unpack
 
     runCommandInTimelimit =
       (if timelimit options > 0 then timeout (ceiling $ timelimit options * 1e6) else fmap Just)
@@ -276,15 +251,15 @@ parseCmdOptionsWithInput =
           FromFile fp -> do
             rf <- BLC.fromStrict <$> BS.readFile fp
             return $ StreamOptions rf s
-          FromString str ->
-            return $ StreamOptions (BLC.pack str) s
+          FromString str' ->
+            return $ StreamOptions (BLC.pack str') s
         else do
         s <- mkCmdOptions (ArgsInput) tl c args
         case input of
           FromFile fp -> do
             return $ ArgumentOptions fp s
-          FromString str ->
-            return $ ArgumentOptions str s
+          FromString str' ->
+            return $ ArgumentOptions str' s
 
 
 
@@ -341,12 +316,8 @@ toPredicateM CheckOptions {..} cmd workFolder a = do
   where
     testM oh eh x = do
       let p = testp oh eh x
-      printSuccess p
+      L.info $ if p then "success" else "failure"
       return p
-
-    printSuccess x = do
-      L.info $ if x then "success" else "failure"
-      return x
 
     testp oh eh = \case
       Just (ec', oh', eh') ->
@@ -368,21 +339,22 @@ data ReducerName
   | Binary
   deriving (Show)
 
-fromString :: String -> ReducerName
-fromString = \case
-  "ddmin" -> Ddmin
-  "linear" -> Linear
-  "binary" -> Binary
+reducerNameFromString :: String -> Maybe ReducerName
+reducerNameFromString = \case
+  "ddmin" -> Just Ddmin
+  "linear" -> Just Linear
+  "binary" -> Just Binary
+  _ -> Nothing
 
 parseReducerOptions :: Parser (IO ReducerOptions)
 parseReducerOptions =
   mkReduceOptions
   <$> (
-  fromString <$> strOption
+  option (maybeReader (reducerNameFromString . map toLower))
     ( long "reducer"
       <> short 'R'
       <> help "the reducing algorithm to use."
-      <> value "binary"
+      <> value Binary
       <> showDefault
     )
   )
@@ -419,10 +391,10 @@ reduce ::
   -> PredicateM m [a]
   -> [a]
   -> m (Maybe [a])
-reduce ReducerOptions {..} name pred ls = do
+reduce ReducerOptions {..} name p ls = do
   phase ("Reduction" <-> Builder.fromString name) $ do
     ref <- liftIO $ newIORef (0 :: Int)
-    getReducer (mmap (logComputation ref) pred) ls
+    runReducer (mmap (logComputation ref) p)
   where
     logComputation ::
       (HasLogger env, MonadReader env m, MonadUnliftIO m)
@@ -439,14 +411,14 @@ reduce ReducerOptions {..} name pred ls = do
         withCurrentDirectory folder $
           ma
 
-    getReducer pred ls =
+    runReducer p' =
       case reducer of
         Ddmin ->
-          unsafeDdmin pred ls
+          unsafeDdmin p' ls
         Linear ->
-          runMaybeT (unsafeLinearReduction (asMaybeGuard pred) ls)
+          runMaybeT (unsafeLinearReduction (asMaybeGuard p') ls)
         Binary ->
-          binaryReduction pred ls
+          binaryReduction p' ls
 
 
 parseSimpleLogger :: Parser (SimpleLogger)

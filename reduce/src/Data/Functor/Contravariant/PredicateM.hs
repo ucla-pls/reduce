@@ -31,7 +31,7 @@ newtype PredicateM m a =
   PredicateM { runPredicateM :: a -> m Bool }
 
 instance Applicative m => Semigroup (PredicateM m a) where
-  (<>) f g = PredicateM $
+  (<>) f _ = PredicateM $
     \a -> (&&) <$> runPredicateM f a <*> runPredicateM f a
   {-# inline (<>) #-}
 
@@ -56,18 +56,18 @@ instance Applicative m => Divisible (PredicateM m) where
 
 
 instance MonadFunctor PredicateM where
-  mmap fn pred =
-    PredicateM $ \a -> fn $ runPredicateM pred a
+  mmap fn pred' =
+    PredicateM $ \a -> fn $ runPredicateM pred' a
 
 instance ContravariantM PredicateM where
-  contramapM fn pred =
-    PredicateM $ fn >=> runPredicateM pred
+  contramapM fn pred' =
+    PredicateM $ fn >=> runPredicateM pred'
 
 newtype GuardM m a =
   GuardM { runGuardM :: a -> m () }
 
 instance Applicative m => Semigroup (GuardM m a) where
-  (<>) f g = GuardM $
+  (<>) f _ = GuardM $
     \a -> (const $ const ()) <$> runGuardM f a <*> runGuardM f a
   {-# inline (<>) #-}
 
@@ -89,12 +89,12 @@ instance Applicative m => Divisible (GuardM m) where
   {-# inline conquer #-}
 
 instance MonadFunctor GuardM where
-  mmap fn pred =
-    GuardM $ \a -> fn $ runGuardM pred a
+  mmap fn pred' =
+    GuardM $ \a -> fn $ runGuardM pred' a
 
 instance ContravariantM GuardM where
-  contramapM fn pred =
-    GuardM $ fn >=> runGuardM pred
+  contramapM fn pred' =
+    GuardM $ fn >=> runGuardM pred'
 
 -- | Predicates are predicates.
 yes :: Applicative m => PredicateM m Bool
@@ -108,8 +108,8 @@ guardM = GuardM guard
 
 -- | Create A GuardM from a Predicate T
 asGuard :: MonadPlus m => PredicateM m a -> GuardM m a
-asGuard pred =
-  contramapM (runPredicateM pred) guardM
+asGuard pred' =
+  contramapM (runPredicateM pred') guardM
 {-# inline asGuard #-}
 
 liftUnder ::

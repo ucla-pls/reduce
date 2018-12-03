@@ -25,16 +25,9 @@ import           Control.Concurrent.Async
 -- typed-process
 import           System.Process.Typed
 
--- filepath
-import           System.FilePath
-
--- unliftio
-import           UnliftIO.Directory
-
 -- bytestring
 import qualified Data.ByteString            as BS
 import qualified Data.ByteString.Char8      as BSC
-import qualified Data.ByteString.Lazy       as BL
 
 -- cryptohash-sha256
 import           Crypto.Hash.SHA256         as Sha256
@@ -43,18 +36,13 @@ import           Crypto.Hash.SHA256         as Sha256
 import           Control.Concurrent.STM
 
 -- mtl
-import           Control.Monad.Reader.Class
 import           Control.Monad.Writer
 
 -- base
-import           Control.Monad
-import           Data.Foldable
-import           Data.Functor
 import           Data.IORef
 import           Data.Word
 import           System.Exit
 import           System.IO
-import           System.IO.Error
 
 
 type SHA256 = (BS.ByteString, Word64)
@@ -104,18 +92,20 @@ perLine (consumer, i) = do
           left <- readIORef ref
           if BS.null left
             then
-            consumer a (Nothing )
-            else do
-            consumer a (Just left)
             consumer a Nothing
+            else do
+            b <- consumer a (Just left)
+            consumer b Nothing
       | otherwise = do
           left <- readIORef ref
-          let cont:rest = BSC.split '\n' bs
-          (a', left') <-
-            foldM (\(a, bs') bs -> (,bs) <$> consumer i (Just bs'))
-                  (a, left `BS.append` cont) rest
+          let line : restOfLines = BSC.split '\n' bs
+          (a', left') <- foldM consumeLines (a, left `BS.append` line) restOfLines
           writeIORef ref left'
           return a'
+          where
+            consumeLines (a', currLine) nextLine = do
+              a'' <- consumer a' (Just currLine)
+              return (a'', nextLine)
 
 -- | Build a pure consumer. A pure consumer does not use the IO monad.
 pureConsumer :: (a -> b -> a) -> a -> Consumer b a
@@ -141,38 +131,6 @@ logger fn = ((\() -> fn), ())
 perLineLogger :: (Maybe BS.ByteString -> IO ()) -> IO (Logger BS.ByteString)
 perLineLogger = perLine . logger
 
-class HasLoggers env where
-  stdoutLog :: env -> Logger BS.ByteString
-  stderrLog :: env -> Logger BS.ByteString
-
-logProcess :: (HasLoggers env, MonadReader env m, MonadIO m) => ProcessConfig a b c -> m ExitCode
-logProcess pc = do
-  olog <- asks stdoutLog
-  elog <- asks stderrLog
-
-  (ec,_, _) <- liftIO $ consume olog elog pc
-  return ec
-
-data Loggers = Loggers !(Logger BS.ByteString) !(Logger BS.ByteString)
-
-instance HasLoggers Loggers where
-  stdoutLog (Loggers o _) = o
-  stderrLog (Loggers _ e) = e
-
-mkLoggers :: IO Loggers
-mkLoggers =
-  Loggers
-  <$> perLineLogger
-  (\case
-      Just x -> BSC.hPutStrLn stderr ("[stdout]: " <> x)
-      Nothing -> return ()
-  )
-  <*> perLineLogger
-  (\case
-      Just x -> BSC.hPutStrLn stderr ("[stderr]: " <> x)
-      Nothing -> return ()
-  )
-
 handlerLogger :: Handle -> Logger BS.ByteString
 handlerLogger h = logger (BS.hPutStr h)
 
@@ -191,20 +149,9 @@ consumeWithHash ::
   -> Consumer BS.ByteString stderr
   -> ProcessConfig a b c
   -> IO (ExitCode, (stdout, Sha256), (stderr, Sha256))
-consumeWithHash stdout stderr =
+consumeWithHash stdoutC stderrC =
   fmap (\(e, (out, octx), (err, ectx)) ->
           (e, (out, getHash octx), (err, getHash ectx)))
   . consume
-    (combineConsumers stdout hashConsumer)
-    (combineConsumers stderr hashConsumer)
-
-logWithHash ::
- (HasLoggers env, MonadReader env m, MonadIO m)
-  => ProcessConfig a b c
-  -> m (ExitCode, Sha256, Sha256)
-logWithHash pc = do
-  olog <- asks stdoutLog
-  elog <- asks stderrLog
-
-  (ec,(_,ho),(_,he)) <- liftIO $ consumeWithHash olog elog pc
-  return (ec, ho, he)
+    (combineConsumers stdoutC hashConsumer)
+    (combineConsumers stderrC hashConsumer)

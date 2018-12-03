@@ -1,4 +1,5 @@
 {-# language BangPatterns #-}
+{-# language LambdaCase #-}
 {-# language ViewPatterns #-}
 {-|
 Module      : Control.Reduce
@@ -45,26 +46,24 @@ module Control.Reduce
   , liftISetReducer
   ) where
 
-import           Control.Applicative
-
-import           Control.Monad
-import           Control.Monad.Trans (lift)
+-- mtl
 import           Control.Monad.Trans.Maybe
-import           Control.Monad.Trans.Reader
 
-import           Data.Functor
-import           Data.Monoid
-
-import Data.Functor.Contravariant.PredicateM
-
+-- contravariant
 import Data.Functor.Contravariant hiding (Predicate)
 
+-- base
+import           Data.Functor
+import           Control.Applicative
+import           Control.Monad
 import qualified Data.IntSet as IS
 import qualified Data.Vector as V
 import qualified Data.List as L
 
+-- reduce
+import Data.Functor.Contravariant.PredicateM
 
-import Debug.Trace
+
 
 -- * Reducers
 
@@ -112,7 +111,7 @@ ddmin' n test world =
     , return world
     ]
   where
-    testrec n d = runGuardM test d >> ddmin' n test d
+    testrec n' d = runGuardM test d >> ddmin' n' test d
     deltas = splitSet n world
     size = IS.size world
 
@@ -122,18 +121,17 @@ ddmin' n test world =
 -- Runtime: \( O(n) \)
 linearReduction :: Monad m => Reducer m [e]
 linearReduction p xs =
-  runMaybeT (runGuardM pred xs >> unsafeLinearReduction pred xs)
-  where
-    pred = asMaybeGuard $ p
+  runMaybeT (runGuardM p' xs >> unsafeLinearReduction p' xs)
+  where p' = asMaybeGuard p
 
 unsafeLinearReduction :: MonadPlus m => GuardM m [e] -> [e] -> m [e]
-unsafeLinearReduction (runGuardM -> pred) = go []
+unsafeLinearReduction (runGuardM -> pred') = go []
   where
     go !sol !es =
       case es of
         [] -> return sol
         e:es' -> do
-          sol' <- ($ sol) <$> cases [ pred (sol ++ es') $> id, pure (++ [e])]
+          sol' <- ($ sol) <$> cases [ pred' (sol ++ es') $> id, pure (++ [e])]
           go sol' es'
 
 -- | Binary reduction is the simplest form of the set minimizing algorithm.
@@ -144,9 +142,8 @@ binaryReduction :: Monad m => Reducer m [e]
 binaryReduction p es =
   runMaybeT . go [] $ L.length es
   where
-    pred = asMaybeGuard p
     go !sol !n = do
-      r <- binarySearch (contramap range pred) 0 n
+      r <- binarySearch (contramap range $ asMaybeGuard p) 0 n
       cases
         [ guard (r > 0) >> go (es L.!! (r - 1) : sol) (r - 1)
         , return $ range r
@@ -158,9 +155,8 @@ binaryReductions :: (Eq e, Monad m) => PredicateM m [e] -> [e] -> m [[e]]
 binaryReductions p =
   fmap (map L.reverse) . go []
   where
-    pred = asMaybeGuard p
     go !sol !xs = do
-      mr <- runMaybeT $ binarySearch (contramap range pred) 0 (L.length xs)
+      mr <- runMaybeT $ binarySearch (contramap range $ asMaybeGuard p) 0 (L.length xs)
       case mr of
         Just r
           | r > 0 -> do
@@ -191,14 +187,14 @@ binaryReductions p =
 -- | Like a the binary reductor, but uses a generic cost function. Is functionally
 -- equivilent to 'binaryReduction' if the const function is 'List.length'.
 genericBinaryReduction :: (Monad m, Show a) => ([a] -> Int) -> Reducer m [a]
-genericBinaryReduction cost (asMaybeGuard -> pred) =
+genericBinaryReduction cost (asMaybeGuard -> pred') =
   runMaybeT . go []
   where
     go !sol (L.sortOn (cost . (:sol)) -> !as) = do
-      r <- binarySearch (contramap (\i -> L.take i as ++ sol) pred) 0 (L.length as)
+      r <- binarySearch (contramap (\i -> L.take i as ++ sol) pred') 0 (L.length as)
       if r > 0
         then do
-          let (as', rs:ys) = L.splitAt (r - 1) as
+          let (as', rs:_) = L.splitAt (r - 1) as
           go (rs:sol) as' <|> return (as' ++ rs:sol)
         else
           return sol
@@ -213,19 +209,19 @@ type ISetReducer m =
 -- continuously sort the list of set in size  to get the smallest
 -- possible set.
 setBinaryReduction :: Monad m => ISetReducer m
-setBinaryReduction (asMaybeGuard -> pred) =
+setBinaryReduction (asMaybeGuard -> pred') =
   runMaybeT . go ([], IS.empty) . map (\a -> (a, a))
   where
     go (sol, h) (L.sortOn (IS.size . snd) -> !as) = do
       let u = V.fromList $ L.scanl (\a -> IS.union a . snd) h as
-      r <- binarySearch (contramap (V.unsafeIndex u) pred) 0 (V.length u - 1)
+      r <- binarySearch (contramap (V.unsafeIndex u) pred') 0 (V.length u - 1)
       if r > 0
         then do
           let
             (as', (rs, ru):_) = L.splitAt (r - 1) as
             h' = IS.union h ru
           cases
-            [ runGuardM pred h' >> return (rs:sol)
+            [ runGuardM pred' h' >> return (rs:sol)
             , go (rs:sol, IS.union h ru)
                 [(a, s') | (a, s) <- as', let s' = s IS.\\ ru, not (IS.null s')]
                 <|> return (map fst as' ++ rs:sol)
@@ -263,10 +259,10 @@ splitSet n s =
       q + if r > 0 then 1 else 0
       where (q, r) = quotRem i j
 
-    partition n [] = []
-    partition n s =
-      h : partition n r
-      where (h, r) = splitAt n s
+    partition n' = \case
+      [] -> []
+      ss -> h : partition n' r
+        where (h, r) = splitAt n' ss
 
 -- ** MonadPlus related
 
@@ -278,8 +274,8 @@ cases = msum
 -- ** Conversion
 -- | Transform a IReducer to a Reducer
 liftReducer :: Monad m => IReducer m -> Reducer m [e]
-liftReducer red pred es = do
-  mr <- runMaybeT $ red (contramap unset (asMaybeGuard pred)) world
+liftReducer red pred' es = do
+  mr <- runMaybeT $ red (contramap unset (asMaybeGuard pred')) world
   return $ unset <$> mr
   where
     refs = V.fromList es
@@ -288,13 +284,13 @@ liftReducer red pred es = do
 
 -- | Transform a ISetReducer to a Reducer
 toSetReducer :: Monad m => Reducer m [IS.IntSet] -> ISetReducer m
-toSetReducer red pred es =
-  red (contramap IS.unions pred) $ L.sortOn IS.size es
+toSetReducer red pred' es =
+  red (contramap IS.unions pred') $ L.sortOn IS.size es
 
 -- | Transform a ISetReducer to a Reducer
 liftISetReducer :: Monad m => ISetReducer m -> Reducer m [a]
-liftISetReducer red pred es = do
-  mr <- red (contramap unset pred) world
+liftISetReducer red pred' es = do
+  mr <- red (contramap unset pred') world
   return $ unset . IS.unions <$> mr
   where
     refs = V.fromList es

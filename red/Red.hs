@@ -6,34 +6,19 @@
 -- mtl
 import Control.Monad.Reader
 
--- text
-import qualified Data.Text as Text
-
 -- bytestring
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as BLC
 
 -- optparse-applicative
 import Options.Applicative
 
-
 -- reduce-util
 import Control.Reduce.Util
-import System.Process.Consume
 
 -- contravariant
 import Data.Functor.Contravariant
 
--- reduce
-import Control.Reduce
-import Data.Functor.Contravariant.PredicateM
-
 -- base
-import Control.Applicative
-import Control.Monad
-import Control.Monad.IO.Class
-import System.IO
 import Data.Foldable
 
 data Format = Format
@@ -64,6 +49,7 @@ getConfigParser formats =
     cfg fmt lg check rd cmd =
       Config fmt lg check <$> rd <*> cmd
 
+main :: IO ()
 main = do
   let configParser = getConfigParser formats
   config <- join . execParser $
@@ -86,40 +72,42 @@ run Config {..} = do
     StreamOptions a cmdOptions -> do
       mp <- toPredicateM checkOptions cmdOptions (workFolder $ reducerOptions) a
       case mp of
-        Just pred ->
+        Just pred' ->
           case formatFlag format of
             'c' -> do
-              x <- reduce reducerOptions "chars" (BLC.pack `contramap` pred) (BLC.unpack a)
+              x <- reduce reducerOptions "chars" (BLC.pack `contramap` pred') (BLC.unpack a)
               case x of
                 Just f ->
                   liftIO $ BLC.putStrLn (BLC.pack f)
                 Nothing ->
                   error "predicate was not reduceable"
             'l' -> do
-              x <- reduce reducerOptions "lines" (BLC.unlines `contramap` pred) (BLC.lines a)
+              x <- reduce reducerOptions "lines" (BLC.unlines `contramap` pred') (BLC.lines a)
               case x of
                 Just f ->
                   liftIO $ BLC.putStrLn (BLC.unlines f)
                 Nothing ->
                   error "predicate was not reduceable"
+            _ -> error "wtf"
         Nothing -> error "predicate was not valid"
     ArgumentOptions a cmdOptions -> do
       mp <- toPredicateM checkOptions cmdOptions (workFolder $ reducerOptions) a
       case mp of
-        Just pred ->
+        Just pred' ->
           case formatFlag format of
             'c' -> do
-              x <- reduce reducerOptions "chars" pred a
+              x <- reduce reducerOptions "chars" pred' a
               case x of
                 Just f ->
                   liftIO $ putStrLn f
                 Nothing ->
                   error "predicate was not reduceable"
             'l' -> do
-              x <- reduce reducerOptions "lines" (unlines `contramap` pred) (lines a)
+              x <- reduce reducerOptions "lines" (unlines `contramap` pred') (lines a)
               case x of
                 Just f ->
                   liftIO $ putStrLn (unlines f)
                 Nothing ->
                   error "predicate was not reduceable"
+            _ -> error "wtf"
         Nothing -> error "predicate was not valid"

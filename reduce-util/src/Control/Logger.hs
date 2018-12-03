@@ -15,7 +15,6 @@ module Control.Logger where
 -- text
 import qualified Data.Text.Lazy             as Text
 import qualified Data.Text.Lazy.Builder     as Builder
-import qualified Data.Text.Lazy.Encoding    as Text
 import qualified Data.Text.Lazy.IO          as Text
 
 -- mtl
@@ -68,14 +67,14 @@ data SimpleLogger = SimpleLogger
   , indent       :: ! IndentionFormat
   } deriving (Show, Eq)
 
+defaultLogger :: SimpleLogger
 defaultLogger = SimpleLogger INFO 0 0 stderr (IndentionFormat "│ " "├ " "└ ")
 
-indentation i cur =
-  Builder.fromLazyText (Text.replicate (fromIntegral i) cur)
-
+sPutStr :: MonadIO m => SimpleLogger -> m Builder.Builder -> m ()
 sPutStr SimpleLogger {..} m =
   liftIO . Text.hPutStr logHandle . Builder.toLazyText =<< m
 
+sPutStrLn :: MonadIO m => SimpleLogger -> m Builder.Builder -> m ()
 sPutStrLn SimpleLogger {..} m =
   liftIO . Text.hPutStrLn logHandle . Builder.toLazyText =<< m
 
@@ -99,6 +98,10 @@ simpleLogMessage SimpleLogger {..} lvl bldr = do
           mempty
     <-> indentation currentDepth (straight indent) <> bldr
 
+  where
+    indentation i cur =
+      Builder.fromLazyText (Text.replicate (fromIntegral i) cur)
+
 instance HasLogger SimpleLogger where
   log curLvl bldr = do
     sl@SimpleLogger {..} <- ask
@@ -108,7 +111,7 @@ instance HasLogger SimpleLogger where
 
   timedPhase' bldr ma = do
     sl@SimpleLogger {..} <- ask
-    let runMa = local (\sl -> sl { currentDepth = currentDepth + 1 } ) ma
+    let runMa = local (\s -> s { currentDepth = currentDepth + 1 } ) ma
     case currentDepth `compare` (if maxDepth < 0 then currentDepth + 1 else maxDepth) of
       LT -> do
         sPutStrLn sl $ simpleLogMessage sl "START"
