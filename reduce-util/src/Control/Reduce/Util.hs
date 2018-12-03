@@ -1,6 +1,8 @@
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE Rank2Types          #-}
 {-# LANGUAGE RecordWildCards     #-}
+{-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving  #-}
 {-# LANGUAGE ViewPatterns        #-}
@@ -13,8 +15,17 @@ Maintainer  : kalhauge@cs.ucla.edu
 This module provides utils, so that it is easier to write command-line reducers.
 
 * TODO
-- Make output csv file
-- Make understandable logging.
+
+- Move logging to its own module
+- Improve interface for inputs to the CmdOptions
+- Add support for file-trees (folders)
+- Add support for JSON
+
+* Ideas
+
+Different types of inputs.
+
+Lists, Trees, Graphs.
 
 -}
 module Control.Reduce.Util
@@ -36,6 +47,9 @@ module Control.Reduce.Util
     , parseReducerOptions
     , reduce
 
+    , SimpleLogger (..)
+    , mkSimpleLogger
+
   -- , mkCmdOptionsPredicate
   -- , parseCmdOptions
 
@@ -55,6 +69,12 @@ import           System.Process.Typed
 -- filepath
 import           System.FilePath
 
+-- text
+import qualified Data.Text.Lazy as Text
+import qualified Data.Text.Lazy.Encoding as Text
+import qualified Data.Text.Lazy.IO as Text
+import qualified Data.Text.Lazy.Builder as Builder
+
 -- unliftio
 import           UnliftIO
 import           UnliftIO.Directory
@@ -68,7 +88,7 @@ import qualified Data.ByteString.Lazy                  as BL
 import qualified Data.ByteString.Lazy.Char8            as BLC
 
 -- cryptohash-sha256
-import           Crypto.Hash.SHA256                    as SHA256
+import qualified Crypto.Hash.SHA256                    as SHA256
 
 -- stm
 import           Control.Concurrent.STM
@@ -85,6 +105,7 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.Foldable
 import           Data.Functor
+import           Data.Functor.Identity
 import           Data.Int
 import           Data.Word
 import           System.Exit
@@ -157,48 +178,63 @@ toProcessConfig CmdOptions {..} =
       return $ setStdin (byteStringInput a) p
 
 runCmd ::
- (HasLoggers env, MonadReader env m, MonadIO m)
+ (HasLogger env, MonadReader env m, MonadIO m)
   => CmdOptions a
   -> a
   -> m (Maybe (ExitCode, Sha256, Sha256))
 runCmd options a = do
-  olog <- asks stdoutLog
-  elog <- asks stderrLog
-
-  liftIO $ do
-    (tp, p) <- timeProcess $ toProcessConfig options a
-    (tm, m) <-
-      withFile "stdout" WriteMode $
+  (tp, p) <- timePhase "setup" . liftIO $
+    toProcessConfig options a
+  (tm, m) <- timePhase "run" $ do
+    olog <- getLogger "+"
+    elog <- getLogger "-"
+    liftIO . withFile "stdout" WriteMode $
       \hout ->
         withFile "stderr" WriteMode $
         \herr ->
-           timeProcess . runCommandInTimelimit $
-            consumeWithHash
-              (combineConsumers olog $ handlerLogger hout)
-              (combineConsumers elog $ handlerLogger herr)
-              p
-    case m of
-      Just (ec, (_, ho@(showHash-> hos, olen)), (_, he@(showHash -> hes, elen))) -> do
-        appendFile "process.csv" $
-          printf "%.3f,%.3f%,%d,%s,%d,%s,%d\n" tp tm (exitCodeToInt ec) hos olen hes elen
-        return $ Just (ec, ho, he)
-      Nothing -> do
-        appendFile "process.csv" $ "N/A,N/A,N/A,N/A\n"
-        return Nothing
+          runCommandInTimelimit $
+          consumeWithHash
+            (combineConsumers olog $ handlerLogger hout)
+            (combineConsumers elog $ handlerLogger herr)
+            p
+  case m of
+    Just (ec, (_, ho@(showHash-> hos, olen)), (_, he@(showHash -> hes, elen))) -> do
+      liftIO $ appendFile "process.csv" $
+        printf "%.3f,%.3f,%d,%s,%d,%s,%d\n" tp tm (exitCodeToInt ec) hos olen hes elen
+      lg $ "exitcode:" <-> displayf "%3d" (exitCodeToInt ec)
+      lg $ "stdout" <-> displayf "(bytes: %05d):" olen <-> Builder.fromString hos
+      lg $ "stderr" <-> displayf "(bytes: %05d):" elen <-> Builder.fromString hes
+      return $ Just (ec, ho, he)
+    Nothing -> do
+      lg $ "timeout"
+      liftIO $appendFile "process.csv" $ "N/A,N/A,N/A,N/A\n"
+      return Nothing
 
   where
+    getLogger ::
+      (HasLogger env, MonadReader env m, MonadIO m)
+      => Builder.Builder -> m (Logger BS.ByteString)
+    getLogger name = do
+      env <- ask
+      liftIO . perLine . logger . maybe (return ())
+        $ log_ env . (\n -> name <-> n <> "\n")
+        . Builder.fromLazyText
+        . Text.decodeUtf8
+        . BLC.fromStrict
+
+
     showHash :: BS.ByteString -> String
     showHash = concatMap (printf "%02x") . BS.unpack
 
     runCommandInTimelimit =
       (if timelimit options > 0 then timeout (ceiling $ timelimit options * 1e6) else fmap Just)
 
-    timeProcess :: IO a -> IO (Double, a)
-    timeProcess m = do
-      start <- getCurrentTime
-      a <- m
-      end <- getCurrentTime
-      return (realToFrac $ diffUTCTime end start, a)
+timeProcess :: MonadIO m => m a -> m (Double, a)
+timeProcess m = do
+  start <- liftIO getCurrentTime
+  a <- m
+  end <- liftIO getCurrentTime
+  return (realToFrac $ diffUTCTime end start, a)
 
 data CmdOptionWithInput
   = ArgumentOptions !String !(CmdOptions String)
@@ -284,23 +320,28 @@ exitCodeToInt (ExitFailure n) = n
 
 -- | Creates a predicate from the CheckOptions and CmdOptions.
 toPredicateM ::
- (HasLoggers env, MonadReader env m, MonadUnliftIO m)
+ (HasLogger env, MonadReader env m, MonadUnliftIO m)
  => CheckOptions
  -> CmdOptions a
  -> FilePath
  -> a
  -> m (Maybe (PredicateM m a))
 toPredicateM CheckOptions {..} cmd workFolder a = do
-  let initial = workFolder </> "initial"
-  liftIO $ createDirectoryIfMissing True initial
-  (withCurrentDirectory initial $ runCmd cmd a) >>= \case
-    Just (ec, oh, eh)
-      | ec /= expectedStatus ->
+  phase "Initial run" $ do
+    let initial = workFolder </> "initial"
+    liftIO $ createDirectoryIfMissing True initial
+    (withCurrentDirectory initial $ runCmd cmd a) >>= \case
+      Just (ec, oh, eh)
+        | ec /= expectedStatus ->
+          return $ Nothing
+        | otherwise ->
+          return . Just $
+            runCmd cmd `contramapM`
+            ( testp oh eh `contramap`
+              ((\x -> (if x then lg "success" else lg "failure") >> return x)
+                `contramapM` yes ))
+      Nothing ->
         return $ Nothing
-      | otherwise ->
-        return . Just $ runCmd cmd `contramapM` ( testp oh eh `contramap` yes )
-    Nothing ->
-      return $ Nothing
   where
     testp oh eh  = \case
       Just (ec', oh', eh') ->
@@ -367,40 +408,31 @@ parseReducerOptions =
 
 -- | Reduce using the reducer options.
 reduce ::
-  (HasLoggers env, MonadReader env m, MonadUnliftIO m)
+  (HasLogger env, MonadReader env m, MonadUnliftIO m)
   => ReducerOptions
   -> String
   -> PredicateM m [a]
   -> [a]
   -> m (Maybe [a])
 reduce ReducerOptions {..} name pred ls = do
-  ref <- liftIO $ do
-    newIORef (0 :: Int)
-  getReducer (mmap (logComputation ref) pred) ls
+  phase ("Reduction" <-> Builder.fromString name) $ do
+    ref <- liftIO $ newIORef (0 :: Int)
+    getReducer (mmap (logComputation ref) pred) ls
   where
-    sandbox ::
-      (HasLoggers env, MonadReader env m, MonadUnliftIO m)
-      => FilePath
-      -> m a
-      -> m a
-    sandbox folder ma = do
-      let sbx = folder </> "sandbox"
-      liftIO $ createDirectoryIfMissing True sbx
-      withCurrentDirectory sbx ma
-
     logComputation ::
-      (HasLoggers env, MonadReader env m, MonadUnliftIO m)
+      (HasLogger env, MonadReader env m, MonadUnliftIO m)
       => IORef Int
       -> m a
       -> m a
     logComputation ref ma = do
-      folder <- liftIO $ do
+      (x, folder) <- liftIO $ do
         x <- atomicModifyIORef ref (\a -> (succ a, a))
         let folder = workFolder </> printf "%s-%04d" name x
         createDirectoryIfMissing True folder
-        return folder
-
-      sandbox folder ma
+        return (x, folder)
+      phase ("Iteration" <-> displayf "%04d" x) $
+        withCurrentDirectory folder $
+          ma
 
     getReducer pred ls =
       case reducer of
@@ -410,3 +442,95 @@ reduce ReducerOptions {..} name pred ls = do
           runMaybeT (unsafeLinearReduction (asMaybeGuard pred) ls)
         Binary ->
           binaryReduction pred ls
+
+
+class HasLogger env where
+  log_ :: env -> Builder.Builder -> IO ()
+  direct :: env -> Builder.Builder -> IO ()
+  logLevelL :: Functor f => (Int -> f Int) -> (env -> f env)
+  maxLogLevelL :: Functor f => (Int -> f Int) -> (env -> f env)
+
+
+data SimpleLogger = SimpleLogger !Int !Int
+
+mkSimpleLogger = SimpleLogger 0
+
+instance HasLogger SimpleLogger where
+  log_ env@(SimpleLogger i mx) bldr =
+    direct env $ Builder.fromLazyText (Text.replicate (fromIntegral i) "│ ") <> bldr
+  direct (SimpleLogger i mx) bldr
+    | i <= mx =
+      Text.hPutStr stderr . Builder.toLazyText $ bldr
+    | otherwise =
+      return ()
+  logLevelL fn (SimpleLogger i mx) = (\j -> SimpleLogger j mx) <$> fn i
+  maxLogLevelL fn (SimpleLogger i mx) = (\mx' -> SimpleLogger i mx') <$> fn mx
+
+lg ::
+  (HasLogger env, MonadReader env m, MonadIO m)
+  => Builder.Builder
+  -> m ()
+lg bldr = do
+  fn <- asks log_
+  liftIO $ fn (bldr <> Builder.singleton '\n')
+
+lgc ::
+  (HasLogger env, MonadReader env m, MonadIO m)
+  => Builder.Builder
+  -> m (Builder.Builder -> m ())
+lgc bldr = do
+  env <- ask
+  liftIO $ log_ env bldr
+  return (liftIO . direct env . (<> "\n"))
+
+withIncreasedLevel ::
+  (HasLogger env, MonadReader env m, MonadIO m)
+  => m a
+  -> m a
+withIncreasedLevel =
+  local (update logLevelL succ)
+
+timePhase ::
+  (HasLogger env, MonadReader env m, MonadIO m)
+  => Builder.Builder
+  -> m a
+  -> m (Double, a)
+timePhase bldr m = do
+  mx <- view maxLogLevelL
+  lvl <- view logLevelL
+  if lvl == mx
+    then do
+      after <- lgc bldr
+      (t, x) <- timeProcess $ withIncreasedLevel m
+      after $ displayf " [%.3fs]" t
+      return (t, x)
+    else do
+      lg $ bldr
+      (t, x) <- timeProcess $ withIncreasedLevel m
+      lg $ "└" <-> displayf "[%.3fs]" t
+      return (t, x)
+
+phase ::
+  (HasLogger env, MonadReader env m, MonadIO m)
+  => Builder.Builder
+  -> m a
+  -> m a
+phase bldr m = snd <$> timePhase bldr m
+
+(<->) :: Builder.Builder -> Builder.Builder -> Builder.Builder
+(<->) a b = a <> " " <> b
+
+display :: Show a => a -> Builder.Builder
+display = Builder.fromString . show
+
+displayf :: PrintfArg a => String -> a -> Builder.Builder
+displayf fmt = Builder.fromString . printf fmt
+
+-- Lens boilerplate
+type Lens s t a b = forall f. Functor f => (a -> f b) -> (s -> f t)
+
+view :: MonadReader s m => Lens s s a a -> m a
+view lens = getConst . lens Const <$> ask
+
+update :: Lens s t a b -> (a -> b) -> (s -> t)
+update lens f = runIdentity . lens (Identity . f)

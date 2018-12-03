@@ -36,6 +36,7 @@ dependencies:
 - unliftio
 - process
 - time
+- text
 
 library:
   source-dirs: src

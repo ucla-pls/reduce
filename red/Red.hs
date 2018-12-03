@@ -43,6 +43,7 @@ data Format = Format
 
 data Config = Config
   { format :: !Format
+  , verbosity :: Int
   , checkOptions :: !CheckOptions
   , reducerOptions :: !ReducerOptions
   , cmdOptionsWithInput :: !CmdOptionWithInput
@@ -52,6 +53,7 @@ getConfigParser :: [ Format ] -> Parser (IO Config)
 getConfigParser formats =
   cfg
   <$> asum (map formatAsOpt formats)
+  <*> (length <$> many (flag' () (short 'v' <> help "verbosity.")))
   <*> parseCheckOptions
   <*> parseReducerOptions
   <*> parseCmdOptionsWithInput
@@ -59,8 +61,8 @@ getConfigParser formats =
     formatAsOpt fmt@(Format f desc) =
       flag' fmt (short f <> help desc)
 
-    cfg fmt check rd cmd =
-      Config fmt check <$> rd <*> cmd
+    cfg fmt vb check rd cmd =
+      Config fmt (vb - 1) check <$> rd <*> cmd
 
 main = do
   let configParser = getConfigParser formats
@@ -70,17 +72,14 @@ main = do
     <> header "red"
     <> progDesc "A command line tool for reducing almost anything."
     )
-
-  print (config)
-  loggers <- mkLoggers
-  runReaderT (run config) loggers
+  runReaderT (run config) (mkSimpleLogger (verbosity config))
   where
     formats =
       [ Format 'c' "see the input as a list of chars"
       , Format 'l' "see the input as a list of lines"
       ]
 
-run :: Config -> ReaderT Loggers IO ()
+run :: Config -> ReaderT SimpleLogger IO ()
 run Config {..} = do
   case cmdOptionsWithInput of
     StreamOptions a cmdOptions -> do
