@@ -28,6 +28,9 @@ import           Data.Char                  (toLower)
 import           Data.Foldable
 import qualified Data.List                  as List
 
+-- temporary
+import System.IO.Temp
+
 -- bytestring
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BLC
@@ -124,8 +127,8 @@ reducerNameFromString = \case
   "binary" -> Just Binary
   _ -> Nothing
 
-parseReducerOptions :: Parser (IO ReducerOptions)
-parseReducerOptions =
+parseReducerOptions :: String -> Parser (IO ReducerOptions)
+parseReducerOptions template =
   mkReduceOptions
   <$> (
   option (maybeReader (reducerNameFromString . map toLower))
@@ -158,8 +161,9 @@ parseReducerOptions =
         Just folder -> do
           createDirectory folder
           return $ ReducerOptions red folder n
-        Nothing ->
-          error "please set the work folder for now."
+        Nothing -> do
+          folder <- createTempDirectory "." template
+          return $ ReducerOptions red folder n
 
 parseSimpleLogger :: Parser (SimpleLogger)
 parseSimpleLogger =

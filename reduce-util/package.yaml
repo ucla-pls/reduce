@@ -37,6 +37,7 @@ dependencies:
 - process
 - time
 - text
+- temporary
 
 library:
   source-dirs: src
