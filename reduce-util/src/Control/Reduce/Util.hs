@@ -177,7 +177,7 @@ runCmd options a = do
   where
     getLogger ::
       (HasLogger env, MonadReader env m, MonadIO m)
-      => Builder.Builder -> m (Logger BS.ByteString)
+      => Builder.Builder -> m (Consumer BS.ByteString ())
     getLogger name = do
       env <- ask
       liftIO . perLine . logger $ maybe (return ()) (x env)

@@ -66,9 +66,6 @@ consume outLogger errLogger cfg = do
 -- | A consumer, is a fold over a handle.
 type Consumer b a = (a -> b -> IO a, a)
 
--- | A logger is a consumer with no side effects
-type Logger b = Consumer b ()
-
 -- | Fold over a handle using a consumer
 hFoldM :: Int -> Handle -> Consumer BS.ByteString a -> IO a
 hFoldM size handle consumer = go (snd consumer)
@@ -124,14 +121,14 @@ combineConsumers (fna, ia) (fnb, ib) =
 -- ** Loggers
 
 -- | Build a logger
-logger :: (b -> IO ()) -> Logger b
+logger :: (b -> IO ()) -> Consumer b ()
 logger fn = ((\() -> fn), ())
 {-# inline logger #-}
 
-perLineLogger :: (Maybe BS.ByteString -> IO ()) -> IO (Logger BS.ByteString)
+perLineLogger :: (Maybe BS.ByteString -> IO ()) -> IO (Consumer BS.ByteString ())
 perLineLogger = perLine . logger
 
-handlerLogger :: Handle -> Logger BS.ByteString
+handlerLogger :: Handle -> Consumer BS.ByteString ()
 handlerLogger h = logger (BS.hPutStr h)
 
 -- ** HashConsumer

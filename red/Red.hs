@@ -33,7 +33,7 @@ data Format = Format
 
 data Config = Config
   { format              :: !Format
-  , cnfLogger           :: !SimpleLogger
+  , cnfLogger           :: !Logger
   , checkOptions        :: !CheckOptions
   , reducerOptions      :: !ReducerOptions
   , cmdOptionsWithInput :: !CmdOptionWithInput
@@ -43,7 +43,7 @@ getConfigParser :: [ Format ] -> Parser (IO Config)
 getConfigParser formats =
   cfg
   <$> asum (map formatAsOpt formats)
-  <*> parseSimpleLogger
+  <*> parseLogger
   <*> parseCheckOptions
   <*> parseReducerOptions "red"
   <*> parseCmdOptionsWithInput
@@ -79,7 +79,7 @@ go ::
   -> String
   -> Iso a [b]
   -> a
-  -> ReaderT SimpleLogger IO (Maybe a)
+  -> ReaderT Logger IO (Maybe a)
 go redOpt checkOpt cmdOpt name (from, to) a = do
   let folder = workFolder redOpt
   mp <- toPredicateM checkOpt cmdOpt folder a
@@ -92,7 +92,7 @@ go redOpt checkOpt cmdOpt name (from, to) a = do
       liftIO $ exitWith (ExitFailure 1)
 {-# INLINE go #-}
 
-run :: Config -> ReaderT SimpleLogger IO ()
+run :: Config -> ReaderT Logger IO ()
 run Config {..} = do
   case cmdOptionsWithInput of
     StreamOptions a cmdOptions -> do

@@ -42,16 +42,6 @@ data LogLevel
   | ERROR
   deriving (Show, Eq, Ord, Enum, Bounded)
 
--- | Has logger is a class, It allows two functions: `phase` and `log`.
--- `log` logs information, and `phase` logs a phase of information.
--- Logger is nested in the IO monad.
-class HasLogger env where
-  log ::
-    (MonadReader env m, MonadIO m)
-    => LogLevel -> Builder.Builder -> m ()
-  timedPhase' ::
-    (MonadReader env m, MonadIO m)
-    => Builder.Builder -> m (Double, a) -> m (Double, a)
 
 data IndentionFormat = IndentionFormat
   { straight :: !Text.Text
@@ -59,7 +49,7 @@ data IndentionFormat = IndentionFormat
   , end      :: !Text.Text
   } deriving (Show, Eq)
 
-data SimpleLogger = SimpleLogger
+data Logger = Logger
   { logLevel     :: ! LogLevel
   , currentDepth :: ! Int
   , maxDepth     :: ! Int
@@ -67,24 +57,30 @@ data SimpleLogger = SimpleLogger
   , indent       :: ! IndentionFormat
   } deriving (Show, Eq)
 
-defaultLogger :: SimpleLogger
-defaultLogger = SimpleLogger INFO 0 0 stderr (IndentionFormat "│ " "├ " "└ ")
+class HasLogger env where
+  loggerL :: Lens env env Logger Logger
 
-sPutStr :: MonadIO m => SimpleLogger -> m Builder.Builder -> m ()
-sPutStr SimpleLogger {..} m =
+instance HasLogger Logger where
+  loggerL = id
+
+defaultLogger :: Logger
+defaultLogger = Logger INFO 0 0 stderr (IndentionFormat "│ " "├ " "└ ")
+
+sPutStr :: MonadIO m => Logger -> m Builder.Builder -> m ()
+sPutStr Logger {..} m =
   liftIO . Text.hPutStr logHandle . Builder.toLazyText =<< m
 
-sPutStrLn :: MonadIO m => SimpleLogger -> m Builder.Builder -> m ()
-sPutStrLn SimpleLogger {..} m =
+sPutStrLn :: MonadIO m => Logger -> m Builder.Builder -> m ()
+sPutStrLn Logger {..} m =
   liftIO . Text.hPutStrLn logHandle . Builder.toLazyText =<< m
 
 simpleLogMessage ::
   MonadIO m
-  => SimpleLogger
+  => Logger
   -> String
   -> Builder.Builder
   -> m (Builder.Builder)
-simpleLogMessage SimpleLogger {..} lvl bldr = do
+simpleLogMessage Logger {..} lvl bldr = do
   t <- liftIO $ getZonedTime
   return $
     case logLevel of
@@ -102,34 +98,39 @@ simpleLogMessage SimpleLogger {..} lvl bldr = do
     indentation i cur =
       Builder.fromLazyText (Text.replicate (fromIntegral i) cur)
 
-instance HasLogger SimpleLogger where
-  log curLvl bldr = do
-    sl@SimpleLogger {..} <- ask
-    when (curLvl >= logLevel && (currentDepth <= maxDepth || maxDepth < 0)) $ do
-       sPutStrLn sl $ simpleLogMessage sl (show curLvl)
-         (Builder.fromLazyText (new indent) <> bldr)
+log ::
+  (HasLogger env, MonadReader env m, MonadIO m)
+  => LogLevel -> Builder.Builder -> m ()
+log curLvl bldr = do
+  sl@Logger {..} <- view loggerL
+  when (curLvl >= logLevel && (currentDepth <= maxDepth || maxDepth < 0)) $ do
+      sPutStrLn sl $ simpleLogMessage sl (show curLvl)
+        (Builder.fromLazyText (new indent) <> bldr)
 
-  timedPhase' bldr ma = do
-    sl@SimpleLogger {..} <- ask
-    let runMa = local (\s -> s { currentDepth = currentDepth + 1 } ) ma
-    case currentDepth `compare` (if maxDepth < 0 then currentDepth + 1 else maxDepth) of
-      LT -> do
-        sPutStrLn sl $ simpleLogMessage sl "START"
-           (Builder.fromLazyText (new indent) <> bldr)
-        (t, a) <- runMa
-        sPutStrLn sl . simpleLogMessage sl "END" $
-          ( Builder.fromLazyText (straight indent)
-            <> Builder.fromLazyText (end indent)
-            <> displayf "%.3fs" t )
-        return (t, a)
-      EQ -> do
-        sPutStr sl . simpleLogMessage sl "PHASE" $
-           Builder.fromLazyText (new indent) <> bldr
-        (t, a) <- runMa
-        sPutStrLn sl . return $ displayf " (%.3fs)" t
-        return (t, a)
-      GT ->
-        runMa
+timedPhase' ::
+  (HasLogger env, MonadReader env m, MonadIO m)
+  => Builder.Builder -> m (Double, a) -> m (Double, a)
+timedPhase' bldr ma = do
+  sl@Logger {..} <- view loggerL
+  let runMa = local (update loggerL $ \s -> s { currentDepth = currentDepth + 1 } ) ma
+  case currentDepth `compare` (if maxDepth < 0 then currentDepth + 1 else maxDepth) of
+    LT -> do
+      sPutStrLn sl $ simpleLogMessage sl "START"
+          (Builder.fromLazyText (new indent) <> bldr)
+      (t, a) <- runMa
+      sPutStrLn sl . simpleLogMessage sl "END" $
+        ( Builder.fromLazyText (straight indent)
+          <> Builder.fromLazyText (end indent)
+          <> displayf "%.3fs" t )
+      return (t, a)
+    EQ -> do
+      sPutStr sl . simpleLogMessage sl "PHASE" $
+          Builder.fromLazyText (new indent) <> bldr
+      (t, a) <- runMa
+      sPutStrLn sl . return $ displayf " (%.3fs)" t
+      return (t, a)
+    GT ->
+      runMa
 
 timedPhase ::
   (HasLogger env, MonadReader env m, MonadIO m)

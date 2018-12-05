@@ -165,8 +165,8 @@ parseReducerOptions template =
           folder <- createTempDirectory "." template
           return $ ReducerOptions red folder n
 
-parseSimpleLogger :: Parser (SimpleLogger)
-parseSimpleLogger =
+parseLogger :: Parser Logger
+parseLogger =
   mklogger
   <$> ( parseLogLevel
         <$> (length <$> many (flag' () (short 'v' <> help "make it more verbose.")))
