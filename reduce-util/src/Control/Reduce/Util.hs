@@ -29,6 +29,7 @@ Lists, Trees, Graphs.
 -}
 module Control.Reduce.Util
   ( CmdOptions (..)
+
   , InputFormat (..)
   , mkCmdOptions
   , toProcessConfig
@@ -43,6 +44,9 @@ module Control.Reduce.Util
 
   , exitCodeFromInt
   , exitCodeToInt
+
+  , FileContent (..)
+  , writeContent
   ) where
 
 -- typed-process
@@ -72,6 +76,12 @@ import           Control.Monad.Trans.Maybe
 import           System.Exit
 import           Text.Printf
 
+-- directory
+import System.Directory (createFileLink)
+
+-- directory-tree
+import           System.Directory.Tree
+
 -- process
 import           System.Process                        (showCommandForUser)
 
@@ -85,11 +95,24 @@ import           Data.Functor.Contravariant.PredicateM
 
 -- checkConfig :: ! CheckConfig
 
+data FileContent
+  = Content BL.ByteString
+  | SameAs FilePath
+  deriving (Show, Eq)
+
+writeContent :: FilePath -> FileContent -> IO ()
+writeContent fp = \case
+  Content bs ->
+    BL.writeFile fp bs
+  SameAs old ->
+    createFileLink old fp
+
 -- | InputFormat describe ways to interact with the command.
 data InputFormat a where
   ArgsInput   :: InputFormat String
   StreamInput :: InputFormat BL.ByteString
   FileInput   :: FilePath -> InputFormat BL.ByteString
+  DirInput :: FilePath -> InputFormat (DirTree FileContent)
 deriving instance Show (InputFormat a)
 
 -- | CmdOptions is a data structure that holds enough information to run a
@@ -116,18 +139,24 @@ mkCmdOptions ifmt tl fp args = do
         maybe (canonicalizePath exec) return
 
 toProcessConfig ::
-  CmdOptions a
+  (HasLogger env, MonadReader env m, MonadIO m)
+  => CmdOptions a
   -> a
-  -> IO (ProcessConfig () () ())
+  -> m (ProcessConfig () () ())
 toProcessConfig CmdOptions {..} =
   case inputFormat of
     ArgsInput -> \a ->
-      mkProc (args ++ [a])
+      liftIO $ mkProc (args ++ [a])
     StreamInput -> \a ->
-      setStdinLog a =<< mkProc args
-    FileInput fn -> \a -> do
-      BL.writeFile fn a
-      mkProc (args ++ [fn])
+      liftIO $ setStdinLog a =<< mkProc args
+    FileInput fn -> \a ->
+      liftIO $ do
+        BL.writeFile fn a
+        mkProc (args ++ [fn])
+    DirInput fn -> \a -> do
+      liftIO $ do
+        writeTreeWith writeContent (fn :/ a)
+        mkProc (args ++ [fn])
 
   where
     mkProc args'= do
@@ -145,7 +174,7 @@ runCmd ::
   -> a
   -> m (Maybe (ExitCode, Sha256, Sha256))
 runCmd options a = do
-  (tp, p) <- timedPhase "setup" . liftIO $
+  (tp, p) <- timedPhase "setup" $
     toProcessConfig options a
   (tm, m) <- timedPhase "run" $ do
     olog <- getLogger "+"

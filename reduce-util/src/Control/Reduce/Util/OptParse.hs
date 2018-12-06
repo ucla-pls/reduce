@@ -39,6 +39,9 @@ import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Control.Reduce.Util
 import           Control.Reduce.Util.Logger
 
+-- directory-tree
+import System.Directory.Tree
+
 data InputFrom
   = FromString String
   | FromFile FilePath
@@ -47,6 +50,7 @@ data InputFrom
 data CmdOptionWithInput
   = ArgumentOptions !String !(CmdOptions String)
   | StreamOptions !BL.ByteString !(CmdOptions BL.ByteString)
+  | DirOptions !(DirTree FileContent) !(CmdOptions (DirTree FileContent))
   deriving (Show)
 
 data CmdOptionWithoutFormat =
@@ -91,11 +95,18 @@ parseCmdOptionsWithInput =
     getOptions input useStream fn =
       case input of
         FromFile fp -> do
-          rf <- BL.readFile fp
-          s <- if useStream
-            then withFormat fn StreamInput
-            else withFormat fn $ FileInput (takeFileName fp)
-          return $ StreamOptions rf s
+          isDir <- doesDirectoryExist fp
+          if isDir
+            then do
+              fp' <- canonicalizePath fp
+              rf <- fmap SameAs <$> readTree fp'
+              DirOptions (dirTree rf) <$> withFormat fn (DirInput $ takeFileName fp')
+            else do
+              rf <- BL.readFile fp
+              s <- if useStream
+                then withFormat fn StreamInput
+                else withFormat fn $ FileInput (takeFileName fp)
+              return $ StreamOptions rf s
         FromString str' ->
           if useStream
             then do

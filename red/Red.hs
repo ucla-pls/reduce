@@ -15,6 +15,7 @@ import qualified Data.ByteString.Lazy.Char8   as BLC
 import           Options.Applicative          as A
 
 -- reduce-util
+import           System.Directory.Tree
 import           Control.Reduce.Util
 import           Control.Reduce.Util.Logger   as L
 import           Control.Reduce.Util.OptParse
@@ -24,6 +25,7 @@ import           Data.Functor.Contravariant
 
 -- base
 import           Data.Foldable
+import           Data.Maybe
 import           System.Exit
 
 data Format = Format
@@ -68,6 +70,7 @@ main = do
     formats =
       [ Format 'c' "see the input as a list of chars"
       , Format 'l' "see the input as a list of lines"
+      , Format 'F' "see the input as a folder"
       ]
 
 type Iso a b = (a -> b, b -> a)
@@ -111,15 +114,25 @@ run Config {..} = do
     ArgumentOptions a cmdOptions -> do
       let red = go reducerOptions checkOptions cmdOptions
       mp <- case formatFlag format of
-          'c' -> red "chars" (id, id) a
-          'l' -> red "lines" (lines, unlines) a
-          c ->
-            logAndExit $ "does not handle" <-> display c
+        'c' -> red "chars" (id, id) a
+        'l' -> red "lines" (lines, unlines) a
+        c -> logAndExit $ "does not handle" <-> display c
       case mp of
         Just res ->
           liftIO $ putStrLn res
         Nothing ->
           error "input was not reducable"
+
+    DirOptions a cmdOptions -> do
+      let red = go reducerOptions checkOptions cmdOptions
+      mp <- case formatFlag format of
+        'F' -> red "folder" (toFileList, fromJust . fromFileList) a
+        c -> logAndExit $ "does not handle" <-> display c
+      case mp of
+        Just res ->
+          liftIO $ writeTreeWith writeContent ("output-tmp" :/ res )
+        Nothing ->
+          logAndExit $ "input was not reducable"
 
 logAndExit ::
   (HasLogger env, MonadReader env m, MonadIO m)

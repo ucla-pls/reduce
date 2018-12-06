@@ -37,7 +37,10 @@ dependencies:
 - process
 - time
 - text
+- deepseq
 - temporary
+- data-fix
+- containers
 
 library:
   source-dirs: src
