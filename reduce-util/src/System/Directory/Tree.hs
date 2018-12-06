@@ -25,6 +25,8 @@ module System.Directory.Tree
   , readTree
   , writeTreeWith
 
+  , filterTree
+
   , FileContent (..)
   , writeContent
 
@@ -113,10 +115,32 @@ instance Traversable DirTree where
       go (DirTreeF m') = Fix . DirTreeF <$> traverse help m'
       help = foldDirTreeNode (fmap File . f) (fmap Dir)
 
+-- | An Right biased semi group
+instance Semigroup (DirTree a) where
+  (<>) (DirTree a') (DirTree b') =
+    DirTree $ go (a', b')
+    where
+      go (Fix (DirTreeF a), Fix (DirTreeF b)) =
+        Fix . DirTreeF $ Map.unionWith (curry unioner) a b
+      unioner = \case
+        (Dir a, Dir b) -> Dir $ go (a, b)
+        (_, a) -> a
+
+
 data AnchoredTree a = (:/)
   { anchor  :: ! FilePath
   , dirTree :: ! (DirTree a)
   } deriving (Show, Eq, Functor, Foldable, Traversable, Generic)
+
+
+filterTree :: (DirTreeNode (String, a) String -> Bool) -> DirTree a -> DirTree a
+filterTree fn (DirTree dtree) =
+  DirTree $ go dtree
+  where
+      go (Fix (DirTreeF a)) =
+        Fix . DirTreeF $
+          Map.filterWithKey (\key -> fn . foldDirTreeNode (File .(key,)) (Dir . (const key)))
+          a
 
 foldTreeWithFilePath ::
   Monoid m
