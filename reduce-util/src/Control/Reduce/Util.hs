@@ -45,8 +45,6 @@ module Control.Reduce.Util
   , exitCodeFromInt
   , exitCodeToInt
 
-  , FileContent (..)
-  , writeContent
   ) where
 
 -- typed-process
@@ -76,9 +74,6 @@ import           Control.Monad.Trans.Maybe
 import           System.Exit
 import           Text.Printf
 
--- directory
-import System.Directory (createFileLink)
-
 -- directory-tree
 import           System.Directory.Tree
 
@@ -94,18 +89,6 @@ import           Control.Reduce
 import           Data.Functor.Contravariant.PredicateM
 
 -- checkConfig :: ! CheckConfig
-
-data FileContent
-  = Content BL.ByteString
-  | SameAs FilePath
-  deriving (Show, Eq)
-
-writeContent :: FilePath -> FileContent -> IO ()
-writeContent fp = \case
-  Content bs ->
-    BL.writeFile fp bs
-  SameAs old ->
-    createFileLink old fp
 
 -- | InputFormat describe ways to interact with the command.
 data InputFormat a where

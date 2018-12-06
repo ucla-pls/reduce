@@ -25,6 +25,8 @@ module System.Directory.Tree
   , readTree
   , writeTreeWith
 
+  , FileContent (..)
+  , writeContent
 
   ) where
 
@@ -42,6 +44,10 @@ import           System.Directory
 
 -- filepath
 import           System.FilePath
+
+-- bytestring
+import qualified Data.ByteString.Lazy                  as BL
+-- import qualified Data.ByteString.Lazy.Char8            as BLC
 
 -- base
 import           Data.Monoid
@@ -176,3 +182,15 @@ writeTreeWith f (fp :/ tree) = do
       f (fp </> f' ) a
     handleDirectory f' = do
       createDirectory (fp </> f')
+
+data FileContent
+  = Content BL.ByteString
+  | SameAs FilePath
+  deriving (Show, Eq)
+
+writeContent :: FilePath -> FileContent -> IO ()
+writeContent fp = \case
+  Content bs ->
+    BL.writeFile fp bs
+  SameAs old ->
+    createFileLink old fp
