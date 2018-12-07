@@ -29,6 +29,7 @@ module System.Directory.Tree
   , writeTreeWith
 
   , filterTree
+  , filterTreeOnFiles
 
   , FileContent (..)
   , writeContent
@@ -56,6 +57,7 @@ import qualified Data.ByteString.Lazy                  as BL
 
 -- base
 import           Data.Monoid
+import           Data.Maybe
 import           Data.Either
 import qualified Data.List as List
 import           GHC.Generics
@@ -144,6 +146,10 @@ filterTree fn (DirTree dtree) =
         Fix . DirTreeF $
           Map.filterWithKey (\key -> fn . foldDirTreeNode (File .(key,)) (Dir . (const key)))
           a
+
+filterTreeOnFiles :: (FilePath -> Bool) -> DirTree a -> DirTree a
+filterTreeOnFiles fn =
+  fromJust . fromFileList . filter (fn . fst) . toFileList
 
 foldTreeWithFilePath ::
   Monoid m
