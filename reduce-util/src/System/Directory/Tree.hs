@@ -17,6 +17,9 @@ is a little easier to work with.
 module System.Directory.Tree
   ( DirTree
 
+  , DirTreeNode (..)
+  , foldDirTreeNode
+
   , AnchoredTree (..)
   , foldTreeWithFilePath
   , toFileList
