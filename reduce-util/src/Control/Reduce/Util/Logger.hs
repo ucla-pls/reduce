@@ -36,12 +36,12 @@ import           System.IO
 import           Text.Printf
 
 data LogLevel
-  = DEBUG
+  = TRACE
+  | DEBUG
   | INFO
   | WARN
   | ERROR
   deriving (Show, Eq, Ord, Enum, Bounded)
-
 
 data IndentionFormat = IndentionFormat
   { straight :: !Text.Text
@@ -145,6 +145,12 @@ phase bldr ma = snd <$> timedPhase bldr ma
 {-# INLINE phase #-}
 
 -- * Helpers
+
+trace ::
+  (HasLogger env, MonadReader env m, MonadIO m)
+  => Builder.Builder
+  -> m ()
+trace = log TRACE
 
 debug ::
   (HasLogger env, MonadReader env m, MonadIO m)

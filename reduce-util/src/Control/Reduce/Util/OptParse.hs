@@ -195,7 +195,7 @@ parseLogger =
       defaultLogger { logLevel = ll, maxDepth = depth }
 
     parseLogLevel lvl quiet =
-      boundedToEnum (1 - lvl + quiet)
+      boundedToEnum (2 - lvl + quiet)
 
 
 boundedToEnum :: (Bounded a, Enum a) => Int -> a

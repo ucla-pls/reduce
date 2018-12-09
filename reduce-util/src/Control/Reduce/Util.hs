@@ -195,7 +195,7 @@ runCmd options a = do
       liftIO . perLine . logger $ maybe (return ()) (x env)
       where
         x env bs =
-          runReaderT (L.log L.DEBUG (name <-> bsToBuilder bs)) env
+          runReaderT (L.log L.TRACE (name <-> bsToBuilder bs)) env
 
         bsToBuilder =
           Builder.fromLazyText . Text.decodeUtf8 . BLC.fromStrict
