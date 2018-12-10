@@ -56,6 +56,9 @@ data CmdOptionWithInput
 data CmdOptionWithoutFormat =
   CmdOptionWithoutFormat { withFormat :: forall a. InputFormat a -> IO (CmdOptions a)}
 
+instance Show CmdOptionWithoutFormat where
+  showsPrec _ _ = showString "CmdOptionWithoutFormat"
+
 parseCmdOptions :: Parser CmdOptionWithoutFormat
 parseCmdOptions =
   (\t c as -> CmdOptionWithoutFormat $ \fmt -> mkCmdOptions fmt t c as)
