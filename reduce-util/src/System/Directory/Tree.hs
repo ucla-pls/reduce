@@ -17,6 +17,9 @@ is a little easier to work with.
 module System.Directory.Tree
   ( DirTree
 
+  -- , file
+  -- , dir
+
   , DirTreeNode (..)
   , foldDirTreeNode
 
@@ -144,7 +147,8 @@ filterTree fn (DirTree dtree) =
   where
       go (Fix (DirTreeF a)) =
         Fix . DirTreeF $
-          Map.filterWithKey (\key -> fn . foldDirTreeNode (File .(key,)) (Dir . (const key)))
+          Map.filterWithKey
+          (\key -> fn . foldDirTreeNode (File .(key,)) (Dir . (const key)))
           a
 
 filterTreeOnFiles :: (FilePath -> Bool) -> DirTree a -> DirTree a

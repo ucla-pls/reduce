@@ -68,14 +68,14 @@ spec = do
 
   describe "evaluateArgument" $ do
     it "looks up the input in a map" $ do
-      evaluateArgument (CAInput "") (Map.singleton "" "hey")
-        `shouldBe` "hey"
+      evaluateArgument (CAInput "") (Map.singleton "" (CAConst "hey"))
+        `shouldBe` (CAConst "hey")
     it "default to the keyword when nothing is found" $ do
-      evaluateArgument (CAInput "key") (Map.empty)
+      argumentToString (evaluateArgument (CAInput "key") Map.empty)
         `shouldBe` "{key}"
     it "can also handle concatenation" $ do
       let f = CAJoin (CAInput "") (CAJoin (CAConst ":") (CAFilePath "file.txt"))
-      evaluateArgument f ((Map.singleton "" "key"))
+      argumentToString (evaluateArgument f ((Map.singleton "" (CAConst "key"))))
         `shouldBe` "key:file.txt"
 
   describe "replaceRelative" $ do

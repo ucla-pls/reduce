@@ -25,6 +25,11 @@ run %file.txt {}
   absolute path when running the program.
 - {} is the input to the predicate.
 
+
+Todo:
+
+Maybe have an input DSL? Ideally a Semitic for creating the workfolder.
+
 -}
 
 module Control.Reduce.Util.CliPredicate
@@ -38,6 +43,7 @@ module Control.Reduce.Util.CliPredicate
   , CmdArgument (..)
   , parseCmdArgument
   , evaluateArgument
+  , argumentToString
   , canonicalizeArgument
 
   , relativeArgument
@@ -45,6 +51,11 @@ module Control.Reduce.Util.CliPredicate
 
   , CmdInput
   , runCmd
+
+  , fromArgument
+  , fromStream
+  , fromDirTree
+  , fromFile
 
   -- * Utils
   , replaceRelative
@@ -197,12 +208,21 @@ canonicalizeOrFail fp = do
 
 -- | Evaluate an argument using a map from keys to strings.
 evaluateArgument :: CmdArgument -> Map.Map String CmdArgument -> CmdArgument
-evaluateArgument = \case
-  CAConst str -> const str
-  CAFilePath fp -> const fp
-  CAInput key -> Map.findWithDefault ("{" <> key <> "}") key
+evaluateArgument ca =
+  case ca of
+    CAConst str -> const ca
+    CAFilePath fp -> const ca
+    CAInput key -> Map.findWithDefault ca key
+    CAJoin a b ->
+      CAJoin <$> evaluateArgument a <*> evaluateArgument b
+
+argumentToString :: CmdArgument -> String
+argumentToString = \case
+  CAConst str -> str
+  CAFilePath fp -> fp
+  CAInput key -> "{" <> key <> "}"
   CAJoin a b ->
-    (<>) <$> evaluateArgument a <*> evaluateArgument b
+    argumentToString a <> argumentToString b
 
 -- | A representation of a command-line command.
 data Cmd = Cmd
@@ -233,11 +253,17 @@ createCmd timelimit cmd args = runExceptT $ do
 
 -- | Evalutates a `Cmd` with a keymap, so that the results can be
 -- used to create a processs.
-evaluateCmd :: Cmd -> (FilePath, String) -> Map.Map String String -> (String, [String])
-evaluateCmd (Cmd _ str args) fp =
-  (replaceRelative str fp,)
-  <$> mapM evaluateArgument
-     (mapM relativeArgument args $ fp)
+evaluateCmd ::
+  Cmd
+  -> (FilePath, String)
+  -> Map.Map String CmdArgument
+  -> (String, [String])
+evaluateCmd (Cmd _ str args) fp kmap =
+  ( replaceRelative str fp
+  , map ( argumentToString
+         . flip evaluateArgument kmap
+         . flip relativeArgument fp) args
+  )
 
 data CmdInput = CmdInput
   { ciValueMap :: Map.Map String CmdArgument
@@ -250,6 +276,13 @@ instance Semigroup CmdInput where
 
 instance Monoid CmdInput where
   mempty = CmdInput mempty mempty
+
+fromArgument ::
+  Monad m
+  => String
+  -> m CmdInput
+fromArgument str =
+  return $ mempty { ciValueMap = Map.singleton "" (CAConst str) }
 
 fromStream ::
   Monad m
@@ -265,6 +298,15 @@ fromDirTree ::
   -> m CmdInput
 fromDirTree name td = do
   liftIO $ writeTreeWith writeContent (name :/ td)
+  return $ mempty { ciValueMap = Map.singleton "" (CAFilePath name)}
+
+fromFile ::
+  MonadIO m
+  => String
+  -> BL.ByteString
+  -> m CmdInput
+fromFile name bs = do
+  liftIO $ BLC.writeFile name bs
   return $ mempty { ciValueMap = Map.singleton "" (CAFilePath name)}
 
 -- | Creates a shell script which can be executed in the current working
