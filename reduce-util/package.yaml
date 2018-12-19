@@ -41,6 +41,8 @@ dependencies:
 - temporary
 - data-fix
 - containers
+- lens
+- megaparsec == 6.5.0
 
 library:
   source-dirs: src

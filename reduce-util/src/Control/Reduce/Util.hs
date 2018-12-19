@@ -28,12 +28,8 @@ Lists, Trees, Graphs.
 
 -}
 module Control.Reduce.Util
-  ( CmdOptions (..)
-
-  , InputFormat (..)
-  , mkCmdOptions
-  , toProcessConfig
-  , runCmd
+  (
+    runCmd
 
   , CheckOptions (..)
   , toPredicateM
@@ -82,6 +78,7 @@ import           System.Process                        (showCommandForUser)
 
 -- reduce-util
 import           Control.Reduce.Util.Logger            as L
+import           Control.Reduce.Util.CliPredicate
 import           System.Process.Consume
 
 -- reduce
@@ -90,151 +87,33 @@ import           Data.Functor.Contravariant.PredicateM
 
 -- checkConfig :: ! CheckConfig
 
--- | InputFormat describe ways to interact with the command.
-data InputFormat a where
-  ArgsInput   :: InputFormat String
-  StreamInput :: InputFormat BL.ByteString
-  FileInput   :: FilePath -> InputFormat BL.ByteString
-  DirInput :: FilePath -> InputFormat (DirTree FileContent)
-deriving instance Show (InputFormat a)
-
--- | CmdOptions is a data structure that holds enough information to run a
--- single command from options described from the command line.
-data CmdOptions a = CmdOptions
-  { inputFormat :: ! (InputFormat a)
-  , timelimit   :: ! Double
-  , cmd         :: ! FilePath
-  , args        :: ! [String]
-  } deriving (Show)
-
-mkCmdOptions :: InputFormat a -> Double -> FilePath -> [String] -> IO (CmdOptions a)
-mkCmdOptions ifmt tl fp args = do
-  cfp <- getExecutable fp
-  return $ CmdOptions
-    { inputFormat = ifmt
-    , timelimit = tl
-    , cmd = cfp
-    , args = args
-    }
-  where
-    getExecutable exec = do
-      findExecutable exec >>=
-        maybe (canonicalizePath exec) return
-
-toProcessConfig ::
-  (HasLogger env, MonadReader env m, MonadIO m)
-  => CmdOptions a
-  -> a
-  -> m (ProcessConfig () () ())
-toProcessConfig CmdOptions {..} =
-  case inputFormat of
-    ArgsInput -> \a ->
-      liftIO $ mkProc (args ++ [a])
-    StreamInput -> \a ->
-      liftIO $ setStdinLog a =<< mkProc args
-    FileInput fn -> \a ->
-      liftIO $ do
-        BL.writeFile fn a
-        mkProc (args ++ [fn])
-    DirInput fn -> \a -> do
-      liftIO $ do
-        writeTreeWith writeContent (fn :/ a)
-        mkProc (args ++ [fn])
-
-  where
-    mkProc args'= do
-      writeFile "cmd" $ showCommandForUser cmd args'
-      return $ proc cmd args'
-
-    setStdinLog a p = do
-      BLC.writeFile "stdin" $ a
-      appendFile "cmd" " <stdin"
-      return $ setStdin (byteStringInput a) p
-
-runCmd ::
- (HasLogger env, MonadReader env m, MonadIO m)
-  => CmdOptions a
-  -> a
-  -> m (Maybe (ExitCode, Sha256, Sha256))
-runCmd options a = do
-  (tp, p) <- timedPhase "setup" $
-    toProcessConfig options a
-  (tm, m) <- timedPhase "run" $ do
-    olog <- getLogger "+"
-    elog <- getLogger "-"
-    liftIO . withFile "stdout" WriteMode $
-      \hout ->
-        withFile "stderr" WriteMode $
-        \herr ->
-          runCommandInTimelimit $
-          consumeWithHash
-            (combineConsumers olog $ handlerLogger hout)
-            (combineConsumers elog $ handlerLogger herr)
-            p
-  case m of
-    Just (ec, (_, ho@(showHash-> hos, olen)), (_, he@(showHash -> hes, elen))) -> do
-      liftIO $ appendFile "process.csv" $
-        printf "%.3f,%.3f,%d,%s,%d,%s,%d\n" tp tm (exitCodeToInt ec) hos olen hes elen
-      L.info $ "exitcode:" <-> displayf "%3d" (exitCodeToInt ec)
-      L.info $ "stdout" <-> displayf "(bytes: %05d):" olen
-        <-> Builder.fromString (take 8 hos )
-      L.info $ "stderr" <-> displayf "(bytes: %05d):" elen
-        <-> Builder.fromString (take 8 hes)
-      return $ Just (ec, ho, he)
-    Nothing -> do
-      L.warn $ "timeout"
-      liftIO $appendFile "process.csv" $ "N/A,N/A,N/A,N/A\n"
-      return Nothing
-
-  where
-    getLogger ::
-      (HasLogger env, MonadReader env m, MonadIO m)
-      => Builder.Builder -> m (Consumer BS.ByteString ())
-    getLogger name = do
-      env <- ask
-      liftIO . perLine . logger $ maybe (return ()) (x env)
-      where
-        x env bs =
-          runReaderT (L.log L.TRACE (name <-> bsToBuilder bs)) env
-
-        bsToBuilder =
-          Builder.fromLazyText . Text.decodeUtf8 . BLC.fromStrict
-
-
-    showHash :: BS.ByteString -> String
-    showHash = concatMap (printf "%02x") . BS.unpack
-
-    runCommandInTimelimit =
-      (if timelimit options > 0 then timeout (ceiling $ timelimit options * 1e6) else fmap Just)
-
-
-
 data CheckOptions = CheckOptions
   { expectedStatus :: ExitCode
   , preserveStdout :: Bool
   , preserveStderr :: Bool
   } deriving (Show, Eq)
 
-
 -- | Creates a predicate from the CheckOptions and CmdOptions.
 toPredicateM ::
  (HasLogger env, MonadReader env m, MonadUnliftIO m)
  => CheckOptions
- -> CmdOptions a
+ -> (a -> m CmdInput)
  -> FilePath
+ -> Cmd
  -> a
- -> m (Maybe (PredicateM m a))
-toPredicateM CheckOptions {..} cmd workFolder a = do
+ -> m (Maybe (PredicateM m (FilePath, a)))
+toPredicateM CheckOptions {..} setup workFolder cmd a = do
   phase "Initial run" $ do
-    let initial = workFolder </> "initial"
-    liftIO $ createDirectoryIfMissing True initial
-    withCurrentDirectory initial (runCmd cmd a) >>= \case
+    runCmd setup (workFolder </> "initial") cmd a >>= \case
       Just (ec, oh, eh)
         | ec /= expectedStatus ->
           return $ Nothing
         | otherwise ->
-          return . Just $
-            (runCmd cmd >=> testM oh eh) `contramapM` yes
+          return . Just .
+            PredicateM $
+            ( (\(fp, a) -> runCmd setup (workFolder </> fp) cmd a)
+             >=> testM oh eh
+            )
       Nothing ->
         return $ Nothing
   where
@@ -251,6 +130,26 @@ toPredicateM CheckOptions {..} cmd workFolder a = do
       Nothing ->
         False
 
+-- | Wrap a predicate and have it run in the folders
+wrapPredicate ::
+  (HasLogger env, MonadReader env m, MonadUnliftIO m)
+  => String
+  -> PredicateM m (FilePath, a)
+  -> m (PredicateM m a)
+wrapPredicate name pred = do
+  ref <- newIORef (0 :: Int)
+  return . PredicateM $ go ref
+  where
+    go ref a = do
+      x <- liftIO $ atomicModifyIORef ref (\x -> (succ x, x))
+      let phaseName =
+            "Iteration ("
+              <> Builder.fromString name
+              <> ")"
+              <-> displayf "%04d" x
+      phase phaseName $
+        runPredicateM pred (printf "%s/%04d" name x, a)
+
 data ReducerOptions = ReducerOptions
   { reducer        :: ReducerName
   , workFolder     :: FilePath
@@ -263,7 +162,6 @@ data ReducerName
   | Binary
   deriving (Show)
 
-
 -- | Reduce using the reducer options.
 reduce ::
   (HasLogger env, MonadReader env m, MonadUnliftIO m)
@@ -274,40 +172,10 @@ reduce ::
   -> m (Maybe [a])
 reduce ReducerOptions {..} name p ls = do
   phase ("Reduction" <-> Builder.fromString name) $ do
-    ref <- liftIO $ newIORef (0 :: Int)
-    runReducer (mmap (logComputation ref) p)
-  where
-    logComputation ::
-      (HasLogger env, MonadReader env m, MonadUnliftIO m)
-      => IORef Int
-      -> m a
-      -> m a
-    logComputation ref ma = do
-      (x, folder) <- liftIO $ do
-        x <- atomicModifyIORef ref (\a -> (succ a, a))
-        let folder = workFolder </> printf "%s-%04d" name x
-        createDirectoryIfMissing True folder
-        return (x, folder)
-      phase ("Iteration" <-> displayf "%04d" x) $
-        withCurrentDirectory folder $
-          ma
-
-    runReducer p' =
-      case reducer of
-        Ddmin ->
-          unsafeDdmin p' ls
-        Linear ->
-          runMaybeT (unsafeLinearReduction (asMaybeGuard p') ls)
-        Binary ->
-          binaryReduction p' ls
-
-
-exitCodeFromInt :: Int -> ExitCode
-exitCodeFromInt = \case
-  0 -> ExitSuccess
-  n -> ExitFailure n
-
-exitCodeToInt :: ExitCode -> Int
-exitCodeToInt = \case
-  ExitSuccess -> 0
-  ExitFailure n -> n
+    case reducer of
+      Ddmin ->
+        unsafeDdmin p ls
+      Linear ->
+        runMaybeT (unsafeLinearReduction (asMaybeGuard p) ls)
+      Binary ->
+        binaryReduction p ls

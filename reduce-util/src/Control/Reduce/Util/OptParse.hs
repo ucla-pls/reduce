@@ -38,6 +38,7 @@ import qualified Data.ByteString.Lazy.Char8 as BLC
 -- reduce-util
 import           Control.Reduce.Util
 import           Control.Reduce.Util.Logger
+import           Control.Reduce.Util.CliPredicate
 
 -- directory-tree
 import System.Directory.Tree
@@ -47,21 +48,21 @@ data InputFrom
   | FromFile FilePath
   deriving (Show, Eq)
 
-data CmdOptionWithInput
-  = ArgumentOptions !String !(CmdOptions String)
-  | StreamOptions !BL.ByteString !(CmdOptions BL.ByteString)
-  | DirOptions !(DirTree FileContent) !(CmdOptions (DirTree FileContent))
-  deriving (Show)
+-- data CmdOptionWithInput
+--   = ArgumentOptions !String !(CmdOptions String)
+--   | StreamOptions !BL.ByteString !(CmdOptions BL.ByteString)
+--   | DirOptions !(DirTree FileContent) !(CmdOptions (DirTree FileContent))
+--   deriving (Show)
 
-data CmdOptionWithoutFormat =
-  CmdOptionWithoutFormat { withFormat :: forall a. InputFormat a -> IO (CmdOptions a)}
+-- data CmdOptionWithoutFormat =
+--   CmdOptionWithoutFormat { withFormat :: forall a. InputFormat a -> IO (CmdOptions a)}
 
-instance Show CmdOptionWithoutFormat where
-  showsPrec _ _ = showString "CmdOptionWithoutFormat"
+-- instance Show CmdOptionWithoutFormat where
+--   showsPrec _ _ = showString "CmdOptionWithoutFormat"
 
-parseCmdOptions :: Parser CmdOptionWithoutFormat
-parseCmdOptions =
-  (\t c as -> CmdOptionWithoutFormat $ \fmt -> mkCmdOptions fmt t c as)
+parseCmd :: Parser (IO (Either String Cmd))
+parseCmd =
+  createCmd
   <$> option auto
   ( long "timelimit"
     <> short 'T'
@@ -79,60 +80,67 @@ parseCmdOptions =
   ( strArgument (metavar "ARG.." <> help "arguments to the command.")
   )
 
-parseCmdOptionsWithInput :: Parser (IO CmdOptionWithInput)
-parseCmdOptionsWithInput =
-  getOptions
-  <$> parseInputFrom
-  <*> flag False True
-  (long "stream" <> short 'S' <> help "stream the input to the process.")
-  <*> parseCmdOptions
-  where
-    parseInputFrom = asum
-      [ FromString <$> strOption
-        (long "input" <> short 'i' <> help "the input to reduce.")
-      , FromFile <$> strOption
-        (long "file" <> short 'f' <> help "read input from file or folder.")
-      ]
+-- parseCmdOptionsWithInput :: Parser (IO CmdOptionWithInput)
+-- parseCmdOptionsWithInput =
+--   getOptions
+--   <$> parseInputFrom
+--   <*> flag False True
+--   (long "stream" <> short 'S' <> help "stream the input to the process.")
+--   <*> parseCmdOptions
+--   where
+--     parseInputFrom = asum
+--       [ FromString <$> strOption
+--         (long "input" <> short 'i' <> help "the input to reduce.")
+--       , FromFile <$> strOption
+--         (long "file" <> short 'f' <> help "read input from file or folder.")
+--       ]
 
-    getOptions :: InputFrom -> Bool -> CmdOptionWithoutFormat -> IO CmdOptionWithInput
-    getOptions input useStream fn =
-      case input of
-        FromFile fp -> do
-          isDir <- doesDirectoryExist fp
-          if isDir
-            then do
-              fp' <- canonicalizePath fp
-              rf <- fmap SameAs <$> readTree fp'
-              DirOptions (dirTree rf) <$> withFormat fn (DirInput $ takeFileName fp')
-            else do
-              rf <- BL.readFile fp
-              s <- if useStream
-                then withFormat fn StreamInput
-                else withFormat fn $ FileInput (takeFileName fp)
-              return $ StreamOptions rf s
-        FromString str' ->
-          if useStream
-            then do
-              s <- withFormat fn StreamInput
-              return $ StreamOptions (BLC.pack str') s
-            else do
-            s <- withFormat fn ArgsInput
-            return $ ArgumentOptions str' s
+--     getOptions ::
+--       InputFrom
+--       -> Bool
+--       -> CmdOptionWithoutFormat
+--       -> IO CmdOptionWithInput
+--     getOptions input useStream fn =
+--       case input of
+--         FromFile fp -> do
+--           isDir <- doesDirectoryExist fp
+--           if isDir
+--             then do
+--               fp' <- canonicalizePath fp
+--               rf <- fmap SameAs <$> readTree fp'
+--               DirOptions (dirTree rf) <$> withFormat fn (DirInput $ takeFileName fp')
+--             else do
+--               rf <- BL.readFile fp
+--               s <- if useStream
+--                 then withFormat fn StreamInput
+--                 else withFormat fn $ FileInput (takeFileName fp)
+--               return $ StreamOptions rf s
+--         FromString str' ->
+--           if useStream
+--             then do
+--               s <- withFormat fn StreamInput
+--               return $ StreamOptions (BLC.pack str') s
+--             else do
+--             s <- withFormat fn ArgsInput
+--             return $ ArgumentOptions str' s
 
 parseCheckOptions :: Parser CheckOptions
 parseCheckOptions =
   CheckOptions
-      <$> ( exitCodeFromInt
-            <$> option auto
-            ( long "exit-code"
-              <> short 'E'
-              <> help "preserve exit-code"
-              <> value 0
-              <> metavar "CODE"
-              <> showDefault)
-          )
+      <$> parseExitcode
       <*> switch (long "stdout" <> help "preserve stdout.")
       <*> switch (long "stderr" <> help "preserve stderr.")
+
+   where
+     parseExitcode =
+       exitCodeFromInt
+       <$> option auto
+       ( long "exit-code"
+         <> short 'E'
+         <> help "preserve exit-code"
+         <> value 0
+         <> metavar "CODE"
+         <> showDefault)
 
 reducerNameFromString :: String -> Maybe ReducerName
 reducerNameFromString = \case
