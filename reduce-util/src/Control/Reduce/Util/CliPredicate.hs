@@ -53,6 +53,9 @@ module Control.Reduce.Util.CliPredicate
   , CmdInput
   , runCmd
 
+  , CmdResult (..)
+  , showHash
+
   , fromArgument
   , fromStream
   , fromDirNode
@@ -104,9 +107,9 @@ import qualified Data.Map                              as Map
 import           Control.Applicative                   hiding (many, some)
 import           Data.Bifunctor                        (first)
 import           Data.Foldable
+import qualified Data.List                             as L
 import           Data.String
 import           Data.Void
-import qualified Data.List as L
 import           System.Exit
 import           System.IO.Error
 import           Text.Printf
@@ -121,8 +124,8 @@ import           Text.Megaparsec.Char
 
 -- reduce-util
 import           Control.Reduce.Util.Logger            as L
-import           System.Process.Consume
 import           System.Directory.Tree
+import           System.Process.Consume
 
 -- reduce
 import           Control.Reduce
@@ -373,9 +376,20 @@ setupWorkDir ::
 setupWorkDir cmdInput@(CmdInput {..}) cmd = do
   curDir <- getCurrentDirectory
   maybe (return ()) (BLC.writeFile "stdin") ciStdin
-  LazyText.writeFile "run.sh" $ toShellScript cmdInput curDir cmd
-  setPermissions "run.sh" . setOwnerExecutable True =<< getPermissions "run.sh"
+  writeExec "run.sh" $ toShellScript cmdInput curDir cmd
+  where
+    writeExec fp txt = do
+      LazyText.writeFile fp txt
+      getPermissions fp >>=
+        setPermissions fp. setOwnerExecutable True
 
+data CmdResult = CmdResult
+  { resultSetupTime :: Double
+  , resultRunTime   :: Double
+  , resultExitCode  :: ExitCode
+  , resultStdout    :: Sha256
+  , resultStderr    :: Sha256
+  } deriving (Show, Eq, Ord)
 
 -- | Run a command in a working folder. Fails if the working folder
 -- already exists.
@@ -385,14 +399,14 @@ runCmd ::
  -> FilePath
  -> Cmd
  -> a
- -> m (Maybe (ExitCode, Sha256, Sha256))
+ -> m (Maybe CmdResult)
 runCmd inputCreater workDir cmd a = do
   liftIO $ createDirectoryIfMissing True workDir
   withCurrentDirectory workDir $ do
     (tp, _) <- timedPhase "setup" $ do
       input <- inputCreater a
       liftIO $ setupWorkDir input cmd
-    (tm, fmap formatResults -> m) <- timedPhase "run" $ do
+    (tm, x) <- timedPhase "run" $ do
       olog <- traceLogger "+"
       elog <- traceLogger "-"
       liftIO . withFile "stdout" WriteMode $
@@ -404,27 +418,12 @@ runCmd inputCreater workDir cmd a = do
               (combineConsumers olog $ handlerLogger hout)
               (combineConsumers elog $ handlerLogger herr)
               $ proc "./run.sh" []
-    logResults tp tm m
+    let m = fmap (formatResults tp tm) x
+    logResults m
     return m
-
   where
-    formatResults (ec, (_, ho), (_, he)) = (ec, ho, he)
-
-    logResults tp tm m = do
-      x <- case m of
-        Just (ec, (showHash -> hos, olen), (showHash -> hes, elen)) -> do
-          L.info $ "exitcode:" <-> displayf "%3d" (exitCodeToInt ec)
-          L.info $ "stdout" <-> displayf "(bytes: %05d):" olen
-            <-> Builder.fromString (take 8 hos)
-          L.info $ "stderr" <-> displayf "(bytes: %05d):" elen
-            <-> Builder.fromString (take 8 hes)
-          return $ printf "%d,%s,%d,%s,%d\n"
-            (exitCodeToInt ec) hos olen hes elen
-        Nothing -> do
-          L.warn $ "Process Timed-out"
-          return $ "N/A,N/A,N/A,N/A,N/A\n"
-      liftIO $ appendFile "process.csv" $
-        printf "%.3f,%.3f," tp tm ++ x
+    formatResults tp tm (ec, (_, ho), (_, he)) =
+      CmdResult tp tm ec ho he
 
     traceLogger ::
       (HasLogger env, MonadReader env m, MonadIO m)
@@ -438,8 +437,23 @@ runCmd inputCreater workDir cmd a = do
         bsToBuilder =
           Builder.fromLazyText . Text.decodeUtf8 . BLC.fromStrict
 
-    showHash =
-      concatMap (printf "%02x") . BS.unpack
+showHash :: BS.ByteString -> String
+showHash =
+  concatMap (printf "%02x") . BS.unpack
+
+logResults ::
+  (HasLogger env, MonadReader env m, MonadUnliftIO m)
+  => Maybe CmdResult
+  -> m ()
+logResults = \case
+  Just (CmdResult tp tm ec (showHash -> hos, olen) (showHash -> hes, elen)) -> do
+    L.info $ "exitcode:" <-> displayf "%3d" (exitCodeToInt ec)
+    L.info $ "stdout" <-> displayf "(bytes: %05d):" olen
+      <-> Builder.fromString (take 8 hos)
+    L.info $ "stderr" <-> displayf "(bytes: %05d):" elen
+      <-> Builder.fromString (take 8 hes)
+  Nothing -> do
+    L.warn $ "Process Timed-out"
 
 tryTimeout timelimit =
   if timelimit > 0

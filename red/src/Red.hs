@@ -32,6 +32,9 @@ import           Control.Reduce.Util.Logger       as L
 import           Control.Reduce.Util.OptParse
 import           System.Directory.Tree
 
+-- cassava
+import qualified Data.Csv as C
+
 -- contravariant
 import           Data.Functor.Contravariant
 
@@ -96,6 +99,14 @@ main = do
     )
   runReaderT (run config) $ cnfLogger config
 
+newtype Count = Count Int
+
+instance C.DefaultOrdered Count where
+  headerOrder _ = C.header ["count"]
+
+instance C.ToNamedRecord Count where
+  toNamedRecord (Count c) = C.namedRecord ["count" C..= c ]
+
 run :: Config -> ReaderT Logger IO ()
 run Config {..} = do
   case cnfFormat of
@@ -130,7 +141,9 @@ run Config {..} = do
       -> a
       -> m a
     reduceAll tofile cost is a =
-      toPredicateM cnfPredicateOptions tofile a >>= \case
+      toPredicateM
+        cnfPredicateOptions tofile
+        (Count . length . view (cloneIso is)) a >>= \case
         Just predicate -> do
           result <- reduce cnfReducerName cost predicate is a
           case result of

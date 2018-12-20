@@ -43,6 +43,7 @@ dependencies:
 - containers
 - lens
 - megaparsec == 6.5.0
+- cassava
 
 library:
   source-dirs: src

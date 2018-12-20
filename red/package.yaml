@@ -30,6 +30,7 @@ dependencies:
 - lens
 - contravariant
 - unliftio
+- cassava
   # - filepath
   # - directory
   # - bytestring

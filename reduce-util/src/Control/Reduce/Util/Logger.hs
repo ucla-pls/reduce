@@ -83,17 +83,19 @@ simpleLogMessage ::
 simpleLogMessage Logger {..} lvl bldr = do
   t <- liftIO $ getZonedTime
   return $
-    case logLevel of
-      DEBUG ->
+    (
+      if logLevel <= DEBUG
+      then
         displayf "[%5s]" lvl
         <-> Builder.fromString
-          (formatTime defaultTimeLocale (iso8601DateFormat (Just "%H:%M:%S")) t)
-      INFO ->
+        (formatTime defaultTimeLocale (iso8601DateFormat (Just "%H:%M:%S")) t)
+      else
+        if logLevel == INFO
+        then
           Builder.fromString ((formatTime defaultTimeLocale "%H:%M:%S") t)
-      _ ->
+        else
           mempty
-    <-> indentation currentDepth (straight indent) <> bldr
-
+    ) <-> indentation currentDepth (straight indent) <> bldr
   where
     indentation i cur =
       Builder.fromLazyText (Text.replicate (fromIntegral i) cur)

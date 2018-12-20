@@ -138,6 +138,13 @@ parsePredicateOptions template =
           )
           <|> pure Nothing
         )
+    <*> ( Just <$> strOption
+          ( long "metrics"
+            <> help
+            "the metrics output, defaults to metric.csv in the work folder."
+          )
+          <|> pure Nothing
+        )
     <*> switch
     ( long "keep-folders"
       <> short 'K'
@@ -145,7 +152,7 @@ parsePredicateOptions template =
     )
     <*> parseCmd
    where
-     mkPredicateOptions ec so se wf kf mkCmd = do
+     mkPredicateOptions ec so se wf mf kf mkCmd = do
        cmd <- mkCmd >>= \case
          Left err ->
            fail err
@@ -156,7 +163,11 @@ parsePredicateOptions template =
             return $ folder
           Nothing -> do
             createTempDirectory "." template
-       return $ PredicateOptions ec so se wf' kf cmd
+       return $
+         PredicateOptions
+         ec so se
+         (maybe (wf' </> "metrics.csv") id mf)
+         wf' kf cmd
 
      parseExitcode =
        exitCodeFromInt

@@ -2,7 +2,7 @@
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 1022ee4918c32d7884b4362d02c9dda9dca38625f04af42ab3754aee56863e60
+-- hash: 9cceeefe3ca47cbf01c84fac6ee33f4e94974ba55448166e3f58ab1e50560c23
 
 name:           red
 version:        0.1.0.0
@@ -33,6 +33,7 @@ library
   build-depends:
       base >=4.7 && <5
     , bytestring
+    , cassava
     , contravariant
     , lens
     , mtl
@@ -53,6 +54,7 @@ executable red
   build-depends:
       base >=4.7 && <5
     , bytestring
+    , cassava
     , contravariant
     , lens
     , mtl

@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedStrings   #-}
@@ -52,8 +53,8 @@ module Control.Reduce.Util
   ) where
 
 -- lens
-import Control.Lens.Iso
-import Control.Lens
+import           Control.Lens
+import           Control.Lens.Iso
 
 -- typed-process
 import           System.Process.Typed
@@ -72,6 +73,9 @@ import           UnliftIO.Directory
 -- containers
 import qualified Data.IntSet                           as IS
 
+-- cassava
+import qualified Data.Csv as C
+
 -- bytestring
 import qualified Data.ByteString.Char8                 as BS
 import qualified Data.ByteString.Lazy                  as BL
@@ -83,8 +87,10 @@ import           Control.Monad.Trans.Maybe
 
 -- base
 import qualified Data.List                             as L
+import           GHC.Generics                          (Generic)
 import           System.Exit
 import           Text.Printf
+import           Data.Maybe
 
 -- directory-tree
 import           System.Directory.Tree
@@ -104,51 +110,109 @@ import           System.Process.Consume
 import           Control.Reduce
 import           Data.Functor.Contravariant.PredicateM
 
+-- -- cassava
+-- import qualified Data.Csv
+
+
 data PredicateOptions = PredicateOptions
   { predOptExpectedStatus :: !ExitCode
   , predOptPreserveStdout :: !Bool
   , predOptPreserveStderr :: !Bool
+  , predOptMetrics        :: !FilePath
   , predOptWorkFolder     :: !FilePath
   , predOptKeepFolders    :: !Bool
   , predOptCmd            :: !Cmd
   } deriving (Show, Eq)
 
+data Metric a = Metric
+  { metricContent :: !a
+  , metricFolder  :: !String
+  , metricResults :: !(Maybe CmdResult)
+  , metricSuccess :: !Bool
+  } deriving (Show, Eq, Generic)
+
+
+instance C.DefaultOrdered a => C.DefaultOrdered (Metric a) where
+  headerOrder _ =
+    C.headerOrder (undefined :: a)
+    <> C.header
+    [ "folder"
+    , "success"
+    , "setup time"
+    , "run time"
+    , "status"
+    , "stdout (length)"
+    , "stdout (sha256)"
+    , "stderr (length)"
+    , "stderr (sha256)"
+    ]
+
+instance C.ToNamedRecord a => C.ToNamedRecord (Metric a) where
+  toNamedRecord Metric {..} =
+    C.toNamedRecord metricContent <>
+    C.namedRecord
+    ["folder" C..= (metricFolder :: String)
+    , "setup time" C..= maybe (-1) resultSetupTime metricResults
+    , "run time" C..= maybe (-1) resultRunTime metricResults
+    , "status" C..= maybe (-1) (exitCodeToInt . resultExitCode) metricResults
+    , "stdout (length)"
+      C..= maybe (-1 :: Int) (fromIntegral . snd . resultStdout) metricResults
+    , "stdout (sha256)"
+      C..= maybe "-" (showHash . fst . resultStdout) metricResults
+    , "stderr (length)"
+      C..= maybe (-1 :: Int) (fromIntegral . snd . resultStderr) metricResults
+    , "stderr (sha256)"
+      C..= maybe "-" (showHash . fst . resultStderr) metricResults
+    , "success" C..= (if metricSuccess then "true" else "false" :: String)
+    ]
+
 -- | Creates a predicate from the CheckOptions and CmdOptions.
 toPredicateM ::
- (L.HasLogger env, MonadReader env m, MonadUnliftIO m)
+ (L.HasLogger env, C.ToNamedRecord c, C.DefaultOrdered c, MonadReader env m,
+ MonadUnliftIO m)
  => PredicateOptions
  -> (a -> m CmdInput)
+ -> (a -> c)
  -> a
  -> m (Maybe (PredicateM m a))
-toPredicateM PredicateOptions {..} setup a = do
+toPredicateM PredicateOptions {..} setup cf a = do
   L.phase "Initial run" $ do
-    runCmd setup (predOptWorkFolder </> "initial") predOptCmd a >>= \case
-      Just (ec, oh, eh)
-        | ec /= predOptExpectedStatus ->
+    let folder = predOptWorkFolder </> "initial"
+    cmdres <- runCmd setup folder predOptCmd a
+    pred' <- case cmdres of
+      Just CmdResult {..}
+        | resultExitCode /= predOptExpectedStatus ->
           return $ Nothing
         | otherwise -> do
-            let
-              pred =
-                PredicateM $
-                ( (\(fp, a) ->
-                     runCmd setup (predOptWorkFolder </> fp) predOptCmd a)
-                >=> testM oh eh
-                )
-            Just <$> wrapPredicate pred
+            Just <$> wrapPredicate
+              ( PredicateM $ predicate resultStdout resultStderr )
       Nothing ->
         return $ Nothing
+    liftIO .
+      BLC.writeFile predOptMetrics
+      $ C.encodeDefaultOrderedByName
+      [ Metric (cf a) folder cmdres (isJust pred')]
+    return pred'
   where
-    testM oh eh x = do
-      let p = testp oh eh x
-      L.info $ if p then "success" else "failure"
-      return p
-    testp oh eh = \case
-      Just (ec', oh', eh') ->
-        ec' == predOptExpectedStatus
-        && (not predOptPreserveStdout || oh' == oh)
-        && (not predOptPreserveStderr || eh' == eh)
-      Nothing ->
-        False
+    predicate oh eh (fp, a) = do
+      let folder = (predOptWorkFolder </> fp)
+      res <- runCmd setup folder predOptCmd a
+      let succ = p res
+      L.info $ if succ then "success" else "failure"
+      liftIO .
+        BLC.appendFile predOptMetrics
+        $ C.encodeDefaultOrderedByNameWith
+          (C.defaultEncodeOptions { C.encIncludeHeader = False })
+          [ Metric (cf a) folder res succ ]
+      return succ
+      where
+        p = \case
+          Just CmdResult {..} ->
+            resultExitCode == predOptExpectedStatus
+            && (not predOptPreserveStdout || resultStdout == oh)
+            && (not predOptPreserveStderr || resultStderr == eh)
+          Nothing ->
+            False
 
     wrapPredicate ::
       (L.HasLogger env, MonadReader env m, MonadUnliftIO m)
