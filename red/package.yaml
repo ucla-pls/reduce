@@ -27,7 +27,9 @@ dependencies:
 - text
 - mtl
 - bytestring
+- lens
 - contravariant
+- unliftio
   # - filepath
   # - directory
   # - bytestring
@@ -37,15 +39,19 @@ dependencies:
   # - stm
   # - mtl
 
+library:
+  source-dirs: src
+
 executables:
   red:
-    main:                Red.hs
+    main:                Main.hs
     source-dirs:         .
     ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
+      - -threaded
+      - -rtsopts
+      - -with-rtsopts=-N
     dependencies:
-    - reduce-util
-    - reduce
-    - optparse-applicative
+      - red
+      - reduce-util
+      - reduce
+      - optparse-applicative

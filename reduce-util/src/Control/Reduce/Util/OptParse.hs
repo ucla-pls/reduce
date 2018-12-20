@@ -124,14 +124,40 @@ parseCmd =
 --             s <- withFormat fn ArgsInput
 --             return $ ArgumentOptions str' s
 
-parseCheckOptions :: Parser CheckOptions
-parseCheckOptions =
-  CheckOptions
-      <$> parseExitcode
-      <*> switch (long "stdout" <> help "preserve stdout.")
-      <*> switch (long "stderr" <> help "preserve stderr.")
-
+parsePredicateOptions :: String -> Parser (IO PredicateOptions)
+parsePredicateOptions template =
+  mkPredicateOptions
+    <$> parseExitcode
+    <*> switch (long "stdout" <> help "preserve stdout.")
+    <*> switch (long "stderr" <> help "preserve stderr.")
+    <*> ( Just <$> strOption
+          ( long "work-folder"
+            <> short 'W'
+            <> help "the work folder."
+            <> showDefault
+          )
+          <|> pure Nothing
+        )
+    <*> switch
+    ( long "keep-folders"
+      <> short 'K'
+      <> help "keep the work folders after use?"
+    )
+    <*> parseCmd
    where
+     mkPredicateOptions ec so se wf kf mkCmd = do
+       cmd <- mkCmd >>= \case
+         Left err ->
+           fail err
+         Right cmd -> return $ cmd
+       wf' <- case wf of
+          Just folder -> do
+            createDirectory folder
+            return $ folder
+          Nothing -> do
+            createTempDirectory "." template
+       return $ PredicateOptions ec so se wf' kf cmd
+
      parseExitcode =
        exitCodeFromInt
        <$> option auto
@@ -149,43 +175,45 @@ reducerNameFromString = \case
   "binary" -> Just Binary
   _ -> Nothing
 
-parseReducerOptions :: String -> Parser (IO ReducerOptions)
-parseReducerOptions template =
-  mkReduceOptions
-  <$> (
+parseReducerName :: Parser ReducerName
+parseReducerName =
   option (maybeReader (reducerNameFromString . map toLower))
-    ( long "reducer"
-      <> short 'R'
-      <> help "the reducing algorithm to use."
-      <> value Binary
-      <> showDefault
-    )
+  ( long "reducer"
+    <> short 'R'
+    <> help "the reducing algorithm to use."
+    <> value Binary
+    <> showDefault
   )
 
-  <*> (
-  Just <$> strOption
-    ( long "work-folder"
-      <> short 'W'
-      <> help "the work folder."
-      <> showDefault
-    )
-    <|> pure Nothing
-  )
+-- parseReducerOptions :: String -> Parser (IO ReducerOptions)
+-- parseReducerOptions template =
+--   mkReduceOptions
+--   <$>
 
-  <*> switch
-  ( long "keep-folders"
-    <> short 'K'
-    <> help "keep the work folders after use?"
-  )
-  where
-    mkReduceOptions red (mfolder :: Maybe FilePath) n = do
-      case mfolder of
-        Just folder -> do
-          createDirectory folder
-          return $ ReducerOptions red folder n
-        Nothing -> do
-          folder <- createTempDirectory "." template
-          return $ ReducerOptions red folder n
+--   <*> (
+--   Just <$> strOption
+--     ( long "work-folder"
+--       <> short 'W'
+--       <> help "the work folder."
+--       <> showDefault
+--     )
+--     <|> pure Nothing
+--   )
+
+--   <*> switch
+--   ( long "keep-folders"
+--     <> short 'K'
+--     <> help "keep the work folders after use?"
+--   )
+--   where
+--     mkReduceOptions red (mfolder :: Maybe FilePath) n = do
+--       case mfolder of
+--         Just folder -> do
+--           createDirectory folder
+--           return $ ReducerOptions red folder n
+--         Nothing -> do
+--           folder <- createTempDirectory "." template
+--           return $ ReducerOptions red folder n
 
 parseLogger :: Parser Logger
 parseLogger =

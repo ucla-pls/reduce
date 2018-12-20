@@ -78,6 +78,7 @@ spec = do
       argumentToString (evaluateArgument f ((Map.singleton "" (CAConst "key"))))
         `shouldBe` "key:file.txt"
 
+
   describe "replaceRelative" $ do
     it "should replace a relative path" $ do
       replaceRelative "/hello/world/text.txt" ("/hello", "$VAR")
@@ -86,6 +87,21 @@ spec = do
     it "should not replace an path outside the relative path" $ do
       replaceRelative "/hello/world/text.txt" ("/peanuts", "$VAR")
         `shouldBe` "/hello/world/text.txt"
+
+  describe "evaluateCmd" $ do
+    it "should prefix the command and arguments" $ do
+      evaluateCmd (Cmd (-1) "/some/prefix/hello.sh" [CAFilePath "/some/prefix/file", CAInput ""]) ("/some/prefix", "$VAR") (Map.singleton "" (CAFilePath "/some/prefix/file2"))
+      `shouldBe` ("$VAR/hello.sh", ["$VAR/file", "$VAR/file2"])
+
+  describe "cmdToString" $ do
+    it "should prefix the command and arguments" $ do
+      cmdToString
+        (Cmd (-1)
+         "/some/prefix/hello.sh"
+         [CAFilePath "/some/prefix/file", CAInput ""]
+        ) ("/some/prefix", "$VAR")
+        (Map.singleton "" (CAFilePath "/some/prefix/file2"))
+      `shouldBe` ("\"$VAR/hello.sh\" \"$VAR/file\" \"$VAR/file2\"" :: String)
 
   -- describe "createShellScript" $ do
   --   it "can create a shell script" $ do

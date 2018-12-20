@@ -93,8 +93,9 @@ ddmin p es = do
           return $ if t then Just x else Nothing
         Nothing -> return Nothing
 
--- | A slightly faster ddmin, but does not check the predicate for the empty set first and
--- the result of the ddmin. So this assumes that P [] = false and P U = true.
+-- | A slightly faster ddmin, but does not check the predicate for the empty set
+-- first and the result of the ddmin. So this assumes that P [] = false and P U
+-- = true.
 unsafeDdmin :: Monad m => Reducer m [e]
 unsafeDdmin =
   liftReducer (ddmin' 2)
@@ -186,7 +187,7 @@ binaryReductions p =
 
 -- | Like a the binary reductor, but uses a generic cost function. Is functionally
 -- equivilent to 'binaryReduction' if the const function is 'List.length'.
-genericBinaryReduction :: (Monad m, Show a) => ([a] -> Int) -> Reducer m [a]
+genericBinaryReduction :: (Monad m) => ([a] -> Int) -> Reducer m [a]
 genericBinaryReduction cost (asMaybeGuard -> pred') =
   runMaybeT . go []
   where

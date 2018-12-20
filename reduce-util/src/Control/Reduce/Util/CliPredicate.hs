@@ -37,6 +37,7 @@ module Control.Reduce.Util.CliPredicate
   Cmd (..)
   , createCmd
   , evaluateCmd
+  , cmdToString
 
   , toShellScript
 
@@ -54,8 +55,9 @@ module Control.Reduce.Util.CliPredicate
 
   , fromArgument
   , fromStream
-  , fromDirTree
+  , fromDirNode
   , fromFile
+  , fromDirTree
 
   -- * Utils
   , replaceRelative
@@ -102,7 +104,9 @@ import qualified Data.Map                              as Map
 import           Control.Applicative                   hiding (many, some)
 import           Data.Bifunctor                        (first)
 import           Data.Foldable
+import           Data.String
 import           Data.Void
+import qualified Data.List as L
 import           System.Exit
 import           System.IO.Error
 import           Text.Printf
@@ -216,11 +220,11 @@ evaluateArgument ca =
     CAJoin a b ->
       CAJoin <$> evaluateArgument a <*> evaluateArgument b
 
-argumentToString :: CmdArgument -> String
+argumentToString :: (IsString a, Semigroup a) => CmdArgument -> a
 argumentToString = \case
-  CAConst str -> str
-  CAFilePath fp -> fp
-  CAInput key -> "{" <> key <> "}"
+  CAConst str -> fromString str
+  CAFilePath fp -> fromString fp
+  CAInput key -> "{" <> fromString key <> "}"
   CAJoin a b ->
     argumentToString a <> argumentToString b
 
@@ -254,16 +258,33 @@ createCmd timelimit cmd args = runExceptT $ do
 -- | Evalutates a `Cmd` with a keymap, so that the results can be
 -- used to create a processs.
 evaluateCmd ::
-  Cmd
+  (Semigroup m, IsString m)
+  => Cmd
   -> (FilePath, String)
   -> Map.Map String CmdArgument
-  -> (String, [String])
+  -> (String, [m])
 evaluateCmd (Cmd _ str args) fp kmap =
   ( replaceRelative str fp
   , map ( argumentToString
+         . flip relativeArgument fp
          . flip evaluateArgument kmap
-         . flip relativeArgument fp) args
+        ) args
   )
+
+cmdToString ::
+  (Monoid m, IsString m)
+  => Cmd
+  -> (FilePath, String)
+  -> Map.Map String CmdArgument
+  -> m
+cmdToString cmd fp kmap =
+  let
+    (a, ms) = evaluateCmd cmd fp kmap
+  in
+    foldMap id
+    . L.intersperse (fromString " ")
+    . map (\x -> "\"" <> x <> "\"")
+    $ fromString a : ms
 
 data CmdInput = CmdInput
   { ciValueMap :: Map.Map String CmdArgument
@@ -291,23 +312,32 @@ fromStream ::
 fromStream bs =
   return $ mempty { ciStdin = Just bs }
 
-fromDirTree ::
+fromDirNode ::
   MonadIO m
   => String
-  -> DirTree FileContent
+  -> DirNode FileContent
   -> m CmdInput
-fromDirTree name td = do
-  liftIO $ writeTreeWith writeContent (name :/ td)
-  return $ mempty { ciValueMap = Map.singleton "" (CAFilePath name)}
+fromDirNode name dn = do
+  name' <- liftIO $ do
+    case unDirNode dn of
+      File f -> writeContent name f
+      Dir td -> writeTreeWith writeContent (name :/ td)
+    makeAbsolute name
+  return $ mempty { ciValueMap = Map.singleton "" (CAFilePath name')}
 
 fromFile ::
   MonadIO m
   => String
   -> BL.ByteString
   -> m CmdInput
-fromFile name bs = do
-  liftIO $ BLC.writeFile name bs
-  return $ mempty { ciValueMap = Map.singleton "" (CAFilePath name)}
+fromFile name = fromDirNode name . DirNode . File . Content
+
+fromDirTree ::
+  MonadIO m
+  => String
+  -> DirTree FileContent
+  -> m CmdInput
+fromDirTree name = fromDirNode name . DirNode . Dir
 
 -- | Creates a shell script which can be executed in the current working
 -- directory.
@@ -318,14 +348,14 @@ toShellScript ::
   -> LazyText.Text
 toShellScript CmdInput {..} workdir cmd = do
   let
-    (p, args) = evaluateCmd cmd (workdir, "\"$WORKDIR\"") ciValueMap
     bldr = execWriter $ do
       tell "#!/usr/bin/env sh\n"
-      tell "WORKDIR=${1:-.}\n"
-      tell "SANDBOX=${2:-\"$WORKDIR\"sandbox}\n"
-      tell "mkdir \"$SANDBOX\"\n"
+      -- tell "#" >> tell (Builder.fromString workdir) >> tell "\n"
+      tell "WORKDIR=${1:-$(pwd)}\n"
+      tell "SANDBOX=${2:-\"$WORKDIR/sandbox\"}\n"
+      tell "mkdir -p \"$SANDBOX\"\n"
       tell "cd \"$SANDBOX\"\n"
-      tell (Builder.fromString $ showCommandForUser p args)
+      tell (cmdToString cmd (workdir, "$WORKDIR") ciValueMap)
       case ciStdin of
         Just _ ->
           tell "< \"$WORKDIR/stdin\""
@@ -344,6 +374,7 @@ setupWorkDir cmdInput@(CmdInput {..}) cmd = do
   curDir <- getCurrentDirectory
   maybe (return ()) (BLC.writeFile "stdin") ciStdin
   LazyText.writeFile "run.sh" $ toShellScript cmdInput curDir cmd
+  setPermissions "run.sh" . setOwnerExecutable True =<< getPermissions "run.sh"
 
 
 -- | Run a command in a working folder. Fails if the working folder
@@ -372,7 +403,7 @@ runCmd inputCreater workDir cmd a = do
             consumeWithHash
               (combineConsumers olog $ handlerLogger hout)
               (combineConsumers elog $ handlerLogger herr)
-              $ proc "run.sh" []
+              $ proc "./run.sh" []
     logResults tp tm m
     return m
 
@@ -387,7 +418,8 @@ runCmd inputCreater workDir cmd a = do
             <-> Builder.fromString (take 8 hos)
           L.info $ "stderr" <-> displayf "(bytes: %05d):" elen
             <-> Builder.fromString (take 8 hes)
-          return $ printf "%d,%s,%d,%s,%d\n" (exitCodeToInt ec)
+          return $ printf "%d,%s,%d,%s,%d\n"
+            (exitCodeToInt ec) hos olen hes elen
         Nothing -> do
           L.warn $ "Process Timed-out"
           return $ "N/A,N/A,N/A,N/A,N/A\n"

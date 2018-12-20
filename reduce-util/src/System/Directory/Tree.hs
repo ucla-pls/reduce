@@ -23,6 +23,8 @@ module System.Directory.Tree
   , DirTreeNode (..)
   , foldDirTreeNode
 
+  , DirNode (..)
+
   , AnchoredTree (..)
   , foldTreeWithFilePath
   , toFileList
@@ -77,6 +79,7 @@ foldDirTreeNode ff fd =
     File a -> ff a
     Dir  r -> fd r
 
+
 newtype DirTreeF a r =
   DirTreeF { unDirTreeF :: Map.Map FilePath (DirTreeNode a r) }
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, NFData, Generic)
@@ -88,22 +91,10 @@ newtype DirTree a =
   DirTree {unDirTree :: Fix (DirTreeF a)}
   deriving (Show, Eq, Ord, Generic)
 
--- file :: a -> DirTree a
--- file = fromNode . File
--- {-# INLINE file #-}
-
--- dir :: Map.Map FilePath (DirTree a) -> DirTree a
--- dir = fromNode . Dir . coerce
--- {-# INLINE dir #-}
-
--- -- (Map.Map FilePath (Fix (DirTreeF a)))
--- fromNode :: DirTreeNode a (DirTree) -> DirTree a
--- fromNode = DirTree . Fix . DirTreeF
--- underDir f = DirTree . f . unDirTree
--- {-# INLINE underDir #-}
-
--- cataD :: (DirTreeNode a (Fix (DirTreeF a)) -> c) -> DirTree a -> c
--- cataD f = cata (fmap f . unDirTreeF) . unDirTree
+-- | A directory tree
+newtype DirNode a =
+  DirNode { unDirNode :: DirTreeNode a (DirTree a) }
+  deriving (Show, Eq, Ord, Generic)
 
 instance Functor DirTree where
   fmap f =
@@ -133,7 +124,6 @@ instance Semigroup (DirTree a) where
       unioner = \case
         (Dir a, Dir b) -> Dir $ go (a, b)
         (_, a) -> a
-
 
 data AnchoredTree a = (:/)
   { anchor  :: ! FilePath

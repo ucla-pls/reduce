@@ -2,7 +2,7 @@
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 0b6c9409a702a969b4ee221d80760fb402a1cf01b404c999aa617c27d04a3bb3
+-- hash: 1022ee4918c32d7884b4362d02c9dda9dca38625f04af42ab3754aee56863e60
 
 name:           red
 version:        0.1.0.0
@@ -23,8 +23,28 @@ source-repository head
   type: git
   location: https://github.com/kalhauge/reduce
 
+library
+  exposed-modules:
+      Red
+  other-modules:
+      Paths_red
+  hs-source-dirs:
+      src
+  build-depends:
+      base >=4.7 && <5
+    , bytestring
+    , contravariant
+    , lens
+    , mtl
+    , optparse-applicative
+    , reduce
+    , reduce-util
+    , text
+    , unliftio
+  default-language: Haskell2010
+
 executable red
-  main-is: Red.hs
+  main-is: Main.hs
   other-modules:
       Paths_red
   hs-source-dirs:
@@ -34,9 +54,12 @@ executable red
       base >=4.7 && <5
     , bytestring
     , contravariant
+    , lens
     , mtl
     , optparse-applicative
+    , red
     , reduce
     , reduce-util
     , text
+    , unliftio
   default-language: Haskell2010
