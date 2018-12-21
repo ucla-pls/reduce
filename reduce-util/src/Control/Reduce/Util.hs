@@ -45,6 +45,8 @@ module Control.Reduce.Util
   ( PredicateOptions (..)
   , toPredicateM
 
+  , count
+
   , ReducerName (..)
   , reduce
   , setreduce
@@ -282,3 +284,17 @@ setreduce reducer p ffrom input = do
         toSetReducer linearReduction p' input
       Binary ->
         setBinaryReduction p' input
+
+
+-- * Metrics
+
+count :: [a] -> Count
+count = Count . length
+
+newtype Count = Count Int
+
+instance C.DefaultOrdered Count where
+  headerOrder _ = C.header ["count"]
+
+instance C.ToNamedRecord Count where
+  toNamedRecord (Count c) = C.namedRecord ["count" C..= c ]

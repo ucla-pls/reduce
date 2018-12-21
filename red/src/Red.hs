@@ -103,14 +103,6 @@ main = do
     )
   runReaderT (run config) $ cnfLogger config
 
-newtype Count = Count Int
-
-instance C.DefaultOrdered Count where
-  headerOrder _ = C.header ["count"]
-
-instance C.ToNamedRecord Count where
-  toNamedRecord (Count c) = C.namedRecord ["count" C..= c ]
-
 run :: Config -> ReaderT Logger IO ()
 run Config {..} = do
   case cnfFormat of
@@ -147,7 +139,7 @@ run Config {..} = do
     reduceAll tofile cost is a =
       toPredicateM
         cnfPredicateOptions tofile
-        (Count . length . view (cloneIso is)) a >>= \case
+        (count . view (cloneIso is)) a >>= \case
         Just predicate -> do
           result <- reduce cnfReducerName cost predicate is a
           case result of
