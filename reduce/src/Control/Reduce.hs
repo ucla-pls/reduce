@@ -30,7 +30,6 @@ module Control.Reduce
 
   -- ** Binary Reduction
   , binaryReduction
-  , binaryReductions
 
   -- *** Generic Binary Reduction
   , genericBinaryReduction
@@ -140,39 +139,18 @@ unsafeLinearReduction (runGuardM -> pred') = go []
 --
 -- Runtime: \(O(s \log n)\)
 binaryReduction :: Monad m => Reducer m [e]
-binaryReduction p es =
+binaryReduction (asMaybeGuard -> p) es =
   runMaybeT . go [] $ L.length es
   where
-    go !sol !n = do
-      r <- binarySearch (contramap range $ asMaybeGuard p) 0 n
-      cases
-        [ guard (r > 0) >> go (es L.!! (r - 1) : sol) (r - 1)
-        , return $ range r
-        ]
+    go !sol !n = cases
+      [ do
+          runGuardM p sol
+          return sol
+      , do
+          r <- binarySearch (contramap range p) 0 n
+          guard (r > 0) >> go (es L.!! (r - 1) : sol) (r - 1)
+      ]
       where range i = L.take i es ++ sol
-
--- | Find all possible minimas. Worst-case exponential.
-binaryReductions :: (Eq e, Monad m) => PredicateM m [e] -> [e] -> m [[e]]
-binaryReductions p =
-  fmap (map L.reverse) . go []
-  where
-    go !sol !xs = do
-      mr <- runMaybeT $ binarySearch (contramap range $ asMaybeGuard p) 0 (L.length xs)
-      case mr of
-        Just r
-          | r > 0 -> do
-              let e = xs L.!! (r - 1)
-              rs <- go  (e : sol) (L.take (r-1) xs)
-              case rs of
-                (m:_) ->
-                  (map (e:) rs ++) . concat <$> mapM (go sol . flip L.delete xs) m
-                [] ->
-                  return []
-          | otherwise ->
-            return [[]]
-        Nothing ->
-          return []
-      where range i = L.take i xs ++ sol
 
 
 -- $GenericReducers
@@ -191,14 +169,16 @@ genericBinaryReduction :: (Monad m) => ([a] -> Int) -> Reducer m [a]
 genericBinaryReduction cost (asMaybeGuard -> pred') =
   runMaybeT . go []
   where
-    go !sol (L.sortOn (cost . (:sol)) -> !as) = do
-      r <- binarySearch (contramap (\i -> L.take i as ++ sol) pred') 0 (L.length as)
-      if r > 0
-        then do
+    go !sol (L.sortOn (cost . (:sol)) -> !as) = cases
+      [ do
+          runGuardM pred' sol
+          return sol
+      , do
+          r <- binarySearch
+            (contramap (\i -> L.take i as ++ sol) pred') 0 (L.length as)
           let (as', rs:_) = L.splitAt (r - 1) as
           go (rs:sol) as' <|> return (as' ++ rs:sol)
-        else
-          return sol
+      ]
 
 -- | An 'ISetReducer' like a generic reducer but uses slightly optimized
 -- data-structures.

@@ -28,14 +28,11 @@ tests =
       [ testSpec "ddmin" (baseTests ddmin)
       , testSpec "binaryReduction" (baseTests binaryReduction)
       , testSpec "linearReduction" (baseTests linearReduction)
-      , testSpec "binaryReductions"
-         (baseTests (\p i -> fmap fst . L.uncons <$> binaryReductions p i ))
       , testSpec "setBinaryReduction"
           (baseTests (liftISetReducer setBinaryReduction ))
       , testSpec "genericBinaryReduction"
           (baseTests (genericBinaryReduction (const 1)))
       ]
-    , testSpec "reduction" $ reductionsTests
     , testGroup "sets" <$> sequence
         [ testSpec "gBiRed" $ setsTests (toSetReducer $ genericBinaryReduction (IS.size . IS.unions))
         , testSpec "sBiRed" $ setsTests setBinaryReduction
@@ -112,14 +109,6 @@ setsTests red = do
           ]
     x <- red (IS.isSubsetOf big >$< yes) space
     x `shouldBe` Just [big]
-
-reductionsTests :: Spec
-reductionsTests = do
-  let mp m = PredicateM $ \i -> return (any (`L.isSubsequenceOf` i) m)
-  it "can find all mimima" $ do
-    let minima = [[3, 5, 9], [5,8,9], [1,2]]
-    x <- binaryReductions (mp minima) [0..10]
-    L.nub x `shouldMatchList` minima
 
 specBinarySearch :: Spec
 specBinarySearch = do
