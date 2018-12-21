@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric       #-}
+{-# LANGUAGE DeriveFunctor       #-}
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedStrings   #-}
@@ -45,7 +46,8 @@ module Control.Reduce.Util
   ( PredicateOptions (..)
   , toPredicateM
 
-  , count
+  , counted
+  , Count (..)
 
   , ReducerName (..)
   , reduce
@@ -126,19 +128,24 @@ data PredicateOptions = PredicateOptions
   , predOptCmd            :: !Cmd
   } deriving (Show, Eq)
 
-data Metric a = Metric
-  { metricContent :: !a
-  , metricFolder  :: !String
-  , metricResults :: !(Maybe CmdResult)
-  , metricSuccess :: !Bool
+
+class Metric a where
+   order :: Const [BS.ByteString] a
+   fields :: a -> [(BS.ByteString, BS.ByteString)]
+
+data MetricRow a = MetricRow
+  { metricRowContent :: !a
+  , metricRowFolder  :: !String
+  , metricRowResults :: !(Maybe CmdResult)
+  , metricRowSuccess :: !Bool
   } deriving (Show, Eq, Generic)
 
 
-instance C.DefaultOrdered a => C.DefaultOrdered (Metric a) where
+instance Metric a => C.DefaultOrdered (MetricRow a) where
   headerOrder _ =
-    C.headerOrder (undefined :: a)
-    <> C.header
-    [ "folder"
+    C.header $
+    getConst (order :: Const [BS.ByteString] a)
+    <> [ "folder"
     , "success"
     , "setup time"
     , "run time"
@@ -149,35 +156,34 @@ instance C.DefaultOrdered a => C.DefaultOrdered (Metric a) where
     , "stderr (sha256)"
     ]
 
-instance C.ToNamedRecord a => C.ToNamedRecord (Metric a) where
-  toNamedRecord Metric {..} =
-    C.toNamedRecord metricContent <>
-    C.namedRecord
-    ["folder" C..= (metricFolder :: String)
-    , "setup time" C..= maybe (-1) resultSetupTime metricResults
-    , "run time" C..= maybe (-1) resultRunTime metricResults
-    , "status" C..= maybe (-1) (exitCodeToInt . resultExitCode) metricResults
+instance Metric a => C.ToNamedRecord (MetricRow a) where
+  toNamedRecord MetricRow {..} =
+    C.namedRecord $
+    (fields metricRowContent) <>
+    ["folder" C..= (metricRowFolder :: String)
+    , "setup time" C..= maybe (-1) resultSetupTime metricRowResults
+    , "run time" C..= maybe (-1) resultRunTime metricRowResults
+    , "status" C..= maybe (-1) (exitCodeToInt . resultExitCode) metricRowResults
     , "stdout (length)"
-      C..= maybe (-1 :: Int) (fromIntegral . snd . resultStdout) metricResults
+      C..= maybe (-1 :: Int) (fromIntegral . snd . resultStdout) metricRowResults
     , "stdout (sha256)"
-      C..= maybe "-" (showHash . fst . resultStdout) metricResults
+      C..= maybe "-" (showHash . fst . resultStdout) metricRowResults
     , "stderr (length)"
-      C..= maybe (-1 :: Int) (fromIntegral . snd . resultStderr) metricResults
+      C..= maybe (-1 :: Int) (fromIntegral . snd . resultStderr) metricRowResults
     , "stderr (sha256)"
-      C..= maybe "-" (showHash . fst . resultStderr) metricResults
-    , "success" C..= (if metricSuccess then "true" else "false" :: String)
+      C..= maybe "-" (showHash . fst . resultStderr) metricRowResults
+    , "success" C..= (if metricRowSuccess then "true" else "false" :: String)
     ]
 
 -- | Creates a predicate from the CheckOptions and CmdOptions.
 toPredicateM ::
- (L.HasLogger env, C.ToNamedRecord c, C.DefaultOrdered c, MonadReader env m,
+ (L.HasLogger env, Metric a, MonadReader env m,
  MonadUnliftIO m)
  => PredicateOptions
  -> (a -> m CmdInput)
- -> (a -> c)
  -> a
  -> m (Maybe (PredicateM m a))
-toPredicateM PredicateOptions {..} setup cf a = do
+toPredicateM PredicateOptions {..} setup a = do
   L.phase "Initial run" $ do
     let folder = predOptWorkFolder </> "initial"
     cmdres <- runCmd setup folder predOptCmd a
@@ -193,7 +199,7 @@ toPredicateM PredicateOptions {..} setup cf a = do
     liftIO .
       BLC.writeFile predOptMetrics
       $ C.encodeDefaultOrderedByName
-      [ Metric (cf a) folder cmdres (isJust pred')]
+      [ MetricRow a folder cmdres (isJust pred')]
     return pred'
   where
     predicate oh eh (fp, a) = do
@@ -205,7 +211,7 @@ toPredicateM PredicateOptions {..} setup cf a = do
         BLC.appendFile predOptMetrics
         $ C.encodeDefaultOrderedByNameWith
           ( C.defaultEncodeOptions { C.encIncludeHeader = False } )
-          [ Metric (cf a) folder res succ ]
+          [ MetricRow a folder res succ ]
       return succ
       where
         p = \case
@@ -239,32 +245,33 @@ data ReducerName
   | Binary
   deriving (Show)
 
+
 -- | Reduce using the reducer options.
 reduce ::
   (Monad m)
   => ReducerName
   -> Maybe ([b] -> Int)
   -> PredicateM m a
-  -> AnIso' a [b]
-  -> a
+  -> ([b] -> a)
+  -> [b]
   -> m (Maybe a)
-reduce reducer costf p f a = do
-  let p' = view (from f) `contramap` p
-  (fmap . fmap $ view (from f)) $
+reduce reducer costf p f input = do
+  let p' = f `contramap` p
+  (fmap . fmap $ f) $
     case reducer of
       Ddmin ->
-        unsafeDdmin p' input
+        unsafeDdmin p' sortedInput
       Linear ->
         runMaybeT
-          (unsafeLinearReduction (asMaybeGuard p') input)
+          (unsafeLinearReduction (asMaybeGuard p') sortedInput)
       Binary ->
         case costf of
-          Nothing -> binaryReduction p' input
+          Nothing -> binaryReduction p' sortedInput
           Just cf ->
-            genericBinaryReduction cf p' (a ^. cloneIso f)
+            genericBinaryReduction cf p' input
   where
-    input =
-      maybe id (\cf -> L.sortOn (cf . (:[]))) costf $ a ^. cloneIso f
+    sortedInput =
+      maybe id (\cf -> L.sortOn (cf . (:[]))) costf $ input
 
 setreduce ::
   forall m a.
@@ -288,13 +295,13 @@ setreduce reducer p ffrom input = do
 
 -- * Metrics
 
-count :: [a] -> Count
-count = Count . length
+counted :: [a] -> Count [a]
+counted a = Count (length a) a
 
-newtype Count = Count Int
+data Count a = Count { getCount :: Int, unCount :: a }
+  deriving (Functor)
 
-instance C.DefaultOrdered Count where
-  headerOrder _ = C.header ["count"]
-
-instance C.ToNamedRecord Count where
-  toNamedRecord (Count c) = C.namedRecord ["count" C..= c ]
+instance Metric (Count x) where
+  order = Const ["count"]
+  fields (Count a _) =
+    ["count" C..= a ]

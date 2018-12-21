@@ -110,22 +110,21 @@ run Config {..} = do
       bs <- liftIO $ BLC.readFile cnfInputFile
       result <- reduceAll
         (fromFile "input")
-        Nothing
-        (iso BLC.lines BLC.unlines) bs
+        Nothing BLC.unlines
+        $ BLC.lines bs
       liftIO $ BLC.writeFile cnfOutputFile result
     Chars -> do
       bs <- liftIO $ BLC.readFile cnfInputFile
       result <- reduceAll
         (fromFile "input")
-        Nothing
-        (iso BLC.unpack BLC.pack) bs
+        Nothing BLC.pack $ BLC.unpack bs
       liftIO $ BLC.writeFile cnfOutputFile result
     Files -> do
       _ :/ dt <- liftIO $ fmap SameAs <$> readTree cnfInputFile
       result <- reduceAll
         (fromDirTree "input")
-        Nothing
-        (iso toFileList (fromJust . fromFileList)) dt
+        Nothing (fromJust . fromFileList)
+        $ toFileList dt
       liftIO $ writeTreeWith writeContent (cnfOutputFile :/ result)
 
   where
@@ -133,23 +132,23 @@ run Config {..} = do
       (HasLogger env, MonadReader env m, MonadUnliftIO m)
       => (a -> m CmdInput)
       -> Maybe ([b] -> Int)
-      -> AnIso' a [b]
-      -> a
+      -> ([b] -> a)
+      -> [b]
       -> m a
-    reduceAll tofile cost is a =
-      toPredicateM
-        cnfPredicateOptions tofile
-        (count . view (cloneIso is)) a >>= \case
+    reduceAll tofile cost f bs =
+      toPredicateM cnfPredicateOptions (tofile . unCount) (f <$> counted bs)
+      >>= \case
         Just predicate -> do
-          result <- reduce cnfReducerName cost predicate is a
+          result <- reduce cnfReducerName cost predicate (fmap f . counted) bs
           case result of
-            Just r -> return r
+            Just r -> return (unCount r)
             Nothing -> do
               L.warn "Could not reduce problem"
-              return a
+              return (f $ bs)
         Nothing -> do
           L.err "Predicate failed"
           liftIO $ exitWith (ExitFailure 1)
+
 
 logAndExit ::
   (HasLogger env, MonadReader env m, MonadIO m)
