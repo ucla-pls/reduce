@@ -46,6 +46,8 @@ module Control.Reduce.Util
   ( PredicateOptions (..)
   , toPredicateM
 
+
+  , Metric (..)
   , counted
   , Count (..)
 
