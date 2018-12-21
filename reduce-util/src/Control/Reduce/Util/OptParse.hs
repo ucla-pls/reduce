@@ -157,7 +157,7 @@ parsePredicateOptions template =
          Left err ->
            fail err
          Right cmd -> return $ cmd
-       wf' <- case wf of
+       wf' <- makeAbsolute =<< case wf of
           Just folder -> do
             createDirectory folder
             return $ folder

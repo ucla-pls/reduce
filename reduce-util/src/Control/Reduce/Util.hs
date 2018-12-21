@@ -202,7 +202,7 @@ toPredicateM PredicateOptions {..} setup cf a = do
       liftIO .
         BLC.appendFile predOptMetrics
         $ C.encodeDefaultOrderedByNameWith
-          (C.defaultEncodeOptions { C.encIncludeHeader = False })
+          ( C.defaultEncodeOptions { C.encIncludeHeader = False } )
           [ Metric (cf a) folder res succ ]
       return succ
       where
@@ -269,10 +269,10 @@ setreduce ::
   (Monad m)
   => ReducerName
   -> PredicateM m a
-  -> (a -> [IS.IntSet], IS.IntSet -> a)
-  -> a
+  -> (IS.IntSet -> a)
+  -> [IS.IntSet]
   -> m (Maybe a)
-setreduce reducer p (fto, ffrom) a = do
+setreduce reducer p ffrom input = do
   let p' = ffrom `contramap` p
   (fmap . fmap $ ffrom . IS.unions) $
     case reducer of
@@ -282,5 +282,3 @@ setreduce reducer p (fto, ffrom) a = do
         toSetReducer linearReduction p' input
       Binary ->
         setBinaryReduction p' input
-  where
-    input = fto a
