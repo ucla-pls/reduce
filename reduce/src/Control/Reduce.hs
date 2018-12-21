@@ -120,19 +120,20 @@ ddmin' n test world =
 --
 -- Runtime: \( O(n) \)
 linearReduction :: Monad m => Reducer m [e]
-linearReduction p xs =
-  runMaybeT (runGuardM p' xs >> unsafeLinearReduction p' xs)
-  where p' = asMaybeGuard p
+linearReduction (asMaybeGuard -> p) xs = do
+  runMaybeT $ do
+    runGuardM p xs
+    unsafeLinearReduction p xs
 
 unsafeLinearReduction :: MonadPlus m => GuardM m [e] -> [e] -> m [e]
-unsafeLinearReduction (runGuardM -> pred') = go []
+unsafeLinearReduction p = go []
   where
-    go !sol !es =
-      case es of
-        [] -> return sol
-        e:es' -> do
-          sol' <- ($ sol) <$> cases [ pred' (sol ++ es') $> id, pure (++ [e])]
-          go sol' es'
+    go !sol = \case
+      [] -> return sol
+      e:es' -> cases
+        [ runGuardM p (sol ++ es') >> go sol es'
+        , go (sol ++ [e]) es'
+        ]
 
 -- | Binary reduction is the simplest form of the set minimizing algorithm.
 -- As such it is fast, while still having the 1-minimality property.
@@ -143,12 +144,10 @@ binaryReduction (asMaybeGuard -> p) es =
   runMaybeT . go [] $ L.length es
   where
     go !sol !n = cases
-      [ do
-          runGuardM p sol
-          return sol
+      [ takeIfSolution p sol
       , do
           r <- binarySearch (contramap range p) 0 n
-          guard (r > 0) >> go (es L.!! (r - 1) : sol) (r - 1)
+          go (es L.!! (r - 1) : sol) (r - 1)
       ]
       where range i = L.take i es ++ sol
 
@@ -166,19 +165,17 @@ binaryReduction (asMaybeGuard -> p) es =
 -- | Like a the binary reductor, but uses a generic cost function. Is functionally
 -- equivilent to 'binaryReduction' if the const function is 'List.length'.
 genericBinaryReduction :: (Monad m) => ([a] -> Int) -> Reducer m [a]
-genericBinaryReduction cost (asMaybeGuard -> pred') =
+genericBinaryReduction cost (asMaybeGuard -> p) =
   runMaybeT . go []
   where
     go !sol (L.sortOn (cost . (:sol)) -> !as) = cases
-      [ do
-          runGuardM pred' sol
-          return sol
+      [ takeIfSolution p sol
       , do
-          r <- binarySearch
-            (contramap (\i -> L.take i as ++ sol) pred') 0 (L.length as)
+          r <- binarySearch (contramap range p) 0 (L.length as)
           let (as', rs:_) = L.splitAt (r - 1) as
           go (rs:sol) as' <|> return (as' ++ rs:sol)
       ]
+      where range i = L.take i as ++ sol
 
 -- | An 'ISetReducer' like a generic reducer but uses slightly optimized
 -- data-structures.
@@ -251,6 +248,11 @@ splitSet n s =
 -- computation.
 cases :: MonadPlus m => [m a] -> m a
 cases = msum
+
+-- |
+takeIfSolution :: Monad m => GuardM m a -> a -> m a
+takeIfSolution p a = runGuardM p a $> a
+
 
 -- ** Conversion
 -- | Transform a IReducer to a Reducer
