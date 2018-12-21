@@ -46,7 +46,6 @@ module Control.Reduce.Util
   ( PredicateOptions (..)
   , toPredicateM
 
-
   , Metric (..)
   , counted
   , Count (..)
@@ -188,7 +187,7 @@ toPredicateM ::
 toPredicateM PredicateOptions {..} setup a = do
   L.phase "Initial run" $ do
     let folder = predOptWorkFolder </> "initial"
-    cmdres <- runCmd setup folder predOptCmd a
+    cmdres <- runCmd setup "initial" predOptCmd a
     pred' <- case cmdres of
       Just CmdResult {..}
         | resultExitCode /= predOptExpectedStatus ->
@@ -213,7 +212,7 @@ toPredicateM PredicateOptions {..} setup a = do
         BLC.appendFile predOptMetrics
         $ C.encodeDefaultOrderedByNameWith
           ( C.defaultEncodeOptions { C.encIncludeHeader = False } )
-          [ MetricRow a folder res succ ]
+          [ MetricRow a fp res succ ]
       return succ
       where
         p = \case
@@ -235,7 +234,7 @@ toPredicateM PredicateOptions {..} setup a = do
         go ref a = do
           x <- liftIO $ atomicModifyIORef ref (\x -> (succ x, x))
           let phaseName =
-                "Iteration " L.<-> L.displayf "%04d" x
+                "Iteration" L.<-> L.displayf "%04d" x
           L.phase phaseName $
             runPredicateM pred (printf "%04d" x, a)
 
