@@ -138,6 +138,11 @@ parsePredicateOptions template =
           )
           <|> pure Nothing
         )
+    <*> switch
+    ( long "keep-folders"
+      <> short 'K'
+      <> help "keep the work folders after use?"
+    )
     <*> ( Just <$> strOption
           ( long "metrics"
             <> help
@@ -145,14 +150,9 @@ parsePredicateOptions template =
           )
           <|> pure Nothing
         )
-    <*> switch
-    ( long "keep-folders"
-      <> short 'K'
-      <> help "keep the work folders after use?"
-    )
     <*> parseCmd
    where
-     mkPredicateOptions ec so se wf mf kf mkCmd = do
+     mkPredicateOptions ec so se wf kf mf mkCmd = do
        cmd <- mkCmd >>= \case
          Left err ->
            fail err

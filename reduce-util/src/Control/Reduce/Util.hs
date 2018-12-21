@@ -265,16 +265,22 @@ reduce reducer costf p f a = do
       maybe id (\cf -> L.sortOn (cf . (:[]))) costf $ a ^. cloneIso f
 
 setreduce ::
+  forall m a.
   (Monad m)
   => ReducerName
-  -> PredicateM m IS.IntSet
-  -> [IS.IntSet]
-  -> m (Maybe [IS.IntSet])
-setreduce reducer p ls = do
-  case reducer of
-    Ddmin ->
-      toSetReducer unsafeDdmin p ls
-    Linear ->
-      toSetReducer linearReduction p ls
-    Binary ->
-      setBinaryReduction p ls
+  -> PredicateM m a
+  -> (a -> [IS.IntSet], IS.IntSet -> a)
+  -> a
+  -> m (Maybe a)
+setreduce reducer p (fto, ffrom) a = do
+  let p' = ffrom `contramap` p
+  (fmap . fmap $ ffrom . IS.unions) $
+    case reducer of
+      Ddmin ->
+        toSetReducer unsafeDdmin p' input
+      Linear ->
+        toSetReducer linearReduction p' input
+      Binary ->
+        setBinaryReduction p' input
+  where
+    input = fto a

@@ -54,8 +54,12 @@ data Format
 
 parseFormat :: Parser Format
 parseFormat =
-  toFormat . map toLower <$> strOption (short 'f' <> value "lines")
-
+  toFormat . map toLower
+  <$> strOption
+  ( short 'f' <> value "lines"
+    <> showDefault <> help "the format of the input."
+    <> metavar "FORMAT"
+  )
   where
     toFormat str =
       let f = List.isPrefixOf str in
@@ -70,9 +74,9 @@ parseFormat =
 data Config = Config
   { cnfInputFile        :: !FilePath
   , cnfOutputFile       :: !FilePath
-  , cnfFormat           :: !Format
   , cnfLogger           :: !Logger
   , cnfReducerName      :: !ReducerName
+  , cnfFormat           :: !Format
   , cnfPredicateOptions :: !PredicateOptions
   } deriving (Show)
 
@@ -81,13 +85,13 @@ getConfigParser =
   cfg
   <$> strOption (long "input-file" <> short 'i')
   <*> strOption (long "output-file" <> short 'o')
-  <*> parseFormat
   <*> parseLogger
   <*> parseReducerName
+  <*> parseFormat
   <*> parsePredicateOptions "red"
   where
-    cfg input output fmt lg rn cmd =
-      Config input output fmt lg rn <$> cmd
+    cfg input output lg rn fmt cmd =
+      Config input output lg rn fmt <$> cmd
 
 main :: IO ()
 main = do
