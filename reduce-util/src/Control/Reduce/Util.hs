@@ -187,7 +187,7 @@ toPredicateM ::
 toPredicateM PredicateOptions {..} setup a = do
   L.phase "Initial run" $ do
     let folder = predOptWorkFolder </> "initial"
-    cmdres <- runCmd setup "initial" predOptCmd a
+    cmdres <- runCmd setup folder predOptCmd a
     pred' <- case cmdres of
       Just CmdResult {..}
         | resultExitCode /= predOptExpectedStatus ->
@@ -200,7 +200,7 @@ toPredicateM PredicateOptions {..} setup a = do
     liftIO .
       BLC.writeFile predOptMetrics
       $ C.encodeDefaultOrderedByName
-      [ MetricRow a folder cmdres (isJust pred')]
+      [ MetricRow a "initial" cmdres (isJust pred')]
     return pred'
   where
     predicate oh eh (fp, a) = do
