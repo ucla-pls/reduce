@@ -1,5 +1,5 @@
-{-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE DeriveFunctor       #-}
+{-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedStrings   #-}
@@ -79,7 +79,10 @@ import           UnliftIO.Directory
 import qualified Data.IntSet                           as IS
 
 -- cassava
-import qualified Data.Csv as C
+import qualified Data.Csv                              as C
+
+-- time
+import           Data.Time
 
 -- bytestring
 import qualified Data.ByteString.Char8                 as BS
@@ -92,10 +95,10 @@ import           Control.Monad.Trans.Maybe
 
 -- base
 import qualified Data.List                             as L
+import           Data.Maybe
 import           GHC.Generics                          (Generic)
 import           System.Exit
 import           Text.Printf
-import           Data.Maybe
 
 -- directory-tree
 import           System.Directory.Tree
@@ -123,6 +126,8 @@ data PredicateOptions = PredicateOptions
   { predOptExpectedStatus :: !ExitCode
   , predOptPreserveStdout :: !Bool
   , predOptPreserveStderr :: !Bool
+  , predOptTotalTimeout   :: !Double
+  , predOptMaxIterations  :: !Int
   , predOptMetrics        :: !FilePath
   , predOptWorkFolder     :: !FilePath
   , predOptKeepFolders    :: !Bool
@@ -136,6 +141,7 @@ class Metric a where
 
 data MetricRow a = MetricRow
   { metricRowContent :: !a
+  , metricRowTime    :: !NominalDiffTime
   , metricRowFolder  :: !String
   , metricRowResults :: !(Maybe CmdResult)
   , metricRowSuccess :: !Bool
@@ -147,21 +153,23 @@ instance Metric a => C.DefaultOrdered (MetricRow a) where
     C.header $
     getConst (order :: Const [BS.ByteString] a)
     <> [ "folder"
-    , "success"
-    , "setup time"
-    , "run time"
-    , "status"
-    , "stdout (length)"
-    , "stdout (sha256)"
-    , "stderr (length)"
-    , "stderr (sha256)"
-    ]
+       , "time"
+       , "success"
+       , "setup time"
+       , "run time"
+       , "status"
+       , "stdout (length)"
+       , "stdout (sha256)"
+       , "stderr (length)"
+       , "stderr (sha256)"
+       ]
 
 instance Metric a => C.ToNamedRecord (MetricRow a) where
   toNamedRecord MetricRow {..} =
     C.namedRecord $
     (fields metricRowContent) <>
-    ["folder" C..= (metricRowFolder :: String)
+    [ "folder" C..= metricRowFolder
+    , "time" C..= (realToFrac metricRowTime :: Double)
     , "setup time" C..= maybe (-1) resultSetupTime metricRowResults
     , "run time" C..= maybe (-1) resultRunTime metricRowResults
     , "status" C..= maybe (-1) (exitCodeToInt . resultExitCode) metricRowResults
@@ -176,6 +184,13 @@ instance Metric a => C.ToNamedRecord (MetricRow a) where
     , "success" C..= (if metricRowSuccess then "true" else "false" :: String)
     ]
 
+data PredicateException
+  = PredicateTimedOut
+  | PredicateIterationsExceeded
+  deriving (Show)
+
+instance Exception PredicateException
+
 -- | Creates a predicate from the CheckOptions and CmdOptions.
 toPredicateM ::
  (L.HasLogger env, Metric a, MonadReader env m,
@@ -185,6 +200,7 @@ toPredicateM ::
  -> a
  -> m (Maybe (PredicateM m a))
 toPredicateM PredicateOptions {..} setup a = do
+  start <- liftIO $ getCurrentTime
   L.phase "Initial run" $ do
     let folder = predOptWorkFolder </> "initial"
     cmdres <- runCmd setup folder predOptCmd a
@@ -194,16 +210,22 @@ toPredicateM PredicateOptions {..} setup a = do
           return $ Nothing
         | otherwise -> do
             Just <$> wrapPredicate
-              ( PredicateM $ predicate resultStdout resultStderr )
+              ( PredicateM $ predicate start resultStdout resultStderr )
       Nothing ->
         return $ Nothing
     liftIO .
       BLC.writeFile predOptMetrics
       $ C.encodeDefaultOrderedByName
-      [ MetricRow a "initial" cmdres (isJust pred')]
+      [ MetricRow a 0 "initial" cmdres (isJust pred')]
     return pred'
   where
-    predicate oh eh (fp, a) = do
+    predicate start oh eh (fp, a) = do
+      now <- liftIO $ getCurrentTime
+      let diff = now `diffUTCTime` start
+
+      when (0 < predOptTotalTimeout && predOptTotalTimeout < realToFrac diff)
+        . liftIO . throwIO $ PredicateTimedOut
+
       let folder = (predOptWorkFolder </> fp)
       res <- runCmd setup folder predOptCmd a
       let succ = p res
@@ -212,7 +234,7 @@ toPredicateM PredicateOptions {..} setup a = do
         BLC.appendFile predOptMetrics
         $ C.encodeDefaultOrderedByNameWith
           ( C.defaultEncodeOptions { C.encIncludeHeader = False } )
-          [ MetricRow a fp res succ ]
+          [ MetricRow a diff fp res succ ]
       return succ
       where
         p = \case
@@ -233,6 +255,8 @@ toPredicateM PredicateOptions {..} setup a = do
       where
         go ref a = do
           x <- liftIO $ atomicModifyIORef ref (\x -> (succ x, x))
+          when (0 < predOptMaxIterations && predOptMaxIterations < x)
+            . liftIO . throwIO $ PredicateIterationsExceeded
           let phaseName =
                 "Iteration" L.<-> L.displayf "%04d" x
           L.phase phaseName $

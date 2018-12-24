@@ -130,6 +130,22 @@ parsePredicateOptions template =
     <$> parseExitcode
     <*> switch (long "stdout" <> help "preserve stdout.")
     <*> switch (long "stderr" <> help "preserve stderr.")
+    <*> option auto
+    ( long "total-time"
+      <> metavar "SECS"
+      <> value (-1)
+      <> showDefault
+      <> help (
+          "the maximum seconds to run all predicates, negative means no timelimit.")
+    )
+    <*> option auto
+    ( long "max-iterations"
+      <> metavar "ITERS"
+      <> value (-1)
+      <> showDefault
+      <> help (
+          "the maximum number of time to run the predicate, negative means no limit.")
+    )
     <*> ( Just <$> strOption
           ( long "work-folder"
             <> short 'W'
@@ -152,7 +168,7 @@ parsePredicateOptions template =
         )
     <*> parseCmd
    where
-     mkPredicateOptions ec so se wf kf mf mkCmd = do
+     mkPredicateOptions ec so se tt mi wf kf mf mkCmd = do
        cmd <- mkCmd >>= \case
          Left err ->
            fail err
@@ -166,6 +182,7 @@ parsePredicateOptions template =
        return $
          PredicateOptions
          ec so se
+         tt mi
          (maybe (wf' </> "metrics.csv") id mf)
          wf' kf cmd
 
