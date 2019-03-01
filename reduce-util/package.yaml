@@ -42,8 +42,10 @@ dependencies:
 - data-fix
 - containers
 - lens
-- megaparsec == 6.5.0
+- vector
+- megaparsec >= 6.5.0 && < 7.1.0
 - cassava
+- profunctors
 
 library:
   source-dirs: src

@@ -31,6 +31,7 @@ dependencies:
 - contravariant
 - unliftio
 - cassava
+- vector
   # - filepath
   # - directory
   # - bytestring

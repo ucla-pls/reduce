@@ -1,6 +1,7 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Rank2Types        #-}
-{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE Rank2Types                 #-}
+{-# LANGUAGE RecordWildCards            #-}
 {-|
 Module      : Control.Reduce.Util.Logger
 Copyright   : (c) Christian Gram Kalhauge, 2018
@@ -12,12 +13,16 @@ This module contains a logger implementation.
 
 module Control.Reduce.Util.Logger where
 
+-- lens
+import           Control.Lens
+
 -- text
 import qualified Data.Text.Lazy             as Text
 import qualified Data.Text.Lazy.Builder     as Builder
 import qualified Data.Text.Lazy.IO          as Text
 
 -- mtl
+import           Control.Monad.Reader
 import           Control.Monad.Reader.Class
 
 -- time
@@ -49,38 +54,54 @@ data IndentionFormat = IndentionFormat
   , end      :: !Text.Text
   } deriving (Show, Eq)
 
-data Logger = Logger
+data LoggerConfig = LoggerConfig
   { logLevel     :: ! LogLevel
   , currentDepth :: ! Int
   , maxDepth     :: ! Int
   , logHandle    :: ! Handle
   , indent       :: ! IndentionFormat
+  , silent       :: ! Bool
   } deriving (Show, Eq)
 
 class HasLogger env where
-  loggerL :: Lens env env Logger Logger
+  loggerL :: Lens env env LoggerConfig LoggerConfig
 
-instance HasLogger Logger where
+instance HasLogger LoggerConfig where
   loggerL = id
 
-defaultLogger :: Logger
-defaultLogger = Logger INFO 0 0 stderr (IndentionFormat "│ " "├ " "└ ")
+newtype LoggerT m a =
+  LoggerT { runLoggerT :: ReaderT LoggerConfig m a }
+  deriving (Functor, Applicative, Monad, MonadReader LoggerConfig, MonadIO)
 
-sPutStr :: MonadIO m => Logger -> m Builder.Builder -> m ()
-sPutStr Logger {..} m =
+type Logger = LoggerT IO
+
+withLogger :: (MonadReader env m, HasLogger env, MonadIO m) => LoggerT IO a -> m a
+withLogger m =
+  liftIO . runReaderT (runLoggerT m) =<< view loggerL
+
+defaultLogger :: LoggerConfig
+defaultLogger = LoggerConfig INFO 0 0 stderr (IndentionFormat "│ " "├ " "└ ") False
+
+silentLogger :: LoggerConfig
+silentLogger = defaultLogger { silent = True }
+
+sPutStr :: MonadIO m => LoggerConfig -> m Builder.Builder -> m ()
+sPutStr LoggerConfig {..} m =
+  unless silent $
   liftIO . Text.hPutStr logHandle . Builder.toLazyText =<< m
 
-sPutStrLn :: MonadIO m => Logger -> m Builder.Builder -> m ()
-sPutStrLn Logger {..} m =
+sPutStrLn :: MonadIO m => LoggerConfig -> m Builder.Builder -> m ()
+sPutStrLn LoggerConfig {..} m =
+  unless silent $
   liftIO . Text.hPutStrLn logHandle . Builder.toLazyText =<< m
 
 simpleLogMessage ::
   MonadIO m
-  => Logger
+  => LoggerConfig
   -> String
   -> Builder.Builder
   -> m (Builder.Builder)
-simpleLogMessage Logger {..} lvl bldr = do
+simpleLogMessage LoggerConfig {..} lvl bldr = do
   t <- liftIO $ getZonedTime
   return $
     (
@@ -104,7 +125,7 @@ log ::
   (HasLogger env, MonadReader env m, MonadIO m)
   => LogLevel -> Builder.Builder -> m ()
 log curLvl bldr = do
-  sl@Logger {..} <- view loggerL
+  sl@LoggerConfig {..} <- view loggerL
   when (curLvl >= logLevel && (currentDepth <= maxDepth || maxDepth < 0)) $ do
       sPutStrLn sl $ simpleLogMessage sl (show curLvl)
         (Builder.fromLazyText (new indent) <> bldr)
@@ -113,8 +134,8 @@ timedPhase' ::
   (HasLogger env, MonadReader env m, MonadIO m)
   => Builder.Builder -> m (Double, a) -> m (Double, a)
 timedPhase' bldr ma = do
-  sl@Logger {..} <- view loggerL
-  let runMa = local (update loggerL $ \s -> s { currentDepth = currentDepth + 1 } ) ma
+  sl@LoggerConfig {..} <- view loggerL
+  let runMa = local (over loggerL $ \s -> s { currentDepth = currentDepth + 1 } ) ma
   case currentDepth `compare` (if maxDepth < 0 then currentDepth + 1 else maxDepth) of
     LT -> do
       sPutStrLn sl $ simpleLogMessage sl "START"
@@ -196,12 +217,3 @@ timeIO m = do
   a <- m
   end <- liftIO getCurrentTime
   return (realToFrac $ diffUTCTime end start, a)
-
--- Lens boilerplate
-type Lens s t a b = forall f. Functor f => (a -> f b) -> (s -> f t)
-
-view :: MonadReader s m => Lens s s a a -> m a
-view lens = getConst . lens Const <$> ask
-
-update :: Lens s t a b -> (a -> b) -> (s -> t)
-update lens f = runIdentity . lens (Identity . f)

@@ -1,6 +1,8 @@
+{-# LANGUAGE ApplicativeDo       #-}
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-|
 Module      : Control.Reduce.Util.OptParse
@@ -24,24 +26,25 @@ import           System.FilePath
 import           System.Directory
 
 -- base
-import           Data.Char                  (toLower)
+import           Data.Char                        (toLower)
 import           Data.Foldable
-import qualified Data.List                  as List
+import qualified Data.List                        as List
+import           Data.Maybe
 
 -- temporary
-import System.IO.Temp
+import           System.IO.Temp
 
 -- bytestring
-import qualified Data.ByteString.Lazy       as BL
-import qualified Data.ByteString.Lazy.Char8 as BLC
+import qualified Data.ByteString.Lazy             as BL
+import qualified Data.ByteString.Lazy.Char8       as BLC
 
 -- reduce-util
 import           Control.Reduce.Util
-import           Control.Reduce.Util.Logger
 import           Control.Reduce.Util.CliPredicate
+import           Control.Reduce.Util.Logger
 
 -- directory-tree
-import System.Directory.Tree
+import           System.Directory.Tree
 
 data InputFrom
   = FromString String
@@ -60,9 +63,9 @@ data InputFrom
 -- instance Show CmdOptionWithoutFormat where
 --   showsPrec _ _ = showString "CmdOptionWithoutFormat"
 
-parseCmd :: Parser (IO (Either String Cmd))
-parseCmd =
-  createCmd
+parseCommandTemplate :: Parser (IO (Either String CommandTemplate))
+parseCommandTemplate =
+  createCommandTemplate
   <$> option auto
   ( long "timelimit"
     <> short 'T'
@@ -124,77 +127,104 @@ parseCmd =
 --             s <- withFormat fn ArgsInput
 --             return $ ArgumentOptions str' s
 
-parsePredicateOptions :: String -> Parser (IO PredicateOptions)
-parsePredicateOptions template =
-  mkPredicateOptions
-    <$> parseExitcode
-    <*> switch (long "stdout" <> help "preserve stdout.")
-    <*> switch (long "stderr" <> help "preserve stderr.")
-    <*> option auto
-    ( long "total-time"
+parsePredicateOptions :: Parser PredicateOptions
+parsePredicateOptions = do
+  predOptPreserveExitCode <-
+    not <$> switch (long "no-exitcode" <> help "ignore the exitcode.")
+
+  predOptPreserveStderr <-
+    switch (long "stdout" <> help "preserve stdout.")
+
+  predOptPreserveStdout <-
+    switch (long "stderr" <> help "preserve stderr.")
+
+  pure $ PredicateOptions {..}
+
+parseReductionOptions :: String -> Parser (IO ReductionOptions)
+parseReductionOptions template = do
+  redOptPredicateOptions <-
+    parsePredicateOptions
+
+  redOptTotalTimeout <- option auto $
+    long "total-time"
       <> metavar "SECS"
       <> value (-1)
       <> showDefault
-      <> help (
-          "the maximum seconds to run all predicates, negative means no timelimit.")
-    )
-    <*> option auto
-    ( long "max-iterations"
-      <> metavar "ITERS"
-      <> value (-1)
-      <> showDefault
-      <> help (
-          "the maximum number of time to run the predicate, negative means no limit.")
-    )
-    <*> ( Just <$> strOption
-          ( long "work-folder"
-            <> short 'W'
-            <> help "the work folder."
-            <> showDefault
-          )
-          <|> pure Nothing
-        )
-    <*> switch
-    ( long "keep-folders"
-      <> short 'K'
-      <> help "keep the work folders after use?"
-    )
-    <*> ( Just <$> strOption
-          ( long "metrics"
-            <> help
-            "the metrics output, defaults to metric.csv in the work folder."
-          )
-          <|> pure Nothing
-        )
-    <*> parseCmd
-   where
-     mkPredicateOptions ec so se tt mi wf kf mf mkCmd = do
-       cmd <- mkCmd >>= \case
-         Left err ->
-           fail err
-         Right cmd -> return $ cmd
-       wf' <- makeAbsolute =<< case wf of
-          Just folder -> do
-            createDirectory folder
-            return $ folder
-          Nothing -> do
-            createTempDirectory "." template
-       return $
-         PredicateOptions
-         ec so se
-         tt mi
-         (maybe (wf' </> "metrics.csv") id mf)
-         wf' kf cmd
+      <> help "the maximum seconds to run all predicates, negative means no timelimit."
 
-     parseExitcode =
-       exitCodeFromInt
-       <$> option auto
-       ( long "exit-code"
-         <> short 'E'
-         <> help "preserve exit-code"
-         <> value 0
-         <> metavar "CODE"
-         <> showDefault)
+  redOptMaxIterations <- option auto $
+    long "max-iterations"
+    <> metavar "ITERS"
+    <> value (-1)
+    <> showDefault
+    <> help "the maximum number of time to run the predicate, negative means no limit."
+
+  opWorkFolder <- optional . strOption $
+    long "work-folder"
+    <> short 'W'
+    <> help "the work folder."
+    <> showDefault
+
+  opMetricsFile <- optional . strOption $
+    long "metrics"
+    <> help "the metrics output, defaults to metric.csv in the work folder."
+
+  redOptKeepFolders <- switch $
+    long "keep-folders"
+    <> short 'K'
+    <> help "keep the work folders after use?"
+
+  redOptName <-
+    parseReducerName
+
+  pure $ do
+    redOptWorkFolder <- makeAbsolute =<< case opWorkFolder of
+      Just folder -> do
+        createDirectory folder
+        return $ folder
+      Nothing -> do
+        createTempDirectory "." template
+
+    let redOptMetrics = fromMaybe (redOptWorkFolder </> "metrics.csv") opMetricsFile
+
+    return $ ReductionOptions {..}
+
+  -- mkPredicateOptions
+  --   <$> parseExitcode
+  --   <*> switch (long "stdout" <> help "preserve stdout.")
+  --   <*> switch (long "stderr" <> help "preserve stderr.")
+  --   <*> parseReducerName
+  --   <*> parseCommandTemplate
+  --  where
+  --    mkPredicateOptions ec so se tt mi kf rn mkCmd = do
+  --      cmd <- mkCmd >>= \case
+  --        Left err ->
+  --          fail err
+  --        Right cmd -> return $ cmd
+  --      -- wf' <- makeAbsolute =<< case wf of
+  --      --    Just folder -> do
+  --      --      createDirectory folder
+  --      --      return $ folder
+  --      --    Nothing -> do
+  --      --      createTempDirectory "." template
+  --      return $
+  --        ReductionOptions
+  --        (PredicateOptions True so se)
+  --        tt mi
+  --        -- (maybe (wf' </> "metrics.csv") id mf)
+  --        -- wf'
+  --        rn kf cmd
+
+  where
+    parseExitcode =
+      exitCodeFromInt
+      <$> option auto
+      ( long "exit-code"
+        <> short 'E'
+        <> help "preserve exit-code"
+        <> value 0
+        <> metavar "CODE"
+        <> showDefault)
 
 reducerNameFromString :: String -> Maybe ReducerName
 reducerNameFromString = \case
@@ -243,8 +273,8 @@ parseReducerName =
 --           folder <- createTempDirectory "." template
 --           return $ ReducerOptions red folder n
 
-parseLogger :: Parser Logger
-parseLogger =
+parseLoggerConfig :: Parser LoggerConfig
+parseLoggerConfig =
   mklogger
   <$> ( parseLogLevel
         <$> (length <$> many (flag' () (short 'v' <> help "make it more verbose.")))

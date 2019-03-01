@@ -1,8 +1,10 @@
--- This file has been generated from package.yaml by hpack version 0.28.2.
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.31.1.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 9cceeefe3ca47cbf01c84fac6ee33f4e94974ba55448166e3f58ab1e50560c23
+-- hash: bafc426d0656f3ef9f3c8f1308d6262f6dce2b71c49b172d69ec5cb16bf87a15
 
 name:           red
 version:        0.1.0.0
@@ -15,7 +17,6 @@ copyright:      MIT
 license:        BSD3
 license-file:   LICENSE
 build-type:     Simple
-cabal-version:  >= 1.10
 extra-source-files:
     README.md
 
@@ -42,6 +43,7 @@ library
     , reduce-util
     , text
     , unliftio
+    , vector
   default-language: Haskell2010
 
 executable red
@@ -64,4 +66,5 @@ executable red
     , reduce-util
     , text
     , unliftio
+    , vector
   default-language: Haskell2010

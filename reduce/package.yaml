@@ -19,65 +19,21 @@ dependencies:
   - transformers
   - contravariant >= 1.4.1
 
-    #default-extensions:
-  #  - AutoDeriveTypeable
-  #  - BangPatterns
-  #  - BinaryLiterals
-  #  - ConstraintKinds
-  #  - DataKinds
-  #  - DefaultSignatures
-  #  - DeriveDataTypeable
-  #  - DeriveFoldable
-  #  - DeriveFunctor
-  #  - DeriveGeneric
-  #  - DeriveTraversable
-  #  - DoAndIfThenElse
-  #  - EmptyDataDecls
-  #  - ExistentialQuantification
-  #  - FlexibleContexts
-  #  - FlexibleInstances
-  #  - FunctionalDependencies
-  #  - GADTs
-  #  - GeneralizedNewtypeDeriving
-  #  - InstanceSigs
-  #  - KindSignatures
-  #  - LambdaCase
-  #  - MonadFailDesugaring
-  #  - MultiParamTypeClasses
-  #  - MultiWayIf
-  #  - NamedFieldPuns
-  #  - OverloadedStrings
-  #  - PartialTypeSignatures
-  #  - PatternGuards
-  #  - PolyKinds
-  #  - RankNTypes
-  #  - RecordWildCards
-  #  - ScopedTypeVariables
-  #  - StandaloneDeriving
-  #  - TupleSections
-  #  - TypeFamilies
-  #  - TypeSynonymInstances
-  #  - ViewPatterns
-
 library:
   source-dirs:      src
 
 benchmarks:
-  reduce-count:
-    main: CountMain.hs
-    source-dirs: benchmark/count
+  reduce-stats:
+    main: StatsMain.hs
+    source-dirs: benchmark/stats
     dependencies:
       - reduce
       - random
-      - fgl
-  
-  reduce-list:
-    main: ListMain.hs
-    source-dirs: benchmark/list
-    dependencies:
-      - reduce
-      - random
-      - fgl
+      - attoparsec
+      - text
+      - optparse-applicative
+      - cassava
+      - bytestring
 
 tests:
   reduce-test:
