@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveFunctor       #-}
+{-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE FlexibleInstances   #-}
 {-# LANGUAGE GADTs               #-}
@@ -47,6 +48,11 @@ module Control.Reduce.Util
   (
     baseline
 
+  , listReduction
+  , runReduction
+
+  , CliPredicate (..)
+
   , PredicateOptions (..)
   , ReductionOptions (..)
   -- , toPredicateM
@@ -65,107 +71,59 @@ module Control.Reduce.Util
   -- , Display(..)
 
   , ReducerName (..)
+
+  , ReductionException (..)
   -- , reduce
   -- , setreduce
 
   , module Control.Reduce.Util.CliPredicate
   ) where
 
--- lens
-import           Control.Lens
-import           Control.Lens.Iso
-
--- typed-process
-import           System.Process.Typed
-
--- filepath
-import           System.FilePath
-
--- text
-import qualified Data.Text.Lazy.Builder                as Builder
-import qualified Data.Text.Lazy.Encoding               as Text
-
 -- unliftio
 import           UnliftIO
 import           UnliftIO.Directory
 
--- containers
-import qualified Data.IntSet                           as IS
+-- -- containers
+-- import qualified Data.IntSet                           as IS
 
--- vector
-import qualified Data.Vector                           as V
+-- -- vector
+-- import qualified Data.Vector                           as V
 
 -- cassava
-import qualified Data.Csv                              as C
+import qualified Data.Csv                         as C
 
 -- time
 import           Data.Time
 
 -- bytestring
-import qualified Data.ByteString.Char8                 as BS
-import qualified Data.ByteString.Lazy                  as BL
-import qualified Data.ByteString.Lazy.Char8            as BLC
+import qualified Data.ByteString.Lazy.Char8       as BLC
 
 -- mtl
-import           Control.Monad.Reader
-import           Control.Monad.Trans.Maybe
+import           Control.Monad.Except
+import           Control.Monad.State
 
 -- base
-import qualified Data.List                             as L
-import           Data.Maybe
-import           GHC.Generics                          (Generic)
-import           System.Exit
 import           Text.Printf
+import           Data.Maybe
+import           Control.Applicative
 
--- directory-tree
-import           System.Directory.Tree
-
--- process
-import           System.Process                        (showCommandForUser)
-
--- contravariant
-import           Data.Functor.Contravariant
+-- free
+import           Control.Monad.Free.Church
 
 -- reduce-util
 import           Control.Reduce.Util.CliPredicate
-import qualified Control.Reduce.Util.Logger            as L
-import           System.Process.Consume
+import qualified Control.Reduce.Util.Logger       as L
+import           Control.Reduce.Util.Metric
 
 -- reduce
 import           Control.Reduce
-import           Data.Functor.Contravariant.PredicateM
 
--- -- cassava
--- import qualified Data.Csv
-
-data Predicate a = Predicate
-  { expected :: !CmdOutput
-  , command :: !Command a (Maybe CmdOutput)
-  }
-
--- | Calculate a baseline to try to emulate when reducing
-baseline ::
-  FilePath
-  -> Command a (Maybe CmdOutput)
-  -> a
-  -> L.Logger (Maybe CmdOutput)
-baseline workdir cmd a =
-  L.phase "Calculating baseline" $ do
-    resultOutput <$> runCommand workdir cmd a
-
+-- | Predicate options, defines which elements to check
 data PredicateOptions = PredicateOptions
   { predOptPreserveExitCode :: !Bool
-  , predOptPreserveStdout :: !Bool
-  , predOptPreserveStderr :: !Bool
+  , predOptPreserveStdout   :: !Bool
+  , predOptPreserveStderr   :: !Bool
   } deriving (Show, Eq)
-
-makeCommandPredicate ::
-  PredicateOptions
-  -> CmdOutput
-  -> Command a (Maybe CmdOutput)
-  -> Command a Bool
-makeCommandPredicate opt output =
-  postprocess (checkOutputPreserved opt output)
 
 checkOutputPreserved ::
   PredicateOptions
@@ -182,6 +140,30 @@ checkOutputPreserved PredicateOptions {..} (CmdOutput c oh eh) = \case
   Nothing ->
     False
 
+checkCliPredicate :: FilePath -> CliPredicate a -> a -> L.Logger (CmdResult (Maybe CmdOutput), Bool)
+checkCliPredicate fp CliPredicate {..} a = do
+  res <- runCommand fp command a
+  return (res, checkOutputPreserved predOpt expected (resultOutput res))
+
+
+-- | A `CliPredicate` is a command that knows it's expected output.
+data CliPredicate a = CliPredicate
+  { predOpt  :: PredicateOptions
+  , expected :: !CmdOutput
+  , command  :: !(Command a (Maybe CmdOutput))
+  }
+
+-- | Calculate a baseline to try to emulate when reducing
+baseline ::
+  FilePath
+  -> Command a (Maybe CmdOutput)
+  -> a
+  -> L.Logger (Maybe CmdOutput)
+baseline workdir cmd a =
+  L.phase "Calculating baseline" $ do
+    resultOutput <$> runCommand workdir cmd a
+
+
 -- | The name of the reducer
 data ReducerName
   = Ddmin
@@ -190,306 +172,100 @@ data ReducerName
   deriving (Show, Eq)
 
 data ReductionOptions = ReductionOptions
-  { redOptPredicateOptions :: !PredicateOptions
-  , redOptTotalTimeout     :: !Double
-  , redOptMaxIterations    :: !Int
-  , redOptMetrics          :: !FilePath
-  , redOptWorkFolder       :: !FilePath
-  , redOptKeepFolders      :: !Bool
-  , redOptName             :: !ReducerName
+  { redOptTotalTimeout  :: !Double
+  , redOptMaxIterations :: !Int
+  , redOptKeepFolders   :: !Bool
   } deriving (Show, Eq)
 
-data PredicateException
-  = PredicateTimedOut
-  | PredicateIterationsExceeded
+data ReductionException
+  = ReductionTimedOut
+  | ReductionIterationsExceeded
+  | ReductionFailed
   deriving (Show)
 
-instance Exception PredicateException
+instance Exception ReductionException
 
+data ReductF a f
+  = Check a (Bool -> f)
+  deriving (Functor)
 
-reduceList ::
-  (Metric b)
+type ReductM x = F (ReductF x)
+
+type Reduction a = a -> ReductM a (Maybe a)
+
+check :: a -> ReductM a Bool
+check a = liftF $ Check a id
+
+listReduction :: ReducerName -> Reduction [x]
+listReduction red xs =
+  case red of
+    Ddmin  -> ddmin predc xs
+    Binary -> binaryReduction predc xs
+    Linear -> linearReduction predc xs
+  where
+    predc = PredicateM check
+
+runReduction ::
+  forall a b c.
+  (Metric c)
   => ReductionOptions
-  -> ([a] -> b)
-  -> Predicate [a]
-  -> [a]
-  -> L.Logger [a]
-reduceList opts metric cmd a = do
-  setupReduction
+  -> FilePath
+  -> ((a, b) -> c)
+  -> (a -> b)
+  -> CliPredicate b
+  -> Reduction a
+  -> a
+  -> L.Logger (Maybe ReductionException, b)
+runReduction (ReductionOptions {..}) wf metric fab predc reduction initial = do
+  start <- liftIO $ getCurrentTime
+  createDirectory wf
+  withCurrentDirectory wf $ do
+    liftIO . BLC.writeFile "metrics.csv"
+      $ C.encodeDefaultOrderedByNameWith C.defaultEncodeOptions ([] :: [MetricRow c])
+    (ee, (_, m)) <- runStateT (runExceptT (iterM (reduce start) (reduction initial))) (0, Nothing)
+    return . fmap fab $ case ee of
+      Left e  ->
+        (Just e, fromMaybe initial m)
+      Right a ->
+        fromMaybe (Just ReductionFailed, initial) $ (Nothing,) <$> (a <|> m)
 
+  where
+    reduce ::
+      UTCTime
+      -> ReductF a (ExceptT ReductionException (StateT (Int, Maybe a) L.Logger) (Maybe a))
+      -> ExceptT ReductionException (StateT (Int, Maybe a) L.Logger) (Maybe a)
+    reduce start (Check a f) = do
 
-setupReduction ::
-  (Metric b)
-  => ReductionOptions
-  -> CmdOutput
-  -> Predicate a CmdOutput
-  -> IO (PredicateM L.Logger (FilePath, (b, a)))
-setupReduction ReductionOptions {..} output cmd = do
-  start <- getCurrentTime
-  return . PredicateM $ \(fp, (b, a)) -> do
-    now <- liftIO $ getCurrentTime
-    L.info $ "Trying: " <> displayMetric b
+      iteration <- gets fst
+      now <- liftIO $ getCurrentTime
 
-    let diff = now `diffUTCTime` start
+      let
+        diff = now `diffUTCTime` start
+        fp = printf "%04d" iteration
+        b = fab a
+        m = metric (a, b)
 
-    when (0 < redOptTotalTimeout && redOptTotalTimeout < realToFrac diff)
-      . liftIO . throwIO $ PredicateTimedOut
+      when (0 < redOptTotalTimeout && redOptTotalTimeout < realToFrac diff) $
+        throwError $ ReductionTimedOut
 
-    res <- runCommand (redOptWorkFolder </> fp) cmd a
+      when (0 < redOptMaxIterations && redOptMaxIterations < iteration) $
+        throwError $ ReductionIterationsExceeded
 
-    let succ = checkOutputPreserved redOptPredicateOptions output (resultOutput res)
-    L.info $ if succ then "success" else "failure"
+      L.info $ "Trying: " <> displayMetric m
+      (res, success) <- lift . lift $ checkCliPredicate fp predc b
 
-    liftIO
-      . BLC.appendFile redOptMetrics
-      $ C.encodeDefaultOrderedByNameWith
-        ( C.defaultEncodeOptions { C.encIncludeHeader = False } )
-        [ MetricRow b diff fp res succ ]
+      L.info $ if success then "success" else "failure"
 
-    return succ
+      logMetric (MetricRow m diff fp res success)
 
+      when success $ do
+        modify (\(i, _) -> (i, Just a))
 
--- getExpectedOutput :: PredicateOptions -> (a -> m CmdInput) -> FilePath -> a -> m (CmdResult (Maybe CmdOutput))
--- getExpectedOutput PredicateOptions {..} setup folder a = do
---     cmdres <- runCmd predOptCmd (setup a) folder
---     case cmdres of
---       Just (CmdResult ts tr (output@CmdOutput {..}))
---         | outputCode /= predOptExpectedStatus ->
---           return $ Nothing
---         | otherwise -> return $ Just cmdres
---       Nothing ->
---         return $ Nothing
+      f success
 
-
--- mkReductionProblem ::
---   forall env b m a.
---   (L.HasLogger env, Metric b, MonadReader env m, MonadUnliftIO m)
---   => PredicateOptions
---   -> (a -> m CmdInput)
---   -> a
---   -> m (Maybe (ReductionProblem m (b, a) a))
--- mkReductionProblem popt@(PredicateOptions {..}) setup a = do
---   L.phase "Initial run" $ do
---     let folder = predOptWorkFolder </> "initial"
-
---     cmdres <- getExpectedOutput popt setup folder a
-
---     liftIO .
---       BLC.writeFile predOptMetrics
---       $ C.encodeDefaultOrderedByName
---       [ MetricRow (initialMetric :: b) 0 "initial" cmdres (isJust pred)]
-
---     return $ ReductionProblem Nothing (initialMetric, a) snd <$> pred
-
---   where
---     wrapPredicate ::
---       (L.HasLogger env, MonadReader env m, MonadUnliftIO m)
---       => PredicateM m (FilePath, (b, a))
---       -> m (PredicateM m (b, a))
---     wrapPredicate pred = do
---       ref <- newIORef (0 :: Int)
---       return . PredicateM $ go ref
---       where
---         go ref a = do
---           x <- liftIO $ atomicModifyIORef ref (\x -> (succ x, x))
---           when (0 < predOptMaxIterations && predOptMaxIterations < x)
---             . liftIO . throwIO $ PredicateIterationsExceeded
---           let phaseName =
---                 "Iteration" L.<-> L.displayf "%04d" x
---           L.phase phaseName $
---             runPredicateM pred (printf "%04d" x, a)
-
--- {-# inlineable mkReductionProblem #-}
-
-
--- data ReductionProblem m a b = ReductionProblem
---   { reductionCost       :: Maybe (a -> Int)
---   , reductionModel      :: ReductionModel () a a
---   , reductionPredictate :: PredicateM m a
---   }
-
--- data ReductionModel b x a = ReductionModel
---   { redModel    :: b
---   , fromModelTo :: b -> (x, a)
---   }
-
--- model :: Metric x => b -> (b -> a) -> ((b, a) -> x) ->  ReductionModel x a b
--- model m fm tx = ReductionModel m $ \b -> let a = fm b in (tx (b, a), a)
-
--- applyModel :: ReductionModel x a c -> ReductionProblem m (x, a) b -> ReductionProblem m c b
--- applyModel (ReductionModel m fromModel) =
---   specializeReduction m fromModel
-
--- specializeReduction :: c -> (c -> a) -> ReductionProblem m a b -> ReductionProblem m c b
--- specializeReduction c ca (ReductionProblem {..}) =
---   ReductionProblem
---     (fmap (. ca) reductionCost)
---     c
---     (reductionRetrive . ca)
---     (ca `contramap` reductionPredictate)
-
-
--- -- | Reduce using the reducer options.
--- reduce ::
---   (Monad m)
---   => ReducerName
---   -> ReductionProblem m [a] b
---   -> m (Maybe b)
--- reduce reducer (ReductionProblem costf input f p) = do
---   fmap f <$> case reducer of
---     Ddmin ->
---       unsafeDdmin p sortedInput
---     Linear ->
---       runMaybeT
---         (unsafeLinearReduction (asMaybeGuard p) sortedInput)
---     Binary ->
---       case costf of
---         Nothing -> binaryReduction p sortedInput
---         Just cf ->
---           genericBinaryReduction cf p input
---   where
---     sortedInput =
---       maybe id (\cf -> L.sortOn (cf . (:[]))) costf $ input
--- {-# inline reduce #-}
-
--- setreduce ::
---   forall m a.
---   (Monad m)
---   => ReducerName
---   -> PredicateM m a
---   -> (IS.IntSet -> a)
---   -> [IS.IntSet]
---   -> m (Maybe a)
--- setreduce reducer p ffrom input = do
---   let p' = ffrom `contramap` p
---   (fmap . fmap $ ffrom . IS.unions) $
---     case reducer of
---       Ddmin ->
---         toSetReducer unsafeDdmin p' input
---       Linear ->
---         toSetReducer linearReduction p' input
---       Binary ->
---         setBinaryReduction p' input
-
-
--- * Metrics
-
-class Metric a where
-   order :: Const [BS.ByteString] a
-   fields :: a -> [(BS.ByteString, BS.ByteString)]
-   displayMetric :: a -> Builder.Builder
-   initialMetric :: a
-
-data MetricRow a = MetricRow
-  { metricRowContent :: !a
-  , metricRowTime    :: !NominalDiffTime
-  , metricRowFolder  :: !String
-  , metricRowResults :: !(CmdResult (Maybe CmdOutput))
-  , metricRowSuccess :: !Bool
-  } deriving (Show, Eq, Generic)
-
-instance Metric a => C.DefaultOrdered (MetricRow a) where
-  headerOrder _ =
-    C.header $
-    getConst (order :: Const [BS.ByteString] a)
-    <> [ "folder"
-       , "time"
-       , "success"
-       , "setup time"
-       , "run time"
-       , "status"
-       , "stdout (length)"
-       , "stdout (sha256)"
-       , "stderr (length)"
-       , "stderr (sha256)"
-       ]
-
-instance Metric a => C.ToNamedRecord (MetricRow a) where
-  toNamedRecord MetricRow {..} =
-    C.namedRecord $
-    (fields metricRowContent) <>
-    [ "folder" C..= metricRowFolder
-    , "time" C..= (realToFrac metricRowTime :: Double)
-    , "setup time" C..= resultSetupTime metricRowResults
-    , "run time" C..= resultRunTime metricRowResults
-    , "status" C..= maybe (-1) (exitCodeToInt . outputCode) result
-    , "stdout (length)"
-      C..= maybe (-1 :: Int) (fromIntegral . snd . outputOut) result
-    , "stdout (sha256)"
-      C..= maybe "-" (showHash . fst . outputOut) result
-    , "stderr (length)"
-      C..= maybe (-1 :: Int) (fromIntegral . snd . outputErr) result
-    , "stderr (sha256)"
-      C..= maybe "-" (showHash . fst . outputErr) result
-    , "success" C..= (if metricRowSuccess then "true" else "false" :: String)
-    ]
-    where
-      result = resultOutput $ metricRowResults
-
--- counted :: ([b] -> a) -> [b] -> ReductionModel Count a [b]
--- counted ba b =
---   model b ba (Count . length . fst)
-
--- data Count = Count { getCount :: Int }
---   deriving (Show)
-
--- instance Metric Count where
---   order = Const ["count"]
---   fields (Count a) =
---     ["count" C..= a ]
---   displayMetric (Count a) =
---     L.displayf "#%i elements" a
---   initialMetric = Count (-1)
-
-
--- displayed :: a -> (b -> Char) -> [b] -> ([b] -> a) -> ReductionModel Display a [Int]
--- displayed a toChar b ba =
---   model
---     idxs
---     (ba . catMaybes . map (v V.!?) . L.sort)
---     (displ . fst)
-
---   where
---     v = V.fromList b
---     str = V.map toChar v
---     idxs = V.toList . V.map fst . V.indexed $ v
---     displ a =
---       let is = IS.fromList a in
---       Display . V.toList $ V.imap (\i c -> if IS.member i is then c else '·') str
-
--- newtype Display = Display String
-
--- instance Metric Display where
---   order = Const ["display"]
---   fields (Display a) =
---     ["display" C..= a ]
---   displayMetric (Display a) =
---     Builder.fromString a
-
---   initialMetric = Display ""
-
--- displayFromString :: [b] -> Display b [Int]
--- displayFromString chs =
---   let
---     v = V.fromList chs
---     idxs = V.toList . V.map fst . V.indexed $ v
---   in
---   Display v idxs
-
--- getIntList :: Display b [Int] -> [Int]
--- getIntList (Display _ a) = a
-
--- compactString :: Display b [Int] -> [b]
--- compactString (Display v a) =
---   catMaybes . map (v V.!?) . L.sort $ a
-
-
--- data Listed a = Listed { getList :: [Bool], items :: a }
---   deriving (Functor, Show)
-
--- instance Metric (Listed [Char]) where
---   order = Const ["count", "listed"]
---   fields (Listed bs items) =
---     ["count" C..= (length $ filter id bs)
---     ,"listed" C..= zipWith (\b x -> if b then x else '·') bs items
---     ]
+    logMetric mr = do
+      liftIO
+        . BLC.appendFile "metrics.csv"
+        $ C.encodeDefaultOrderedByNameWith
+          ( C.defaultEncodeOptions { C.encIncludeHeader = False } )
+          [ mr ]

@@ -3,3 +3,7 @@ packages:
 - reduce
 - reduce-util
 - red
+- location:
+    git: https://github.com/kalhauge/dirtree
+    commit: f47f9da52ac492ec58933fc284c554069bc04ab5
+  extra-dep: true

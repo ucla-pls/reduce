@@ -39,7 +39,7 @@ spec = do
 
   describe "canonicalizeOrFail" $ do
     it "should succeed if it can find the file" $ do
-      canonicalizeOrFail "/dev/null"
+      _ <- canonicalizeOrFail "/dev/null"
       return ()
 
     it "should fail with an exception if it cannot find the file" $ do
@@ -72,11 +72,11 @@ spec = do
         `shouldBe` (CAConst "hey")
     it "default to the keyword when nothing is found" $ do
       argumentToString (evaluateArgument (CAInput "key") Map.empty)
-        `shouldBe` "{key}"
+        `shouldBe` ("{key}" :: String)
     it "can also handle concatenation" $ do
       let f = CAJoin (CAInput "") (CAJoin (CAConst ":") (CAFilePath "file.txt"))
       argumentToString (evaluateArgument f ((Map.singleton "" (CAConst "key"))))
-        `shouldBe` "key:file.txt"
+        `shouldBe` ("key:file.txt" :: String)
 
 
   describe "replaceRelative" $ do
@@ -91,7 +91,7 @@ spec = do
   describe "evaluateTemplate" $ do
     it "should prefix the command and arguments" $ do
       evaluateTemplate (CommandTemplate (-1) "/some/prefix/hello.sh" [CAFilePath "/some/prefix/file", CAInput ""]) ("/some/prefix", "$VAR") (Map.singleton "" (CAFilePath "/some/prefix/file2"))
-      `shouldBe` ("$VAR/hello.sh", ["$VAR/file", "$VAR/file2"])
+      `shouldBe` ("$VAR/hello.sh" :: String, ["$VAR/file", "$VAR/file2" :: String])
 
   describe "templateToString" $ do
     it "should prefix the command and arguments" $ do

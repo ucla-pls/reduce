@@ -17,26 +17,24 @@ module Control.Reduce.Util.Logger where
 import           Control.Lens
 
 -- text
-import qualified Data.Text.Lazy             as Text
-import qualified Data.Text.Lazy.Builder     as Builder
-import qualified Data.Text.Lazy.IO          as Text
+import qualified Data.Text.Lazy         as Text
+import qualified Data.Text.Lazy.Builder as Builder
+import qualified Data.Text.Lazy.IO      as Text
+
+-- unliftio
+import           UnliftIO               (MonadUnliftIO (..))
 
 -- mtl
 import           Control.Monad.Reader
-import           Control.Monad.Reader.Class
 
 -- time
-import           Data.Time                  (diffUTCTime, getCurrentTime,
-                                             getZonedTime)
-import           Data.Time.Format           (defaultTimeLocale, formatTime,
-                                             iso8601DateFormat)
+import           Data.Time              (diffUTCTime, getCurrentTime,
+                                         getZonedTime)
+import           Data.Time.Format       (defaultTimeLocale, formatTime,
+                                         iso8601DateFormat)
 
 -- base
-import           Control.Monad
-import           Control.Monad.IO.Class
-import           Data.Functor.Const
-import           Data.Functor.Identity
-import           Prelude                    hiding (log)
+import           Prelude                hiding (log)
 import           System.IO
 import           Text.Printf
 
@@ -72,6 +70,10 @@ instance HasLogger LoggerConfig where
 newtype LoggerT m a =
   LoggerT { runLoggerT :: ReaderT LoggerConfig m a }
   deriving (Functor, Applicative, Monad, MonadReader LoggerConfig, MonadIO)
+
+instance MonadUnliftIO m => MonadUnliftIO (LoggerT m) where
+  withRunInIO inner = LoggerT $ withRunInIO $ \run -> inner (run . runLoggerT)
+
 
 type Logger = LoggerT IO
 

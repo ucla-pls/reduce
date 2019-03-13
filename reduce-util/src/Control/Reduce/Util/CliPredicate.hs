@@ -85,7 +85,6 @@ import           System.Process.Typed
 import           System.FilePath
 
 -- text
-import qualified Data.Text                             as Text
 import qualified Data.Text.Lazy                        as LazyText
 import qualified Data.Text.Lazy.Builder                as Builder
 import qualified Data.Text.Lazy.Encoding               as Text
@@ -103,7 +102,6 @@ import qualified Data.ByteString.Lazy.Char8            as BLC
 -- mtl
 import           Control.Monad.Except
 import           Control.Monad.Reader
-import           Control.Monad.Trans.Maybe
 import           Control.Monad.Writer
 
 -- lens
@@ -113,22 +111,13 @@ import           Control.Lens
 import qualified Data.Map                              as Map
 
 -- base
-import           Control.Applicative                   hiding (many, some)
 import           Data.Bifunctor                        (first)
-import           Data.Foldable
 import qualified Data.List                             as L
 import           Data.String
 import           Data.Void
 import           System.Exit
 import           System.IO.Error
 import           Text.Printf
-
--- profunctor
-import           Data.Profunctor
-
-
--- process
-import           System.Process                        (showCommandForUser)
 
 -- megaparsec
 import           Text.Megaparsec
@@ -138,10 +127,6 @@ import           Text.Megaparsec.Char
 import           Control.Reduce.Util.Logger            as L
 import           System.Directory.Tree
 import           System.Process.Consume
-
--- reduce
-import           Control.Reduce
-import           Data.Functor.Contravariant.PredicateM
 
 
 -- | A representation of a command-line command.
@@ -263,7 +248,7 @@ createCommandTemplate :: Double -> String -> [String] -> IO (Either String Comma
 createCommandTemplate timelimit cmd args = runExceptT $ do
   exactCmd <- tryL $ getExecutable cmd
   results <-
-    mapM (tryL . canonicalizeArugments)
+    mapM (tryL . canonicalizeArgument)
     =<< mapM (liftEither . parseCmdArgument) args
   return $ CommandTemplate timelimit exactCmd results
   where
@@ -349,14 +334,15 @@ parseCmdArgument arg =
 -- canonicalized. Throws an error if the file cannot be found.
 -- See `canonicalizeOrFail`
 canonicalizeArgument :: CmdArgument -> IO CmdArgument
-canonicalizeArgument (CAJoin a b) =
-  CAJoin
-  <$> canonicalizeArugments a
-  <*> canonicalizeArugments b
-canonicalizeArugments (CAFilePath fp) = do
-  CAFilePath <$> canonicalizeOrFail fp
-canonicalizeArugments a =
-  return a
+canonicalizeArgument = \case
+  CAJoin a b ->
+    CAJoin
+    <$> canonicalizeArgument a
+    <*> canonicalizeArgument b
+  CAFilePath fp ->
+    CAFilePath <$> canonicalizeOrFail fp
+  a ->
+    return a
 
 -- | Returns the filepath with relative filepath replaced by a string.
 replaceRelative :: FilePath -> (FilePath, String) -> FilePath
@@ -395,8 +381,8 @@ canonicalizeOrFail fp = do
 evaluateArgument :: CmdArgument -> Map.Map String CmdArgument -> CmdArgument
 evaluateArgument ca =
   case ca of
-    CAConst str -> const ca
-    CAFilePath fp -> const ca
+    CAConst _ -> const ca
+    CAFilePath _ -> const ca
     CAInput key -> Map.findWithDefault ca key
     CAJoin a b ->
       CAJoin <$> evaluateArgument a <*> evaluateArgument b
@@ -506,6 +492,7 @@ logResults = \case
   Nothing -> do
     L.warn $ "Process Timed-out"
 
+tryTimeout :: (MonadUnliftIO m, RealFrac r) => r -> m a -> m (Maybe a)
 tryTimeout timelimit =
   if timelimit > 0
   then timeout (ceiling $ timelimit * 1e6)

@@ -7,49 +7,33 @@
 {-# LANGUAGE TemplateHaskell   #-}
 module Red where
 
+-- filepath
+import           System.FilePath
+
 -- mtl
 import           Control.Monad.Reader
 
--- unliftio
-import           UnliftIO
-
 -- lens
 import           Control.Lens
-import           Control.Lens.Iso
 
 -- text
-import qualified Data.Text.Lazy.Builder                as Builder
+import qualified Data.Text.Lazy.Builder       as Builder
 
 -- bytestring
-import qualified Data.ByteString.Lazy.Char8            as BLC
+import qualified Data.ByteString.Lazy.Char8   as BLC
 
 -- optparse-applicative
-import           Options.Applicative                   as A
-
--- vector
-import qualified Data.Vector                           as V
-
--- reduce
-import           Data.Functor.Contravariant.PredicateM
+import           Options.Applicative          as A
 
 -- reduce-util
 import           Control.Reduce.Util
-import           Control.Reduce.Util.CliPredicate
-import           Control.Reduce.Util.Logger            as L
+import           Control.Reduce.Util.Logger   as L
+import           Control.Reduce.Util.Metric
 import           Control.Reduce.Util.OptParse
-import           System.Directory.Tree
-
--- cassava
-import qualified Data.Csv                              as C
-
--- contravariant
-import           Data.Functor.Contravariant
 
 -- base
 import           Data.Char
-import           Data.Foldable
-import qualified Data.List                             as List
-import           Data.Maybe
+import qualified Data.List                    as List
 import           System.Exit
 
 
@@ -82,14 +66,14 @@ parseFormat =
     <> metavar "FORMAT"
   )
   where
-    toFormat str =
-      let f = List.isPrefixOf str in
+    toFormat str' =
+      let f = List.isPrefixOf str' in
       if | f "chars" -> FileFormat Chars
          | f "lines" -> FileFormat Lines
          | f "files" -> DirFormat Files
          | f "filetree" -> DirFormat FileTree
          | True ->
-           error $ "Unknown format " ++ str
+           error $ "Unknown format " ++ str'
 
 parseMetricType :: Parser MetricType
 parseMetricType =
@@ -100,21 +84,24 @@ parseMetricType =
     <> metavar "METRIC"
   )
   where
-    toMetricType str =
-      let f = List.isPrefixOf str in
+    toMetricType str' =
+      let f = List.isPrefixOf str' in
       if | f "counted" -> Counted
          | f "displayed" -> Displayed
          | True ->
-           error $ "Unknown metric type " ++ str
+           error $ "Unknown metric type " ++ str'
 
 data Config = Config
-  { _cnfInputFile       :: !FilePath
-  , _cnfOutputFile      :: !FilePath
-  , _cnfLoggerConfig    :: !LoggerConfig
-  , _cnfMetricType      :: !MetricType
-  , _cnfFormat          :: !Format
-  , _cnfReducionOptions :: !ReductionOptions
-  , _cnfCommand         :: !CommandTemplate
+  { _cnfInputFile        :: !FilePath
+  , _cnfOutputFile       :: !FilePath
+  , _cnfLoggerConfig     :: !LoggerConfig
+  , _cnfMetricType       :: !MetricType
+  , _cnfFormat           :: !Format
+  , _cnfReducerName      :: !ReducerName
+  , _cnfWorkFolder       :: !FilePath
+  , _cnfPredicateOptions :: !PredicateOptions
+  , _cnfReductionOptions :: !ReductionOptions
+  , _cnfCommand          :: !CommandTemplate
   } deriving (Show)
 
 makeLenses ''Config
@@ -138,19 +125,25 @@ getConfigParser = do
   _cnfFormat <-
     parseFormat
 
-  ioReductionOptions <-
-    parseReductionOptions "red"
+  _cnfReducerName <-
+    parseReducerName
+
+  ioWorkFolder <-
+    parseWorkFolder "_red"
+
+  _cnfPredicateOptions <-
+    parsePredicateOptions
+
+  _cnfReductionOptions <-
+    parseReductionOptions
 
   ioCommand <-
     parseCommandTemplate
 
   pure $ do
-    _cnfReducionOptions <- ioReductionOptions
+    _cnfWorkFolder <- ioWorkFolder
     _cnfCommand <- either fail return =<< ioCommand
     return $ Config {..}
-  where
-    cfg input output lg mtype rn fmt cmd =
-      Config input output lg mtype rn fmt <$> cmd
 
 instance HasLogger Config where
   loggerL = cnfLoggerConfig
@@ -173,24 +166,36 @@ run = do
     FileFormat ff -> do
       input <- view cnfInputFile
       bs <- liftIO $ BLC.readFile input
+      let cmd = setup (inputFile "input") $ makeCommand template
+      workFolder <- view cnfWorkFolder
+      x <- withLogger (baseline (workFolder </> "baseline") cmd bs) >>= \case
+        Just x -> return $ x
+        Nothing -> fail "Could not satisfy baseline"
 
-      let command = setup (inputFile "input") $ makeCommand template
+      predOpts <- view cnfPredicateOptions
+      let clipred = CliPredicate predOpts x cmd
 
-      base <- withLogger $ baseline "here" command bs
+      rOpt <- view cnfReductionOptions
+      reducerName <- view cnfReducerName
 
-      result <- case ff of
+      result <- handleErrors =<< case ff of
         Lines -> do
-          return bs
-          -- result <- reducex (fromFile "input") . counted BLC.unlines $ BLC.lines bs
-        -- Chars -> do
-        --   case cnfMetricType of
-        --     Counted -> reducex
-        --       (fromFile "input") (counted BLC.unpack BLC.pack ) bs
-        --     Displayed -> reducex
-        --       (fromFile "input") (displayed bs id BLC.unpack BLC.pack) bs
+          withLogger
+            . runReduction rOpt (workFolder </> "iterations") (counted . fst)
+                BLC.unlines clipred
+                (listReduction reducerName)
+            $ BLC.lines bs
+        Chars -> do
+          withLogger
+            . runReduction rOpt (workFolder </> "iterations") (counted . fst) BLC.pack clipred
+              (listReduction reducerName)
+              $ BLC.unpack bs
 
       output <- view cnfOutputFile
-      liftIO $ BLC.writeFile output result
+      L.phase ("Writing output to file " <> display output) $ do
+        liftIO $ BLC.writeFile output result
+
+    _ -> return ()
     -- DirFormat df -> do
     --   case df of
     --     Files -> do
@@ -238,6 +243,18 @@ run = do
     --       L.err "Predicate failed"
     --       liftIO $ exitWith (ExitFailure 1)
 
+  where
+    handleErrors (s, r) = do
+      case s of
+        Just ReductionTimedOut ->
+          L.warn "Reduction timed out"
+        Just ReductionIterationsExceeded ->
+          L.warn "The max iterations reached while reducing"
+        Just ReductionFailed ->
+          L.warn "No reduction possible"
+        Nothing ->
+          return ()
+      return r
 
 logAndExit ::
   (HasLogger env, MonadReader env m, MonadIO m)

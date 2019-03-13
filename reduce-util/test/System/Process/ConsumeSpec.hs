@@ -3,12 +3,12 @@ module System.Process.ConsumeSpec where
 
 import SpecHelper
 
-import Crypto.Hash.SHA256 (hashlazyAndLength)
+-- import Crypto.Hash.SHA256 (hashlazyAndLength)
 import Data.ByteString hiding (reverse)
 import qualified Data.ByteString as BS
 
 import System.Exit
-import Data.IORef
+-- import Data.IORef
 import Control.Monad
 
 import System.Process.Consume
@@ -21,13 +21,13 @@ spec :: Spec
 spec = do
   describe "perLine" $ do
     it "should log lines" $ do
-      logger <- perLine $ pureConsumer (flip (:)) []
-      x <- foldTest logger ["Hello\nThis\nIs\nA\nString\n", ""]
+      l <- perLine $ pureConsumer (flip (:)) []
+      x <- foldTest l ["Hello\nThis\nIs\nA\nString\n", ""]
       reverse x `shouldBe` fmap Just ["Hello", "This", "Is", "A", "String"] ++ [Nothing]
 
     it "can be interupted" $ do
-      logger <- perLine $ pureConsumer (flip (:)) []
-      x <- foldTest logger
+      l <- perLine $ pureConsumer (flip (:)) []
+      x <- foldTest l
         [ "Hel", "lo", "\n", "This\nIs\n", "A\nString\n", "" ]
       reverse x `shouldBe` fmap Just ["Hello", "This", "Is", "A", "String"] ++ [Nothing]
 

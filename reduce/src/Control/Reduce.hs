@@ -1,4 +1,5 @@
 {-# language BangPatterns #-}
+{-# language DeriveFunctor #-}
 {-# language LambdaCase #-}
 {-# language ViewPatterns #-}
 {-|
@@ -61,7 +62,6 @@ import qualified Data.List as L
 
 -- reduce
 import Data.Functor.Contravariant.PredicateM
-
 
 
 -- * Reducers

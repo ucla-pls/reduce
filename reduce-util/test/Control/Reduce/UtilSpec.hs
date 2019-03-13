@@ -3,11 +3,11 @@ module Control.Reduce.UtilSpec where
 
 import SpecHelper
 
-import System.Exit
-import Crypto.Hash.SHA256
+-- import System.Exit
+-- import Crypto.Hash.SHA256
 
-import Control.Reduce.Util
-import System.Directory
+-- import Control.Reduce.Util
+-- import System.Directory
 
 spec :: Spec
 spec = do

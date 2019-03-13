@@ -32,7 +32,7 @@ dependencies:
 - unliftio
 - cassava
 - vector
-  # - filepath
+- filepath
   # - directory
   # - bytestring
   # - typed-process
