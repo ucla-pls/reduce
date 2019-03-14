@@ -49,6 +49,7 @@ module Control.Reduce.Util.CliPredicate
   , inputArgument
   , inputStream
   , inputFile
+  , inputDirectory
   , inputDirTree
 
   , CmdOutput (..)
@@ -444,6 +445,12 @@ inputFile ::
   -> BL.ByteString
   -> CmdInput
 inputFile name = inputDirTree name . file
+
+inputDirectory ::
+  String
+  -> FileMap (DirTree Link BL.ByteString)
+  -> CmdInput
+inputDirectory name = inputDirTree name . directory . toFileList
 
 -- inputDirTree ::
 --   String

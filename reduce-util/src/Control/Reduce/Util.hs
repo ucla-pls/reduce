@@ -124,7 +124,7 @@ runReduction (ReductionOptions {..}) wf reduction p@(Problem {..}) = do
         maybe (Just ReductionFailed, m) (Nothing,) a
   where
     reduce start (Check a f) = do
-      iteration <- gets fst
+      iteration <- state (\(i, r) -> (i, (i + 1, r)))
       now <- liftIO $ getCurrentTime
 
       let
@@ -139,7 +139,7 @@ runReduction (ReductionOptions {..}) wf reduction p@(Problem {..}) = do
 
       L.info $ "Trying: " <> displayAnyMetric metric a
 
-      (res, success) <- lift . lift $ checkSolution p fp a
+      (res, success) <- lift . lift  $ checkSolution p fp a
 
       L.info $ if success then "success" else "failure"
 

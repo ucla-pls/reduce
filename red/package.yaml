@@ -33,6 +33,7 @@ dependencies:
 - cassava
 - vector
 - filepath
+- dirtree
   # - directory
   # - bytestring
   # - typed-process

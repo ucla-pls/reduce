@@ -26,6 +26,9 @@ import qualified Data.ByteString.Lazy.Char8   as BLC
 -- optparse-applicative
 import           Options.Applicative          as A
 
+-- dirtree
+import System.DirTree
+
 -- reduce-util
 import           Control.Reduce.Util
 import           Control.Reduce.Problem
@@ -162,17 +165,16 @@ main = do
 
 run :: ReaderT Config IO ()
 run = do
-  cmd <- setup (inputFile "input") . makeCommand <$> view cnfCommand
-  workFolder <- view cnfWorkFolder
-  predOpts <- view cnfPredicateOptions
-  rOpt <- view cnfReductionOptions
+  Config {..} <- ask
 
-  view cnfFormat >>= \case
+  case _cnfFormat of
     FileFormat ff -> do
-      bs <- liftIO . BLC.readFile =<< view cnfInputFile
+      bs <- liftIO $ BLC.readFile _cnfInputFile
+
+      let cmd = setup (inputFile "input") $ makeCommand _cnfCommand
 
       problem <- withLogger
-        ( setupProblem predOpts (workFolder </> "baseline") cmd bs ) >>= \case
+        ( setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd bs ) >>= \case
           Just problem -> return $ case ff of
             Lines ->
               meassure counted . toIndexed
@@ -180,64 +182,45 @@ run = do
             Chars ->
               meassure counted . toStringified id
               $ liftProblem BLC.unpack BLC.pack problem
-          Nothing -> fail "Could not satisfy baseline"
+          Nothing ->
+            logAndExit "Could not satisfy baseline"
 
       red <- listReduction <$> view cnfReducerName
 
       result <- handleErrors =<< (withLogger $
-        runReduction rOpt (workFolder </> "iterations") red problem)
+        runReduction _cnfReductionOptions (_cnfWorkFolder </> "iterations") red problem)
 
       output <- view cnfOutputFile
       L.phase ("Writing output to file " <> display output) $ do
         liftIO $ BLC.writeFile output result
 
-    _ -> return ()
-    -- DirFormat df -> do
-    --   case df of
-    --     Files -> do
-    --       _ :/ dt <- liftIO $ fmap SameAs <$> readTree cnfInputFile
-    --       result <- reducex
-    --         (fromDirTree "input")
-    --         (counted toFileList (fromJust . fromFileList))
-    --         dt
-    --       liftIO $ writeTreeWith writeContent (cnfOutputFile :/ result)
-  -- where
-  --   reducex ::
-  --     (HasLogger env, MonadReader env m, MonadUnliftIO m, Metric x)
-  --     => (b -> m CmdInput)
-  --     -> ReductionModel x b [a]
-  --     -> m b
-  --   reducex cmdIn model =
-  --     mkReductionProblem cnfPredicateOptions cmdIn  \case
-  --       Just p -> do
-  --         reduce cnfReducerName (applyModel model p) >>= \case
-  --           Just result -> do
-  --             return result
-  --           Nothing -> do
-  --             L.warn "Could not reduce problem"
-  --             return b
-  --       Nothing -> do
-  --         L.err "Predicate failed"
-  --         liftIO $ exitWith (ExitFailure 1)
+    DirFormat _ -> do
+      dirtree <- liftIO $ readDirTree (BLC.readFile) _cnfInputFile
 
+      r <- case dirTreeNode dirtree of
+        Directory r -> return r
+        Symlink _ ->
+          logAndExit "Expected a directory but got a symlink."
+        File _ ->
+          logAndExit "Expected a directory but got a file."
 
-    -- reduceAll ::
-    --   (HasLogger env, MonadReader env m, MonadUnliftIO m, Metric a)
-    --   => (a -> m CmdInput)
-    --   -> a
-    --   -> m a
-    -- reduceAll tofile a =
-    --   toPredicateM cnfPredicateOptions tofile (f bs) >>= \case
-    --     Just predicate -> do
-    --       result <- reduce cnfReducerName Nothing predicate f bs
-    --       case result of
-    --         Just r -> return r
-    --         Nothing -> do
-    --           L.warn "Could not reduce problem"
-    --           return (f $ bs)
-    --     Nothing -> do
-    --       L.err "Predicate failed"
-    --       liftIO $ exitWith (ExitFailure 1)
+      let cmd = setup (inputDirectory "input") $ makeCommand _cnfCommand
+
+      problem <- withLogger
+        ( setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd r ) >>= \case
+        Just problem -> return $
+          ( liftProblem toFileList fromFileList $ problem )
+        Nothing ->
+          logAndExit "Could not satisfy baseline"
+
+      red <- listReduction <$> view cnfReducerName
+
+      result <- handleErrors =<< (withLogger $
+        runReduction _cnfReductionOptions (_cnfWorkFolder </> "iterations") red problem)
+
+      output <- view cnfOutputFile
+      L.phase ("Writing output to directory" <> display output) $ do
+        liftIO . writeDirTree (BLC.writeFile) output . directory $ toFileList result
 
   where
     handleErrors (s, r) = do
