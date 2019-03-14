@@ -1,4 +1,5 @@
 {-# LANGUAGE ApplicativeDo     #-}
+{-# LANGUAGE TupleSections     #-}
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE MultiWayIf        #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -27,6 +28,7 @@ import           Options.Applicative          as A
 
 -- reduce-util
 import           Control.Reduce.Util
+import           Control.Reduce.Problem
 import           Control.Reduce.Util.Logger   as L
 import           Control.Reduce.Util.Metric
 import           Control.Reduce.Util.OptParse
@@ -61,7 +63,7 @@ parseFormat :: Parser Format
 parseFormat =
   toFormat . map toLower
   <$> strOption
-  ( short 'f' <> value "lines"
+  ( short 'F' <> long "format" <> value "lines"
     <> showDefault <> help "the format of the input."
     <> metavar "FORMAT"
   )
@@ -160,36 +162,30 @@ main = do
 
 run :: ReaderT Config IO ()
 run = do
-  template <- view cnfCommand
+  cmd <- setup (inputFile "input") . makeCommand <$> view cnfCommand
+  workFolder <- view cnfWorkFolder
+  predOpts <- view cnfPredicateOptions
+  rOpt <- view cnfReductionOptions
 
   view cnfFormat >>= \case
     FileFormat ff -> do
-      input <- view cnfInputFile
-      bs <- liftIO $ BLC.readFile input
-      let cmd = setup (inputFile "input") $ makeCommand template
-      workFolder <- view cnfWorkFolder
-      x <- withLogger (baseline (workFolder </> "baseline") cmd bs) >>= \case
-        Just x -> return $ x
-        Nothing -> fail "Could not satisfy baseline"
+      bs <- liftIO . BLC.readFile =<< view cnfInputFile
 
-      predOpts <- view cnfPredicateOptions
-      let clipred = CliPredicate predOpts x cmd
+      problem <- withLogger
+        ( setupProblem predOpts (workFolder </> "baseline") cmd bs ) >>= \case
+          Just problem -> return $ case ff of
+            Lines ->
+              addMetric counted . toIndexed
+              $ liftProblem BLC.lines BLC.unlines problem
+            Chars ->
+              addMetric counted . toIndexed
+              $ liftProblem BLC.unpack BLC.pack problem
+          Nothing -> fail "Could not satisfy baseline"
 
-      rOpt <- view cnfReductionOptions
-      reducerName <- view cnfReducerName
+      red <- listReduction <$> view cnfReducerName
 
-      result <- handleErrors =<< case ff of
-        Lines -> do
-          withLogger
-            . runReduction rOpt (workFolder </> "iterations") (counted . fst)
-                BLC.unlines clipred
-                (listReduction reducerName)
-            $ BLC.lines bs
-        Chars -> do
-          withLogger
-            . runReduction rOpt (workFolder </> "iterations") (counted . fst) BLC.pack clipred
-              (listReduction reducerName)
-              $ BLC.unpack bs
+      result <- handleErrors =<< (withLogger $
+        runReduction rOpt (workFolder </> "iterations") red problem)
 
       output <- view cnfOutputFile
       L.phase ("Writing output to file " <> display output) $ do

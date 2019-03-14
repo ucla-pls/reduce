@@ -75,6 +75,9 @@ module Control.Reduce.Util.CliPredicate
   , replaceRelative
   , exitCodeFromInt
   , exitCodeToInt
+
+  , ExitCode (..)
+  , Sha256
   ) where
 
 

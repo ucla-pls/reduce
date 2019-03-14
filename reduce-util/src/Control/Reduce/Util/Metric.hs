@@ -1,8 +1,13 @@
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE FlexibleInstances   #-}
 {-# LANGUAGE DeriveFunctor       #-}
 {-# LANGUAGE DeriveGeneric       #-}
+{-# LANGUAGE GADTs               #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators       #-}
 module Control.Reduce.Util.Metric where
 
 -- time
@@ -10,6 +15,9 @@ import           Data.Time
 
 -- lens
 import           Control.Lens
+
+-- intset
+import qualified Data.IntSet as IS
 
 -- vector
 import qualified Data.Vector                      as V
@@ -29,6 +37,7 @@ import           GHC.Generics                     (Generic)
 -- reduce-util
 import           Control.Reduce.Util.CliPredicate
 import qualified Control.Reduce.Util.Logger       as L
+
 
 -- * Metrics
 class Metric a where
@@ -82,6 +91,37 @@ instance Metric a => C.ToNamedRecord (MetricRow a) where
     where
       result = resultOutput metricRowResults
 
+
+
+data MList k where
+  MNil :: MList '[]
+  MCons :: Metric a => a -> MList b -> MList (a ': b)
+
+
+instance Metric (MList '[]) where
+  order = Const []
+  fields _ = []
+  displayMetric _ = ""
+
+-- instance Metric a => Metric (MList '[a]) where
+--   order = Const . getConst $ (order :: Const [BS.ByteString] a)
+--   fields (MCons a MNil)= fields a
+--   displayMetric (MCons a MNil) = displayMetric a
+
+instance (Metric a, Metric (MList as)) => Metric (MList (a ': as)) where
+  order = Const (getConst (order :: Const [BS.ByteString] a) ++ getConst (order :: Const [BS.ByteString] (MList as)))
+  fields (MCons a as) = fields a ++ fields as
+  displayMetric (MCons a MNil) = displayMetric a 
+  displayMetric (MCons a as) = displayMetric a <> ", " <> displayMetric as
+
+instance (Metric a, Metric b) => Metric (a, b) where
+  order = Const (getConst (order :: Const [BS.ByteString] a) ++ getConst (order :: Const [BS.ByteString] b))
+  fields (a, b) =
+    fields a ++ fields b
+  displayMetric (a, b) =
+    displayMetric a <> " and " <> displayMetric b
+
+
 counted :: [b] -> Count
 counted =
   Count . length
@@ -96,20 +136,12 @@ instance Metric Count where
   displayMetric (Count a) =
     L.displayf "#%i elements" a
 
-instance (Metric a, Metric b) => Metric (a, b) where
-  order = Const (getConst (order :: Const [BS.ByteString] a) ++ getConst (order :: Const [BS.ByteString] b))
-  fields (a, b) =
-    fields a ++ fields b
-  displayMetric (a, b) =
-    displayMetric a <> " and " <> displayMetric b
+stringified :: (Int -> Char) -> Int -> [Int] -> Stringify
+stringified toChar len items =
+  Stringify [ if IS.member i is then toChar i else '·' | i <- [0..len-1] ]
+  where
+    is = IS.fromList items
 
--- displayed :: (b -> Char) -> [b] -> Display
--- displayed toChar =
---   let
---   model
---     idxs
---     (ba . catMaybes . map (v V.!?) . L.sort)
---     (displ . fst)
 
 --   where
 --     v = V.fromList b
@@ -117,15 +149,14 @@ instance (Metric a, Metric b) => Metric (a, b) where
 --     idxs = V.toList . V.map fst . V.indexed $ v
 --     displ a =
 --       let is = IS.fromList a in
---       Display . V.toList $ V.imap (\i c -> if IS.member i is then c else '·') str
 
-newtype Display = Display String
+newtype Stringify = Stringify String
 
-instance Metric Display where
+instance Metric Stringify where
   order = Const ["display"]
-  fields (Display a) =
+  fields (Stringify a) =
     ["display" C..= a ]
-  displayMetric (Display a) =
+  displayMetric (Stringify a) =
     Builder.fromString a
 
 --   initialMetric = Display ""
