@@ -21,14 +21,8 @@ This module defines a reduction problem.
 
 module Control.Reduce.Problem where
 
--- cassava
-import qualified Data.Csv                         as C
-
 -- vector
 import qualified Data.Vector                      as V
-
--- text
-import qualified Data.Text.Lazy.Builder           as Builder
 
 -- lens
 import           Control.Lens
@@ -36,11 +30,8 @@ import           Control.Lens
 -- base
 import           Control.Monad
 import           Data.Maybe
+import           Data.Semigroup
 import           Data.Functor
-
--- bytestring
-import qualified Data.ByteString.Char8            as BS
-import qualified Data.ByteString.Lazy             as BL
 
 -- reduce-util
 import           Control.Reduce.Util.CliPredicate
@@ -49,9 +40,10 @@ import           Control.Reduce.Util.Metric
 
 -- | A Problem is something that we can reduce, by running a program on with the
 -- correct inputs.
-data Problem s a = forall r. Metric (MList r) =>  Problem
+data Problem s a = Problem
   { initial     :: !s
-  , store       :: s -> (a, MList r)
+  , store       :: s -> a
+  , metric      :: AnyMetric s
   , expectation :: !Expectation
   , command     :: !(Command a (Maybe CmdOutput))
   }
@@ -68,41 +60,35 @@ resetProblem s = updateProblem (const s)
 -- isomorphic to the original domain.
 liftProblem :: (s -> t) -> (t -> s) -> Problem s a -> Problem t a
 liftProblem st ts (Problem {..}) =
-  Problem (st initial) (store . ts) expectation command
+  Problem (st initial) (store . ts) (ts `contramap` metric) expectation command
 
 
--- | Get an indexed list of elements, this enables us to differentiate between stufftoIndexed :: Problem r [a] b -> Problem r [Int] b
-toIndexed Problem {..} =
-  Problem indicies (store . displ) expectation command
+-- | Get an indexed list of elements, this enables us to differentiate between stuff.
+toIndexed :: Problem [a] b -> Problem [Int] b
+toIndexed = toIndexed' . liftProblem (fmap Just) catMaybes
+
+toIndexed' :: Problem [Maybe a] b -> Problem [Int] b
+toIndexed' Problem {..} =
+  Problem indicies (store . displ) (displ `contramap` metric) expectation command
   where
    items = V.fromList initial
+   nothings = V.map (const Nothing) items
    indicies = V.toList . V.map fst . V.indexed $ items
    displ ids =
-     catMaybes . V.toList $ V.map (const Nothing) items V.// [(i, items V.!? i) | i <- ids]
+     V.toList $ nothings V.// [(i, join $ items V.!? i) | i <- ids]
 
+-- | Create a stringed version that also measures the cl
+toStringified :: Problem String b -> Problem [Int] b
+toStringified =
+  toIndexed'
+  . meassure (Stringify . map (fromMaybe '·'))
+  . liftProblem (fmap Just) catMaybes
 
+-- | Add a metric to the problem
+meassure :: Metric r => (s -> r) -> Problem s a -> Problem s a
+meassure sr p =
+  p { metric = addMetric sr . metric $ p }
 
-addMetric :: Metric r => (s -> r)  -> Problem s a -> Problem s a
-addMetric sr Problem {..} =
-  Problem
-  initial
-  (\s -> let (a, rs) = store s in (a, MCons (sr s) rs))
-  expectation
-  command
-
-headerString :: Problem s a -> BL.ByteString
-headerString Problem {..} =
-  case store of
-    (a :: s -> (a, MList r)) ->
-      C.encodeDefaultOrderedByNameWith
-      C.defaultEncodeOptions ([] :: [MetricRow (MList r)])
-
-metricRowString :: Problem s a -> MetricRow s -> BL.ByteString
-metricRowString Problem {..} row =
-  let (a, r) = store (metricRowContent row)
-  in C.encodeDefaultOrderedByNameWith
-     ( C.defaultEncodeOptions { C.encIncludeHeader = False } )
-     [ row $> r]
 
 -- | Setup the problem.
 setupProblem ::
@@ -116,7 +102,7 @@ setupProblem opts workDir cmd a =
     (resultOutput <$> runCommand workDir cmd a) >>= \case
       Just output ->
         return . Just
-        $ Problem a (\a -> (a, MNil)) (zipExpectation opts output) cmd
+        $ Problem a id emptyMetric (zipExpectation opts output) cmd
       Nothing ->
         return Nothing
 
@@ -127,11 +113,10 @@ checkSolution ::
   -> a
   -> L.Logger (CmdResult (Maybe CmdOutput), Bool)
 checkSolution (Problem {..}) fp a = do
-  let (b, m) = store a
-  L.info $ "Trying: " <> displayMetric m
-  res <- runCommand fp command b
+  -- L.info $ "Trying: " <> displayMetric m
+  res <- runCommand fp command $ store a
   let success = checkExpectation expectation (resultOutput res)
-  L.info $ if success then "success" else "failure"
+  -- L.info $ if success then "success" else "failure"
   return (res, success)
 
 
@@ -149,7 +134,17 @@ data Expectation = Expectation
   { expectedExitCode :: Maybe ExitCode
   , expectedStdout   :: Maybe Sha256
   , expectedStderr   :: Maybe Sha256
-  } deriving (Show, Eq, Semigroup, Monoid)
+  } deriving (Show, Eq)
+
+instance Semigroup Expectation where
+  Expectation a b c <> Expectation a' b' c' =
+    Expectation (takeLast a a') (takeLast b b') (takeLast c c')
+
+    where
+      takeLast = with Last getLast
+
+      with :: Semigroup b => (a -> b) -> (b -> a) -> Maybe a -> Maybe a -> (Maybe a)
+      with _to _from x y = fmap _from (fmap _to x <> fmap _to y)
 
 -- | Zip the PredicateOptions with a CmdOutput to build an Expectation
 zipExpectation :: PredicateOptions -> CmdOutput -> Expectation

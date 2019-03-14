@@ -1,8 +1,5 @@
 {-# LANGUAGE BangPatterns      #-}
-{-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards   #-}
-{-# LANGUAGE TupleSections     #-}
+
 {-|
 Module      : System.Process.Consume
 Copyright   : (c) Christian Gram Kalhauge, 2018
@@ -53,12 +50,12 @@ consume ::
   -> Consumer BS.ByteString stderr
   -> ProcessConfig a b c
   -> IO (ExitCode, stdout, stderr)
-consume outLogger errLogger cfg = do
+consume outLogger errLogger cfg =
   withProcess (setStderr createPipe . setStdout createPipe $ cfg) $ \p -> do
-    out <- async ( hFoldM 256 (getStdout p) outLogger )
-    err <- async ( hFoldM 256 (getStderr p) errLogger )
-    atomically $
-      (,,) <$> waitExitCodeSTM p <*> waitSTM out <*> waitSTM err
+  out <- async ( hFoldM 256 (getStdout p) outLogger )
+  err <- async ( hFoldM 256 (getStderr p) errLogger )
+  atomically $
+    (,,) <$> waitExitCodeSTM p <*> waitSTM out <*> waitSTM err
 {-# inline consume #-}
 
 -- * Consumer
@@ -106,7 +103,7 @@ perLine (consumer, i) = do
 
 -- | Build a pure consumer. A pure consumer does not use the IO monad.
 pureConsumer :: (a -> b -> a) -> a -> Consumer b a
-pureConsumer fn a = ((\a' bs -> return $ fn a' bs), a)
+pureConsumer fn a = (\a' bs -> return $ fn a' bs, a)
 {-# inline pureConsumer #-}
 
 -- | Ignores the arguments
@@ -115,14 +112,14 @@ ignoreConsumer = logger (const $ return ())
 
 combineConsumers :: Consumer c a -> Consumer c b -> Consumer c (a, b)
 combineConsumers (fna, ia) (fnb, ib) =
-  ((\(a, b) bs -> (,) <$> fna a bs <*> fnb b bs), (ia, ib))
+  (\(a, b) bs -> (,) <$> fna a bs <*> fnb b bs, (ia, ib))
 
 
 -- ** Loggers
 
 -- | Build a logger
 logger :: (b -> IO ()) -> Consumer b ()
-logger fn = ((\() -> fn), ())
+logger fn = (\() -> fn, ())
 {-# inline logger #-}
 
 perLineLogger :: (Maybe BS.ByteString -> IO ()) -> IO (Consumer BS.ByteString ())
@@ -135,7 +132,7 @@ handlerLogger h = logger (BS.hPutStr h)
 
 type Sha256 = (BS.ByteString, Word64)
 
-hashConsumer :: Consumer BS.ByteString (Sha256.Ctx)
+hashConsumer :: Consumer BS.ByteString Sha256.Ctx
 hashConsumer = (\ctx bs -> return $ Sha256.update ctx bs, Sha256.init)
 
 getHash :: Sha256.Ctx -> Sha256

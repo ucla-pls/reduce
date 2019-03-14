@@ -19,20 +19,19 @@ import           Control.Lens
 -- intset
 import qualified Data.IntSet as IS
 
--- vector
-import qualified Data.Vector                      as V
-
 -- text
 import qualified Data.Text.Lazy.Builder           as Builder
 
 -- bytestring
 import qualified Data.ByteString.Char8            as BS
+import qualified Data.ByteString.Lazy             as BL
 
 -- cassava
 import qualified Data.Csv                         as C
 
 -- base
 import           GHC.Generics                     (Generic)
+import           Data.Functor
 
 -- reduce-util
 import           Control.Reduce.Util.CliPredicate
@@ -92,21 +91,51 @@ instance Metric a => C.ToNamedRecord (MetricRow a) where
       result = resultOutput metricRowResults
 
 
+-- | Computes the metric
+data AnyMetric s = forall p. Metric (MList p) => AnyMetric
+  { computeMetric :: s -> MList p
+  }
+
+instance Contravariant AnyMetric where
+  contramap st (AnyMetric f) = AnyMetric (f . st)
+
+emptyMetric :: AnyMetric s
+emptyMetric = AnyMetric $ const MNil
+
+-- | Adds a metric to the list of metrics
+addMetric :: Metric r => (s -> r) -> AnyMetric s -> AnyMetric s
+addMetric sr (AnyMetric f) =
+  AnyMetric (\s -> MCons (sr s) (f s))
+
+-- | Compute a CSV Header
+headerString :: AnyMetric s -> BL.ByteString
+headerString (AnyMetric f)=
+  case f of
+    (_ :: s -> MList r) ->
+      C.encodeDefaultOrderedByNameWith
+      C.defaultEncodeOptions ([] :: [MetricRow (MList r)])
+
+-- | Compute a row in a CSV file
+metricRowString :: AnyMetric s -> MetricRow s -> BL.ByteString
+metricRowString (AnyMetric f) row =
+  C.encodeDefaultOrderedByNameWith
+  ( C.defaultEncodeOptions { C.encIncludeHeader = False } )
+  [ row $> f (metricRowContent row) ]
+
+
+-- | Display the metric of a data point
+displayAnyMetric :: AnyMetric s -> s -> Builder.Builder
+displayAnyMetric (AnyMetric f) s =
+  displayMetric (f s)
 
 data MList k where
   MNil :: MList '[]
   MCons :: Metric a => a -> MList b -> MList (a ': b)
 
-
 instance Metric (MList '[]) where
   order = Const []
   fields _ = []
   displayMetric _ = ""
-
--- instance Metric a => Metric (MList '[a]) where
---   order = Const . getConst $ (order :: Const [BS.ByteString] a)
---   fields (MCons a MNil)= fields a
---   displayMetric (MCons a MNil) = displayMetric a
 
 instance (Metric a, Metric (MList as)) => Metric (MList (a ': as)) where
   order = Const (getConst (order :: Const [BS.ByteString] a) ++ getConst (order :: Const [BS.ByteString] (MList as)))

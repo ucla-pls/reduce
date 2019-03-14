@@ -175,10 +175,10 @@ run = do
         ( setupProblem predOpts (workFolder </> "baseline") cmd bs ) >>= \case
           Just problem -> return $ case ff of
             Lines ->
-              addMetric counted . toIndexed
+              meassure counted . toIndexed
               $ liftProblem BLC.lines BLC.unlines problem
             Chars ->
-              addMetric counted . toIndexed
+              meassure counted . toIndexed
               $ liftProblem BLC.unpack BLC.pack problem
           Nothing -> fail "Could not satisfy baseline"
 
