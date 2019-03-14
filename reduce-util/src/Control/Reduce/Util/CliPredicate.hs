@@ -1,10 +1,8 @@
-{-# LANGUAGE GADTs              #-}
-{-# LANGUAGE LambdaCase         #-}
-{-# LANGUAGE OverloadedStrings  #-}
-{-# LANGUAGE RecordWildCards    #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TupleSections      #-}
-{-# LANGUAGE ViewPatterns       #-}
+{-# LANGUAGE GADTs             #-}
+{-# LANGUAGE LambdaCase        #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE ViewPatterns      #-}
 
 {-|
 Module      : Control.Reduce.Util.CliPredicate
@@ -50,7 +48,6 @@ module Control.Reduce.Util.CliPredicate
   , CmdInput (..)
   , inputArgument
   , inputStream
-  , inputDirNode
   , inputFile
   , inputDirTree
 
@@ -88,19 +85,19 @@ import           System.Process.Typed
 import           System.FilePath
 
 -- text
-import qualified Data.Text.Lazy                        as LazyText
-import qualified Data.Text.Lazy.Builder                as Builder
-import qualified Data.Text.Lazy.Encoding               as Text
-import qualified Data.Text.Lazy.IO                     as LazyText
+import qualified Data.Text.Lazy             as LazyText
+import qualified Data.Text.Lazy.Builder     as Builder
+import qualified Data.Text.Lazy.Encoding    as Text
+import qualified Data.Text.Lazy.IO          as LazyText
 
 -- unliftio
 import           UnliftIO
 import           UnliftIO.Directory
 
 -- bytestring
-import qualified Data.ByteString.Char8                 as BS
-import qualified Data.ByteString.Lazy                  as BL
-import qualified Data.ByteString.Lazy.Char8            as BLC
+import qualified Data.ByteString.Char8      as BS
+import qualified Data.ByteString.Lazy       as BL
+import qualified Data.ByteString.Lazy.Char8 as BLC
 
 -- mtl
 import           Control.Monad.Except
@@ -111,11 +108,13 @@ import           Control.Monad.Writer
 import           Control.Lens
 
 -- containers
-import qualified Data.Map                              as Map
+import qualified Data.Map                   as Map
 
 -- base
-import           Data.Bifunctor                        (first)
-import qualified Data.List                             as L
+import           Data.Bifunctor             (first)
+import           Data.Functor
+import           Data.Foldable
+import qualified Data.List                  as L
 import           Data.String
 import           Data.Void
 import           System.Exit
@@ -126,9 +125,11 @@ import           Text.Printf
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
 
+-- dirtree
+import           System.DirTree
+
 -- reduce-util
-import           Control.Reduce.Util.Logger            as L
-import           System.Directory.Tree
+import           Control.Reduce.Util.Logger as L
 import           System.Process.Consume
 
 
@@ -176,7 +177,7 @@ runCommandWithLogger :: FilePath -> Command a b -> a -> LoggerConfig -> IO (CmdR
 runCommandWithLogger workDir Command {..} a lg = do
   createDirectoryIfMissing True workDir
   withCurrentDirectory workDir . flip runReaderT lg $ do
-    (tp, pr) <- timedPhase "setup" $ do
+    (tp, pr) <- timedPhase "setup" $
       liftIO $ runCmdInput (cmdSetup a) >>= setupProcess
     (tm, x) <- timedPhase "run" $ do
       olog <- traceLogger "+"
@@ -187,7 +188,7 @@ runCommandWithLogger workDir Command {..} a lg = do
         consumeWithHash
         (combineConsumers olog $ handlerLogger hout)
         (combineConsumers elog $ handlerLogger herr)
-        $ pr
+        pr
     let m = formatOutput <$> x
     logResults m
     return $ CmdResult tp tm (cmdPostprocess m)
@@ -207,7 +208,7 @@ runCommandWithLogger workDir Command {..} a lg = do
     -- | Creates a shell script which can be executed in the current working
     -- directory.
     setupProcess :: Input -> IO (ProcessConfig () () ())
-    setupProcess cmdInput@(Input {..})  = do
+    setupProcess cmdInput@Input{..}  = do
       maybe (return ()) (BLC.writeFile "stdin") ciStdin
       writeExec "run.sh" $ toShellScript cmdInput
       return $ proc "./run.sh" []
@@ -220,7 +221,7 @@ runCommandWithLogger workDir Command {..} a lg = do
     -- | Creates a shell script which can be executed in the current working
     -- directory.
     toShellScript :: Input -> LazyText.Text
-    toShellScript Input {..} = do
+    toShellScript Input{..} =
       Builder.toLazyText . execWriter $ do
         tell "#!/usr/bin/env sh\n"
         tell "WORKDIR=${2:-$(pwd)}\n"
@@ -255,7 +256,7 @@ createCommandTemplate timelimit cmd args = runExceptT $ do
     =<< mapM (liftEither . parseCmdArgument) args
   return $ CommandTemplate timelimit exactCmd results
   where
-    getExecutable exec = do
+    getExecutable exec =
       findExecutable exec >>=
         maybe (canonicalizeOrFail exec) return
 
@@ -276,7 +277,7 @@ templateToString cmd fp kmap =
   let
     (a, ms) = evaluateTemplate cmd fp kmap
   in
-    foldMap id
+    fold
     . L.intersperse (fromString " ")
     . map (\x -> "\"" <> x <> "\"")
     $ fromString a : ms
@@ -319,9 +320,7 @@ parseCmdArgument arg =
     cliArgumentP =
       msum
       [ CAFilePath <$> (char '%' *> takeWhile1P Nothing (const True))
-      , do
-          x <- CAConst <$> (string "}}" *> return "}")
-          return x
+      , CAConst <$> (string "}}" $> "}")
       , do
           _ <- char '{'
           msum
@@ -329,8 +328,7 @@ parseCmdArgument arg =
             , CAFilePath <$> (char '%' *> takeWhileP Nothing (/= '}') <* char '}')
             , CAInput <$> takeWhileP Nothing (/= '}') <* char '}'
             ]
-      , do
-          CAConst <$> some (satisfy (\x -> x /= '{' && x /= '}'))
+      , CAConst <$> some (satisfy (\x -> x /= '{' && x /= '}'))
       ]
 
 -- | Returns the arguments with all the file pointers
@@ -359,7 +357,7 @@ relativeArgument (CAJoin a b) =
   CAJoin
   <$> relativeArgument a
   <*> relativeArgument b
-relativeArgument (CAFilePath fp) = do
+relativeArgument (CAFilePath fp) =
   CAFilePath <$> replaceRelative fp
 relativeArgument a =
   return a
@@ -371,8 +369,7 @@ canonicalizeOrFail :: FilePath -> IO FilePath
 canonicalizeOrFail fp = do
   cfp <- canonicalizePath fp
   x <- doesPathExist cfp
-  when (not x)
-    . ioError
+  unless x . ioError
     $ mkIOError
       doesNotExistErrorType
       "Expected file"
@@ -432,15 +429,13 @@ inputStream ::
 inputStream bs = CmdInput $
   return $ mempty { ciStdin = Just bs }
 
-inputDirNode ::
+inputDirTree ::
   String
-  -> DirNode FileContent
+  -> DirTree Link BL.ByteString
   -> CmdInput
-inputDirNode name dn = CmdInput $ do
+inputDirTree name dt = CmdInput $ do
   name' <- liftIO $ do
-    case unDirNode dn of
-      File f -> writeContent name f
-      Dir td -> writeTreeWith writeContent (name :/ td)
+    writeDirTree BL.writeFile name dt
     makeAbsolute name
   return $ mempty { ciValueMap = Map.singleton "" (CAFilePath name')}
 
@@ -448,13 +443,13 @@ inputFile ::
   String
   -> BL.ByteString
   -> CmdInput
-inputFile name = inputDirNode name . DirNode . File . Content
+inputFile name = inputDirTree name . file
 
-inputDirTree ::
-  String
-  -> DirTree FileContent
-  -> CmdInput
-inputDirTree name = inputDirNode name . DirNode . Dir
+-- inputDirTree ::
+--   String
+--   -> DirTree FileContent
+--   -> CmdInput
+-- inputDirTree name = inputDirNode name . DirNode . Dir
 
 data CmdOutput = CmdOutput
   { outputCode :: !ExitCode
@@ -492,8 +487,8 @@ logResults = \case
       <-> Builder.fromString (take 8 hos)
     L.debug $ "stderr" <-> displayf "(bytes: %05d):" elen
       <-> Builder.fromString (take 8 hes)
-  Nothing -> do
-    L.warn $ "Process Timed-out"
+  Nothing ->
+    L.warn "Process Timed-out"
 
 tryTimeout :: (MonadUnliftIO m, RealFrac r) => r -> m a -> m (Maybe a)
 tryTimeout timelimit =

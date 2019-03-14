@@ -1,9 +1,7 @@
 {-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE DeriveAnyClass             #-}
 {-# LANGUAGE ExistentialQuantification  #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GADTs                      #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE KindSignatures             #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE OverloadedStrings          #-}
@@ -50,7 +48,7 @@ data Problem s a = Problem
 
 -- | Update the problem. This is useful if some partial reduction was achieved.
 updateProblem :: (s -> s) -> Problem s a -> Problem s a
-updateProblem fs p@(Problem {..}) = p { initial = fs initial }
+updateProblem fs p@Problem{..} = p { initial = fs initial }
 
 -- | Set the problem to a new begining value
 resetProblem :: s -> Problem s a -> Problem s a
@@ -59,30 +57,32 @@ resetProblem s = updateProblem (const s)
 -- | Lift the problem to a new domain. Requires that the new domain is
 -- isomorphic to the original domain.
 liftProblem :: (s -> t) -> (t -> s) -> Problem s a -> Problem t a
-liftProblem st ts (Problem {..}) =
+liftProblem st ts Problem{..} =
   Problem (st initial) (store . ts) (ts `contramap` metric) expectation command
-
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
 toIndexed :: Problem [a] b -> Problem [Int] b
-toIndexed = toIndexed' . liftProblem (fmap Just) catMaybes
+toIndexed = toIndexed' . toFixedLenght
 
-toIndexed' :: Problem [Maybe a] b -> Problem [Int] b
+-- | Make the problem fixed length.
+toFixedLenght :: Problem [a] b -> Problem (V.Vector (Maybe a)) b
+toFixedLenght = liftProblem (V.map Just . V.fromList) (catMaybes . V.toList)
+
+-- | Turn a problem of reducing maybe values to one of reducting a list of integers.
+toIndexed' :: Problem (V.Vector (Maybe a)) b -> Problem [Int] b
 toIndexed' Problem {..} =
   Problem indicies (store . displ) (displ `contramap` metric) expectation command
   where
-   items = V.fromList initial
-   nothings = V.map (const Nothing) items
-   indicies = V.toList . V.map fst . V.indexed $ items
-   displ ids =
-     V.toList $ nothings V.// [(i, join $ items V.!? i) | i <- ids]
+   nothings = V.map (const Nothing) initial
+   indicies = V.toList . V.map fst . V.indexed $ initial
+   displ ids = nothings V.// [(i, join $ initial V.!? i) | i <- ids]
 
 -- | Create a stringed version that also measures the cl
-toStringified :: Problem String b -> Problem [Int] b
-toStringified =
+toStringified :: (a -> Char) -> Problem [a] b -> Problem [Int] b
+toStringified fx =
   toIndexed'
-  . meassure (Stringify . map (fromMaybe '·'))
-  . liftProblem (fmap Just) catMaybes
+  . meassure (Stringify . V.toList . V.map (maybe '·' fx))
+  . toFixedLenght
 
 -- | Add a metric to the problem
 meassure :: Metric r => (s -> r) -> Problem s a -> Problem s a
@@ -98,13 +98,13 @@ setupProblem ::
   -> a
   -> L.Logger (Maybe (Problem a a))
 setupProblem opts workDir cmd a =
-  L.phase "Calculating Initial Problem" $ do
-    (resultOutput <$> runCommand workDir cmd a) >>= \case
-      Just output ->
-        return . Just
-        $ Problem a id emptyMetric (zipExpectation opts output) cmd
-      Nothing ->
-        return Nothing
+  L.phase "Calculating Initial Problem" $
+  (resultOutput <$> runCommand workDir cmd a) >>= \case
+  Just output ->
+    return . Just
+    $ Problem a id emptyMetric (zipExpectation opts output) cmd
+  Nothing ->
+    return Nothing
 
 
 checkSolution ::
@@ -112,7 +112,7 @@ checkSolution ::
   -> FilePath
   -> a
   -> L.Logger (CmdResult (Maybe CmdOutput), Bool)
-checkSolution (Problem {..}) fp a = do
+checkSolution Problem{..} fp a = do
   -- L.info $ "Trying: " <> displayMetric m
   res <- runCommand fp command $ store a
   let success = checkExpectation expectation (resultOutput res)
@@ -139,29 +139,25 @@ data Expectation = Expectation
 instance Semigroup Expectation where
   Expectation a b c <> Expectation a' b' c' =
     Expectation (takeLast a a') (takeLast b b') (takeLast c c')
-
     where
+      takeLast :: Maybe a -> Maybe a -> Maybe a
       takeLast = with Last getLast
-
-      with :: Semigroup b => (a -> b) -> (b -> a) -> Maybe a -> Maybe a -> (Maybe a)
       with _to _from x y = fmap _from (fmap _to x <> fmap _to y)
 
 -- | Zip the PredicateOptions with a CmdOutput to build an Expectation
 zipExpectation :: PredicateOptions -> CmdOutput -> Expectation
-zipExpectation (PredicateOptions {..}) (CmdOutput {..}) =
+zipExpectation PredicateOptions{..} CmdOutput{..} =
   Expectation
   (guard predOptPreserveExitCode $> outputCode)
   (guard predOptPreserveStdout   $> outputOut)
   (guard predOptPreserveStderr   $> outputErr)
 
 -- | Check if the output matches the expectation.
-checkExpectation :: Expectation -> (Maybe CmdOutput) -> Bool
-checkExpectation (Expectation {..}) = \case
-  Just (CmdOutput {..} ) ->
-    all id
-    [ maybe True (outputCode ==) expectedExitCode
-    , maybe True (outputOut ==) expectedStdout
-    , maybe True (outputErr ==) expectedStderr
-    ]
+checkExpectation :: Expectation -> Maybe CmdOutput -> Bool
+checkExpectation Expectation{..} = \case
+  Just CmdOutput{..} ->
+    maybe True (outputCode ==) expectedExitCode
+    && maybe True (outputOut ==) expectedStdout
+    && maybe True (outputErr ==) expectedStderr
   Nothing ->
     False

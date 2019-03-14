@@ -5,5 +5,5 @@ packages:
 - red
 - location:
     git: https://github.com/kalhauge/dirtree
-    commit: f47f9da52ac492ec58933fc284c554069bc04ab5
+    commit: ded5b1683a9a07875b955beed3e9795848d9bc66
   extra-dep: true

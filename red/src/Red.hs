@@ -178,7 +178,7 @@ run = do
               meassure counted . toIndexed
               $ liftProblem BLC.lines BLC.unlines problem
             Chars ->
-              meassure counted . toIndexed
+              meassure counted . toStringified id
               $ liftProblem BLC.unpack BLC.pack problem
           Nothing -> fail "Could not satisfy baseline"
 

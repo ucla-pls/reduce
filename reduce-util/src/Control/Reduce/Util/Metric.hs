@@ -122,7 +122,6 @@ metricRowString (AnyMetric f) row =
   ( C.defaultEncodeOptions { C.encIncludeHeader = False } )
   [ row $> f (metricRowContent row) ]
 
-
 -- | Display the metric of a data point
 displayAnyMetric :: AnyMetric s -> s -> Builder.Builder
 displayAnyMetric (AnyMetric f) s =
@@ -155,7 +154,7 @@ counted :: [b] -> Count
 counted =
   Count . length
 
-data Count = Count { getCount :: Int }
+newtype Count = Count { getCount :: Int }
   deriving (Show)
 
 instance Metric Count where
