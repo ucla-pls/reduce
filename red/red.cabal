@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: ea26e7d653ab665563d0bfc2b253ee822d48624fe10ffed291f412fe8bdf48a6
+-- hash: 04c8888ff38961de975825b0f526ccc26c1a9c415792ba7273c51678d7348ae5
 
 name:           red
 version:        0.1.0.0
@@ -36,6 +36,7 @@ library
     , bytestring
     , cassava
     , contravariant
+    , directory
     , dirtree
     , filepath
     , lens
@@ -60,6 +61,7 @@ executable red
     , bytestring
     , cassava
     , contravariant
+    , directory
     , dirtree
     , filepath
     , lens

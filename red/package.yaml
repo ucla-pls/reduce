@@ -34,7 +34,7 @@ dependencies:
 - vector
 - filepath
 - dirtree
-  # - directory
+- directory
   # - bytestring
   # - typed-process
   # - cryptohash-sha256

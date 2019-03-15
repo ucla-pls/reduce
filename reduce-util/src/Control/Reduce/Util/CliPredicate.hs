@@ -50,7 +50,9 @@ module Control.Reduce.Util.CliPredicate
   , inputStream
   , inputFile
   , inputDirectory
+  , inputDirectoryWith
   , inputDirTree
+  , inputDirTreeWith
 
   , CmdOutput (..)
 
@@ -434,9 +436,17 @@ inputDirTree ::
   String
   -> DirTree Link BL.ByteString
   -> CmdInput
-inputDirTree name dt = CmdInput $ do
+inputDirTree =
+  inputDirTreeWith BL.writeFile
+
+inputDirTreeWith ::
+  (FilePath -> a -> IO ())
+  -> String
+  -> DirTree Link a
+  -> CmdInput
+inputDirTreeWith f name dt = CmdInput $ do
   name' <- liftIO $ do
-    writeDirTree BL.writeFile name dt
+    writeDirTree f name dt
     makeAbsolute name
   return $ mempty { ciValueMap = Map.singleton "" (CAFilePath name')}
 
@@ -450,7 +460,15 @@ inputDirectory ::
   String
   -> FileMap (DirTree Link BL.ByteString)
   -> CmdInput
-inputDirectory name = inputDirTree name . directory . toFileList
+inputDirectory =
+  inputDirectoryWith BL.writeFile
+
+inputDirectoryWith ::
+  (FilePath -> a -> IO ())
+  -> String
+  -> FileMap (DirTree Link a)
+  -> CmdInput
+inputDirectoryWith f name = inputDirTreeWith f name . directory
 
 -- inputDirTree ::
 --   String

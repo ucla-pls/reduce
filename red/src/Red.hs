@@ -14,6 +14,9 @@ import           System.FilePath
 -- mtl
 import           Control.Monad.Reader
 
+-- directory
+import           System.Directory
+
 -- lens
 import           Control.Lens
 
@@ -195,21 +198,23 @@ run = do
         liftIO $ BLC.writeFile output result
 
     DirFormat _ -> do
-      dirtree <- liftIO $ readDirTree (BLC.readFile) _cnfInputFile
 
-      r <- case dirTreeNode dirtree of
-        Directory r -> return r
-        Symlink _ ->
-          logAndExit "Expected a directory but got a symlink."
-        File _ ->
-          logAndExit "Expected a directory but got a file."
+      dirtree <- liftIO $ readDirTree return _cnfInputFile
 
-      let cmd = setup (inputDirectory "input") $ makeCommand _cnfCommand
+      dir <- case dirTreeNode dirtree of
+        Directory dir -> return $ dir
+        _ -> logAndExit "File not a folder"
+
+      let cmd = setup (inputDirectoryWith (flip createFileLink) "input") $ makeCommand _cnfCommand
 
       problem <- withLogger
-        ( setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd r ) >>= \case
-        Just problem -> return $
-          ( liftProblem toFileList fromFileList $ problem )
+        ( setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd dir ) >>= \case
+        Just problem ->
+          return
+          . meassure counted
+          . toStringified (\(key, _) -> last . show . length $ key)
+          . liftProblem toDeepFileList fromDeepFileList
+          $ problem
         Nothing ->
           logAndExit "Could not satisfy baseline"
 
@@ -219,8 +224,8 @@ run = do
         runReduction _cnfReductionOptions (_cnfWorkFolder </> "iterations") red problem)
 
       output <- view cnfOutputFile
-      L.phase ("Writing output to directory" <> display output) $ do
-        liftIO . writeDirTree (BLC.writeFile) output . directory $ toFileList result
+      L.phase ("Writing output to directory " <> display output) $ do
+        liftIO . writeDirTree (flip copyFile) output . directory $ result
 
   where
     handleErrors (s, r) = do
