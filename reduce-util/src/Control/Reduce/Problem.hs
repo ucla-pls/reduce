@@ -32,9 +32,9 @@ import           Data.Semigroup
 import           Data.Functor
 
 -- reduce-util
-import           Control.Reduce.Util.CliPredicate
+import           Control.Reduce.Command
 import qualified Control.Reduce.Util.Logger       as L
-import           Control.Reduce.Util.Metric
+import           Control.Reduce.Metric
 
 -- | A Problem is something that we can reduce, by running a program on with the
 -- correct inputs.

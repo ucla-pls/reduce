@@ -29,7 +29,9 @@ module Control.Reduce.Util
   , ReducerName (..)
   , ReductionException (..)
 
-  , module Control.Reduce.Util.CliPredicate
+  , module Control.Reduce.Command
+  , module Control.Reduce.Metric
+  , module Control.Reduce.Problem
   ) where
 
 -- unliftio
@@ -53,9 +55,9 @@ import           Text.Printf
 import           Control.Monad.Free.Church
 
 -- reduce-util
-import           Control.Reduce.Util.CliPredicate
+import           Control.Reduce.Command
 import qualified Control.Reduce.Util.Logger       as L
-import           Control.Reduce.Util.Metric
+import           Control.Reduce.Metric
 import           Control.Reduce.Problem
 
 -- reduce

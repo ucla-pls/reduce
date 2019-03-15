@@ -5,7 +5,7 @@
 {-# LANGUAGE ViewPatterns      #-}
 
 {-|
-Module      : Control.Reduce.Util.CliPredicate
+Module      : Control.Reduce.Command
 Copyright   : (c) Christian Gram Kalhauge, 2018
 License     : MIT
 Maintainer  : kalhauge@cs.ucla.edu
@@ -23,14 +23,9 @@ run %file.txt {}
   absolute path when running the program.
 - {} is the input to the predicate.
 
-
-Todo:
-
-Maybe have an input DSL? Ideally a Semitic for creating the workfolder.
-
 -}
 
-module Control.Reduce.Util.CliPredicate
+module Control.Reduce.Command
   (
     Command (..)
   , makeCommand

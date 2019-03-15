@@ -8,7 +8,7 @@
 {-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators       #-}
-module Control.Reduce.Util.Metric where
+module Control.Reduce.Metric where
 
 -- time
 import           Data.Time
@@ -34,7 +34,7 @@ import           GHC.Generics                     (Generic)
 import           Data.Functor
 
 -- reduce-util
-import           Control.Reduce.Util.CliPredicate
+import           Control.Reduce.Command
 import qualified Control.Reduce.Util.Logger       as L
 
 

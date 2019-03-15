@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Control.Reduce.Util.CliPredicateSpec where
+module Control.Reduce.CommandSpec where
 
 import           SpecHelper
 
@@ -7,7 +7,7 @@ import qualified Data.List                        as L
 import qualified Data.Map                         as Map
 import           UnliftIO
 
-import           Control.Reduce.Util.CliPredicate
+import           Control.Reduce.Command
 import           Data.Either
 
 spec :: Spec

@@ -1,11 +1,11 @@
 {-# LANGUAGE ApplicativeDo     #-}
-{-# LANGUAGE TupleSections     #-}
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE MultiWayIf        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE RecordWildCards   #-}
 {-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TupleSections     #-}
 module Red where
 
 -- filepath
@@ -30,13 +30,11 @@ import qualified Data.ByteString.Lazy.Char8   as BLC
 import           Options.Applicative          as A
 
 -- dirtree
-import System.DirTree
+import           System.DirTree
 
 -- reduce-util
 import           Control.Reduce.Util
-import           Control.Reduce.Problem
 import           Control.Reduce.Util.Logger   as L
-import           Control.Reduce.Util.Metric
 import           Control.Reduce.Util.OptParse
 
 -- base
@@ -203,7 +201,7 @@ run = do
 
       dir <- case dirTreeNode dirtree of
         Directory dir -> return $ dir
-        _ -> logAndExit "File not a folder"
+        _             -> logAndExit "File not a folder"
 
       let cmd = setup (inputDirectoryWith (flip createFileLink) "input") $ makeCommand _cnfCommand
 
