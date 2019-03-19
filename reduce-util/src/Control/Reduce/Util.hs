@@ -1,5 +1,4 @@
 {-# LANGUAGE DataKinds           #-}
-{-# LANGUAGE TypeOperators           #-}
 {-# LANGUAGE DeriveFunctor       #-}
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE FlexibleInstances   #-}
@@ -11,6 +10,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving  #-}
 {-# LANGUAGE TupleSections       #-}
+{-# LANGUAGE TypeOperators       #-}
 {-|
 Module      : Control.Reduce.Util
 Copyright   : (c) Christian Gram Kalhauge, 2018
@@ -42,7 +42,7 @@ import           UnliftIO.Directory
 import           Data.Time
 
 -- bytestring
-import qualified Data.ByteString.Lazy.Char8       as BLC
+import qualified Data.ByteString.Lazy.Char8 as BLC
 
 -- mtl
 import           Control.Monad.Except
@@ -56,9 +56,9 @@ import           Control.Monad.Free.Church
 
 -- reduce-util
 import           Control.Reduce.Command
-import qualified Control.Reduce.Util.Logger       as L
 import           Control.Reduce.Metric
 import           Control.Reduce.Problem
+import qualified Control.Reduce.Util.Logger as L
 
 -- reduce
 import           Control.Reduce
@@ -95,6 +95,7 @@ type Reduction a = a -> ReductM a (Maybe a)
 check :: a -> ReductM a Bool
 check a = liftF $ Check a id
 
+-- | Do a reduction over a list
 listReduction :: ReducerName -> Reduction [x]
 listReduction red xs =
   case red of

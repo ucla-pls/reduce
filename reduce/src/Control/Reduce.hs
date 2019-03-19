@@ -1,7 +1,7 @@
-{-# language BangPatterns #-}
-{-# language DeriveFunctor #-}
-{-# language LambdaCase #-}
-{-# language ViewPatterns #-}
+{-# LANGUAGE BangPatterns  #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE LambdaCase    #-}
+{-# LANGUAGE ViewPatterns  #-}
 {-|
 Module      : Control.Reduce
 Copyright   : (c) Christian Gram Kalhauge, 2018
@@ -50,18 +50,18 @@ module Control.Reduce
 import           Control.Monad.Trans.Maybe
 
 -- contravariant
-import Data.Functor.Contravariant hiding (Predicate)
+import           Data.Functor.Contravariant            hiding (Predicate)
 
 -- base
-import           Data.Functor
 import           Control.Applicative
 import           Control.Monad
-import qualified Data.IntSet as IS
-import qualified Data.Vector as V
-import qualified Data.List as L
+import           Data.Functor
+import qualified Data.IntSet                           as IS
+import qualified Data.List                             as L
+import qualified Data.Vector                           as V
 
 -- reduce
-import Data.Functor.Contravariant.PredicateM
+import           Data.Functor.Contravariant.PredicateM
 
 
 -- * Reducers
