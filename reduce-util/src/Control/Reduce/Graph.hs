@@ -22,6 +22,7 @@ module Control.Reduce.Graph
   , buildGraph
   , buildGraph'
   , edges
+  , nodeLabels
 
   , Node (..)
   , buildNode
@@ -83,7 +84,6 @@ import qualified Data.Text.Lazy              as T
 import           Text.Megaparsec             hiding (empty)
 import           Text.Megaparsec.Char
 
-
 -- | A `Vertex`
 type Vertex = Int
 
@@ -113,6 +113,11 @@ buildNode n edges' =
 newtype Graph e n = Graph
   { nodes          :: V.Vector (Node e n)
   } deriving (Show, Eq)
+
+
+nodeLabels :: Graph e n -> V.Vector n
+nodeLabels = V.map nodeLabel . nodes
+
 
 empty :: Graph e n
 empty = Graph (V.empty)
