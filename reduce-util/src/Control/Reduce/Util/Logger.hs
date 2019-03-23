@@ -213,6 +213,9 @@ display = Builder.fromString . show
 displayf :: PrintfArg a => String -> a -> Builder.Builder
 displayf fmt = Builder.fromString . printf fmt
 
+displayString :: String -> Builder.Builder
+displayString = Builder.fromString
+
 timeIO :: MonadIO m => m a -> m (Double, a)
 timeIO m = do
   start <- liftIO getCurrentTime

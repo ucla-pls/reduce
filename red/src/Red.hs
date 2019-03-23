@@ -1,11 +1,12 @@
-{-# LANGUAGE ApplicativeDo     #-}
-{-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE MultiWayIf        #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes        #-}
-{-# LANGUAGE RecordWildCards   #-}
-{-# LANGUAGE TemplateHaskell   #-}
-{-# LANGUAGE TupleSections     #-}
+{-# LANGUAGE ApplicativeDo       #-}
+{-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE MultiWayIf          #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE RecordWildCards     #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE TupleSections       #-}
 module Red where
 
 -- filepath
@@ -33,6 +34,7 @@ import           Options.Applicative          as A
 import           System.DirTree
 
 -- reduce-util
+import           Control.Reduce.Graph
 import           Control.Reduce.Util
 import           Control.Reduce.Util.Logger   as L
 import           Control.Reduce.Util.OptParse
@@ -102,6 +104,7 @@ data Config = Config
   , _cnfOutputFile       :: !FilePath
   , _cnfLoggerConfig     :: !LoggerConfig
   , _cnfMetricType       :: !MetricType
+  , _cnfDependencies     :: !(Maybe FilePath)
   , _cnfFormat           :: !Format
   , _cnfReducerName      :: !ReducerName
   , _cnfWorkFolder       :: !FilePath
@@ -127,6 +130,12 @@ getConfigParser = do
 
   _cnfMetricType <-
     parseMetricType
+
+  _cnfDependencies <- optional
+    . strOption
+    $ long "dependencies"
+    <> short 'd'
+    <> help "A csv file with edges between the dependencies. The headers should be 'from','to','label'."
 
   _cnfFormat <-
     parseFormat
@@ -174,22 +183,36 @@ run = do
 
       let cmd = setup (inputFile "input") $ makeCommand _cnfCommand
 
-      problem <- withLogger
+      abred <- withLogger
         ( setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd bs ) >>= \case
-          Just problem -> return $ case ff of
-            Lines ->
-              meassure counted . toIndexed
-              $ liftProblem BLC.lines BLC.unlines problem
-            Chars ->
-              meassure counted . toStringified id
-              $ liftProblem BLC.unpack BLC.pack problem
+          Just problem -> case ff of
+            Lines -> do
+              let p = meassure (counted "lines") $ liftProblem BLC.lines BLC.unlines problem
+              case _cnfDependencies of
+                Just csvfile
+                  | takeExtension csvfile == ".csv" ->
+                    readEdgesCSV <$> liftIO (BLC.readFile csvfile) >>= \case
+                      Left msg ->
+                        logAndExit $ "Error while reading CSV file:\n" <> displayString msg
+                      Right (edges' :: [Edge () BLC.ByteString]) -> do
+                        red <- intsetReduction <$> view cnfReducerName
+                        return $ AbstractReduction red (toClosures edges' p)
+                  | otherwise ->
+                    logAndExit ("Unknown dependency format " <> displayString csvfile)
+                Nothing -> do
+                  red <- listReduction <$> view cnfReducerName
+                  return $ AbstractReduction red p
+            Chars -> do
+              red <- listReduction <$> view cnfReducerName
+              return $ AbstractReduction red
+                ( meassure (counted "chars") . toStringified id
+                  $ liftProblem BLC.unpack BLC.pack problem
+                )
           Nothing ->
             logAndExit "Could not satisfy baseline"
 
-      red <- listReduction <$> view cnfReducerName
-
-      result <- handleErrors =<< (withLogger $
-        runReduction _cnfReductionOptions (_cnfWorkFolder </> "iterations") red problem)
+      result <- handleErrors =<< withLogger
+        ( runAbstractReduction _cnfReductionOptions (_cnfWorkFolder </> "iterations") abred )
 
       output <- view cnfOutputFile
       L.phase ("Writing output to file " <> display output) $ do
@@ -209,7 +232,7 @@ run = do
         ( setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd dir ) >>= \case
         Just problem ->
           return
-          . meassure counted
+          . meassure (counted "files")
           . toStringified (\(key, _) -> last . show . length $ key)
           . liftProblem toDeepFileList fromDeepFileList
           $ problem

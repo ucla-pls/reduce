@@ -150,19 +150,19 @@ instance (Metric a, Metric b) => Metric (a, b) where
     displayMetric a <> " and " <> displayMetric b
 
 
-counted :: [b] -> Count
-counted =
-  Count . length
+counted :: String -> [b] -> Count
+counted n =
+  Count n . length
 
-newtype Count = Count { getCount :: Int }
+data Count = Count { itemsName :: !String,  getCount :: !Int }
   deriving (Show)
 
 instance Metric Count where
   order = Const ["count"]
-  fields (Count a) =
+  fields (Count _ a) =
     ["count" C..= a ]
-  displayMetric (Count a) =
-    L.displayf "#%i elements" a
+  displayMetric (Count n a) =
+    L.displayf "#%i " a <> L.displayString n
 
 stringified :: (Int -> Char) -> Int -> [Int] -> Stringify
 stringified toChar len items =

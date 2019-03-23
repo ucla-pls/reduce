@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE ExistentialQuantification  #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GADTs                      #-}
@@ -31,8 +32,13 @@ import           Data.Maybe
 import           Data.Semigroup
 import           Data.Functor
 
+
+-- containers
+import qualified Data.IntSet as IS
+
 -- reduce-util
 import           Control.Reduce.Command
+import           Control.Reduce.Graph
 import qualified Control.Reduce.Util.Logger       as L
 import           Control.Reduce.Metric
 
@@ -57,8 +63,24 @@ resetProblem s = updateProblem (const s)
 -- | Lift the problem to a new domain. Requires that the new domain is
 -- isomorphic to the original domain.
 liftProblem :: (s -> t) -> (t -> s) -> Problem s a -> Problem t a
-liftProblem st ts Problem{..} =
-  Problem (st initial) (store . ts) (ts `contramap` metric) expectation command
+liftProblem st ts =
+  refineProblem ((ts,) . st)
+
+-- | Given the original definition of the problem, refine the problem.
+refineProblem :: (s -> (t -> s, t)) -> Problem s a -> Problem t a
+refineProblem f Problem {..} =
+  Problem t (store . tf) (tf `contramap` metric) expectation command
+  where
+    (tf, t) = f initial
+
+-- | Get an indexed list of elements, this enables us to differentiate between stuff.
+toClosures :: Ord n => [Edge e n] -> Problem [n] b -> Problem [IS.IntSet] b
+toClosures edges' = refineProblem refined
+  where
+    refined items = (fs, closures graph)
+      where
+        fs = map (nodeLabel . (nodes graph V.!)) . IS.toList . IS.unions
+        (graph, _) = buildGraphFromNodesAndEdges (map (\a -> (a,a)) items) edges'
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
 toIndexed :: Problem [a] b -> Problem [Int] b

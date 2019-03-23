@@ -21,7 +21,15 @@ This module provides utils, so that it is easier to write command-line reducers.
 -}
 module Control.Reduce.Util
   ( listReduction
+  , intsetReduction
+  , setReduction
+
+  , Reduction
   , runReduction
+
+  , AbstractReduction (..)
+  , runAbstractReduction
+
 
   , PredicateOptions (..)
   , ReductionOptions (..)
@@ -48,8 +56,13 @@ import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Control.Monad.Except
 import           Control.Monad.State
 
+-- containers
+import qualified Data.IntSet                as IS
+import qualified Data.Set                   as S
+
 -- base
 import           Text.Printf
+import qualified Data.List as L
 
 -- free
 import           Control.Monad.Free.Church
@@ -92,6 +105,9 @@ type ReductM x = F (ReductF x)
 
 type Reduction a = a -> ReductM a (Maybe a)
 
+data AbstractReduction b = forall a.
+  AbstractReduction (Reduction a) (Problem a b)
+
 check :: a -> ReductM a Bool
 check a = liftF $ Check a id
 
@@ -104,6 +120,37 @@ listReduction red xs =
     Linear -> linearReduction predc xs
   where
     predc = PredicateM check
+
+-- | Do a reduction over a list of sets
+setReduction :: Ord x => ReducerName -> Reduction [S.Set x]
+setReduction red xs =
+  case red of
+    Ddmin  -> ddmin predc sxs
+    Binary -> genericBinaryReduction (S.size . S.unions) predc xs
+    Linear -> linearReduction predc sxs
+  where
+    sxs = L.sortOn (S.size) xs
+    predc = PredicateM check
+
+-- | Do a reduction over an 'IntSet'
+intsetReduction :: ReducerName -> Reduction [IS.IntSet]
+intsetReduction red xs =
+  case red of
+    Ddmin  -> ddmin predc sxs
+    Binary -> genericBinaryReduction (IS.size . IS.unions) predc xs
+    Linear -> linearReduction predc sxs
+  where
+    sxs = L.sortOn (IS.size) xs
+    predc = PredicateM check
+
+
+runAbstractReduction ::
+  ReductionOptions
+  -> FilePath
+  -> AbstractReduction b
+  -> L.Logger (Maybe ReductionException, b)
+runAbstractReduction opts fp (AbstractReduction red problem) =
+  runReduction opts fp red problem
 
 runReduction ::
   ReductionOptions

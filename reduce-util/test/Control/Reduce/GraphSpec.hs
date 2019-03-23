@@ -1,16 +1,20 @@
+{-# LANGUAGE LambdaCase        #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE LambdaCase #-}
 module Control.Reduce.GraphSpec where
 
 import           SpecHelper
 
-import qualified Data.Text.Lazy.IO as T
+
+import qualified Data.ByteString.Lazy as BL
+
+import qualified Data.Text.Lazy.IO    as T
 
 import qualified Data.Vector          as V
-import qualified Data.Vector.Unboxed          as U
+import qualified Data.Vector.Unboxed  as U
 
 import qualified Data.IntSet          as IS
-import qualified Data.Set          as S
+import qualified Data.Set             as S
 import qualified Data.Tree            as T (Tree (Node))
 
 import           Control.Reduce.Graph
@@ -89,4 +93,24 @@ spec = do
           , S.fromList [ "4", "7"]
           , S.fromList [ "7"]
           , S.fromList [ "0"]
+          ]
+
+  describe "readCSV" $ do
+    it "can read a larger CSV formatted graph" $ do
+      file <- BL.readFile "test/data/example-graph.csv"
+      let r = readCSV [0..16 :: Int] file
+      case r of
+        Left t -> do
+          putStrLn t
+          fail "should be a right"
+        Right ( x :: Graph () Int ) ->
+          closuresN x `shouldMatchList`
+          [ S.fromList [7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+          , S.fromList [7, 8, 9, 10, 11, 12, 13, 14]
+          , S.fromList [1, 2, 3, 4, 7]
+          , S.fromList [1, 2, 3, 4, 5, 6, 7]
+          , S.fromList [1, 2, 4, 7]
+          , S.fromList [4, 7]
+          , S.fromList [7]
+          , S.fromList [0]
           ]

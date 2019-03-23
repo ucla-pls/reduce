@@ -1,4 +1,6 @@
 {-# LANGUAGE BangPatterns        #-}
+{-# LANGUAGE FlexibleInstances        #-}
+{-# LANGUAGE DeriveGeneric        #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -21,12 +23,15 @@ module Control.Reduce.Graph
   , empty
   , buildGraph
   , buildGraph'
+  , buildGraphFromNodesAndEdges
   , edges
   , nodeLabels
 
   , Node (..)
   , buildNode
   , outEdges
+
+  , Edge (..)
 
   , reverseEdges
 
@@ -48,6 +53,8 @@ module Control.Reduce.Graph
   -- * Reading and writing graphs
 
   , readTGF
+  , readCSV
+  , readEdgesCSV
 
   ) where
 
@@ -55,6 +62,7 @@ module Control.Reduce.Graph
 import           Control.Lens
 
 -- base
+import           GHC.Generics (Generic)
 import           Control.Monad
 import           Control.Monad.ST
 import           Data.Char
@@ -80,6 +88,12 @@ import qualified Data.Vector.Unboxed.Mutable as UM
 -- text
 import qualified Data.Text.Lazy              as T
 
+-- bytestring
+import qualified Data.ByteString.Lazy as BL
+
+-- cassava
+import qualified Data.Csv as C
+
 -- megaparsec
 import           Text.Megaparsec             hiding (empty)
 import           Text.Megaparsec.Char
@@ -88,8 +102,8 @@ import           Text.Megaparsec.Char
 type Vertex = Int
 
 -- | An `Edge`
-data Edge n e = Edge !n !n !e
-  deriving (Show, Eq)
+data Edge e n = Edge !n !n !e
+  deriving (Show, Eq, Generic)
 
 -- | A `Node` is a label, and a list of edges.
 data Node e n = Node
@@ -114,10 +128,8 @@ newtype Graph e n = Graph
   { nodes          :: V.Vector (Node e n)
   } deriving (Show, Eq)
 
-
 nodeLabels :: Graph e n -> V.Vector n
 nodeLabels = V.map nodeLabel . nodes
-
 
 empty :: Graph e n
 empty = Graph (V.empty)
@@ -137,7 +149,7 @@ buildGraph' :: Ord n => [(n, [n])] -> (Graph () n, n -> Maybe Vertex)
 buildGraph' nodes' =
   buildGraph [(n, n, map (,()) edges') | (n, edges') <- nodes' ]
 
-buildGraphFromNodesAndEdges :: (Show e, Ord key) => [(key, n)] -> [Edge key e] -> (Graph e n, key -> Maybe Vertex)
+buildGraphFromNodesAndEdges :: (Ord key) => [(key, n)] -> [Edge e key] -> (Graph e n, key -> Maybe Vertex)
 buildGraphFromNodesAndEdges keys edges' =
   (graph, lookupKey)
   where
@@ -146,11 +158,11 @@ buildGraphFromNodesAndEdges keys edges' =
     graph = Graph $ V.zipWith (buildNode . snd) sortedNodes edges''
     lookupKey = binarySearch (V.map fst sortedNodes)
 
-lookupEdge :: (key -> Maybe Vertex) -> Edge key e -> Maybe (Edge Vertex e)
+lookupEdge :: (key -> Maybe Vertex) -> Edge e key -> Maybe (Edge e Vertex)
 lookupEdge fn (Edge k1 k2 e) =
   Edge <$> fn k1 <*> fn k2 <*> pure e
 
-fromEdges :: Int -> [Edge Vertex e] -> V.Vector [(Vertex, e)]
+fromEdges :: Int -> [Edge e Vertex] -> V.Vector [(Vertex, e)]
 fromEdges s edges' = V.create $ do
   v <- VM.replicate s []
   forM_ edges' $ \(Edge i j e) -> do
@@ -176,7 +188,7 @@ binarySearch v n =
 
 
 -- | Get a list of the edges in the graph.
-edges :: Graph e n -> [Edge Vertex e]
+edges :: Graph e n -> [Edge e Vertex]
 edges Graph {..} =
   toListOf (ifolded.to outEdges.folded.withIndex.to (\(i, (j, e)) -> Edge i j e)) nodes
 {-# INLINE edges #-}
@@ -322,3 +334,18 @@ readTGF name bs =
 
     skipSpace =
       void $ takeWhileP Nothing (== ' ')
+
+instance (C.FromField e, C.FromField n) => C.FromRecord (Edge e n) where
+
+
+  -- | Read a csv file of edges
+readEdgesCSV :: (C.FromField n, C.FromField e) => BL.ByteString -> Either String [Edge e n]
+readEdgesCSV bs = V.toList <$> C.decode C.HasHeader bs
+{-# INLINE readEdgesCSV #-}
+
+-- | Read a csv file of edges
+readCSV :: (C.FromField a, C.FromField b, Ord a) => [a] -> BL.ByteString -> Either String (Graph b a)
+readCSV nodes bs = do
+  x <- readEdgesCSV bs
+  return . fst $ buildGraphFromNodesAndEdges (map (\a -> (a,a)) nodes) x
+{-# INLINE readCSV #-}
