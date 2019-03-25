@@ -143,7 +143,6 @@ intsetReduction red xs =
     sxs = L.sortOn (IS.size) xs
     predc = PredicateM check
 
-
 runAbstractReduction ::
   ReductionOptions
   -> FilePath

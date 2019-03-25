@@ -48,6 +48,8 @@ dependencies:
 - profunctors
 - dirtree >= 0.1.0
 - free
+- aeson
+- unordered-containers
     
 ghc-options:
   - -Wall
