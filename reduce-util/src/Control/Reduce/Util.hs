@@ -24,11 +24,11 @@ module Control.Reduce.Util
   , intsetReduction
   , setReduction
 
-  , Reduction
+  , Strategy
   , runReduction
 
-  , AbstractReduction (..)
-  , runAbstractReduction
+  , AbstractProblem (..)
+  , runAbstractProblem
 
 
   , PredicateOptions (..)
@@ -69,6 +69,7 @@ import           Control.Monad.Free.Church
 
 -- reduce-util
 import           Control.Reduce.Command
+import           Control.Reduce.Reduction
 import           Control.Reduce.Metric
 import           Control.Reduce.Problem
 import qualified Control.Reduce.Util.Logger as L
@@ -103,16 +104,16 @@ data ReductF a f
 
 type ReductM x = F (ReductF x)
 
-type Reduction a = a -> ReductM a (Maybe a)
+type Strategy a = a -> ReductM a (Maybe a)
 
-data AbstractReduction b = forall a.
-  AbstractReduction (Reduction a) (Problem a b)
+data AbstractProblem b = forall a.
+  AbstractProblem (Strategy a) (Problem a b)
 
 check :: a -> ReductM a Bool
 check a = liftF $ Check a id
 
 -- | Do a reduction over a list
-listReduction :: ReducerName -> Reduction [x]
+listReduction :: ReducerName -> Strategy [x]
 listReduction red xs =
   case red of
     Ddmin  -> ddmin predc xs
@@ -122,7 +123,7 @@ listReduction red xs =
     predc = PredicateM check
 
 -- | Do a reduction over a list of sets
-setReduction :: Ord x => ReducerName -> Reduction [S.Set x]
+setReduction :: Ord x => ReducerName -> Strategy [S.Set x]
 setReduction red xs =
   case red of
     Ddmin  -> ddmin predc sxs
@@ -133,7 +134,7 @@ setReduction red xs =
     predc = PredicateM check
 
 -- | Do a reduction over an 'IntSet'
-intsetReduction :: ReducerName -> Reduction [IS.IntSet]
+intsetReduction :: ReducerName -> Strategy [IS.IntSet]
 intsetReduction red xs =
   case red of
     Ddmin  -> ddmin predc sxs
@@ -143,18 +144,18 @@ intsetReduction red xs =
     sxs = L.sortOn (IS.size) xs
     predc = PredicateM check
 
-runAbstractReduction ::
+runAbstractProblem ::
   ReductionOptions
   -> FilePath
-  -> AbstractReduction b
+  -> AbstractProblem b
   -> L.Logger (Maybe ReductionException, b)
-runAbstractReduction opts fp (AbstractReduction red problem) =
+runAbstractProblem opts fp (AbstractProblem red problem) =
   runReduction opts fp red problem
 
 runReduction ::
   ReductionOptions
   -> FilePath
-  -> Reduction a
+  -> Strategy a
   -> Problem a b
   -> L.Logger (Maybe ReductionException, b)
 runReduction (ReductionOptions {..}) wf reduction p@(Problem {..}) = do

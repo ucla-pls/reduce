@@ -1,6 +1,5 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE LambdaCase #-}
 {-|
@@ -11,7 +10,39 @@ License     : MIT
 Maintainer  : kalhauge@cs.ucla.edu
 
 -}
-module Control.Reduce.Reduction where
+module Control.Reduce.Reduction
+  (
+    -- * Traversals
+    Reduction
+    , SafeReduction
+    , Reduct
+
+    -- ** Constructors
+    , allOrNothing
+    , adventure
+
+    -- ** Accessing
+    , subelements
+    , deepsubelements
+    , getting
+
+    -- * Algorithms
+    , limit
+    , limiting
+
+    , deepening
+    , boundedDeepening
+
+    -- * Implementations
+    , listR
+    , fstR
+    , sndR
+    , vectorR
+    , hashmapR
+    , jsonR
+    , treeR
+
+  ) where
 
 -- base
 import Data.Maybe
@@ -19,6 +50,9 @@ import Data.Functor.Compose
 
 -- unordered-containers
 import qualified Data.HashMap.Strict as HM
+
+-- containers
+import qualified Data.Tree as T
 
 -- hashable
 import qualified Data.Hashable as HM
@@ -35,189 +69,129 @@ import Data.Aeson
 -- -- mtl
 -- import Control.Monad.State.Strict
 
+
+-- | A 'Reduct' is the most general reduction.
+type Reduct p s t a =
+  forall f. Applicative f => Over p f s t a (Maybe a)
+
 -- | A 'Reduction' is a traversal of an `s` that can maybe can return a smaller
 -- `s`, if we map a collection of elements to maybe existing or not. This traversal
 -- can also change the content of the structure, but not the type.
-type Reduction s a =
-  Traversal s (Maybe s) a (Maybe a)
+-- A 'Reduction' composes with other reductions.
+type Reduction s a = Reduct (->) s (Maybe s) a
+
+-- | A 'SafeReduction' is like a reduction but can handle failure in it's own
+-- data structure. SafeReduction can be composed with traversals on the left
+-- and normal reductions on the right.
+-- @
+-- (a :: Traversal s t) . (b :: SafeReduction s b) :: SafeReduction t b
+-- @
+type SafeReduction s a = Reduct (->) s s a
+
+-- | Forget the safety of the 'SafeReduction'
+adventure :: SafeReduction s a -> Reduction s a
+adventure sred fa = fmap Just . sred fa
+{-# INLINE adventure #-}
+
+-- | Get the possible elements of a reduction
+subelements :: Reduct (->) s t a -> IndexedFold Int s a
+subelements red =
+  getting (indexing red)
+{-# INLINE subelements #-}
+
+-- | Get the all the recursive deep subelements.
+deepsubelements :: Reduction s s -> IndexedFold [Int] s s
+deepsubelements red =
+  getting (deepening red)
+{-# INLINE deepsubelements #-}
 
 -- | The trivial reduction, if any sub element is removed then the structure
 -- cannot be constructed. This can be constructed for all elements.
-allR :: Traversal' s a -> Reduction s a
-allR t fab s = getCompose (t (Compose . fab) s)
-{-# INLINE allR #-}
-
--- | The reduction traversal does not compose nicely with the getter part of the
--- lens library.
-getR :: Reduction s a -> Traversal' (Maybe s) a
-getR red fa = \case
-  Just a -> red (fmap Just . fa) a
-  Nothing -> pure Nothing
-{-# INLINE getR #-}
-
-foldR :: Reduction s a -> Fold s a
-foldR red fa s =
-  Just `contramap` red (fmap Just . fa) s
-{-# INLINE foldR #-}
-
--- | Return a list of subelements.
-subelementsR :: Reduction s a -> s -> [a]
-subelementsR red =
-  toListOf (foldR red)
-{-# INLINE subelementsR #-}
-
--- | IndexedReduction, mostly left here for ease of use.
-type IndexedReduction i s a =
-  IndexedTraversal i s (Maybe s) a (Maybe a)
-
--- | 'indexingR' is just 'indexing', and have mostly been defined
--- for ease of use.
-indexingR :: Reduction s a -> IndexedReduction Int s a
-indexingR = indexing
-{-# INLINE indexingR #-}
-
--- | Turn an Reduc into a IndexedFold
-ifoldR ::
-  IndexedReduction i s a
-  -> IndexedFold i s a
-ifoldR red fa s =
-  Just `contramap` red (rmap (fmap Just) fa) s
-{-# INLINE ifoldR #-}
-
--- getIR :: Reduction s a -> IndexedTraversal' Int (Maybe s) a
--- getIR red fa =
---   \case
---     Nothing -> pure Nothing
---     Just s -> indexing red (lmap (fmap Just) fa) s
--- {-# INLINE getIR #-}
+allOrNothing :: Traversal' s a -> Reduction s a
+allOrNothing t fab s =
+  getCompose (t (Compose . fab) s)
+{-# INLINE allOrNothing #-}
 
 -- | limit
-limitR :: (i -> Bool) -> IndexedReduction i s a -> s -> Maybe s
-limitR keep red s =
-  runIdentity $ itraverseOf red
-  (\i a -> pure $ if keep i then Just a else Nothing) s
+limit :: Reduct (Indexed i) s t a -> (i -> Bool) -> s -> t
+limit red keep =
+  iover red (\i a -> if keep i then Just a else Nothing)
+{-# INLINE limit #-}
 
--- | count
-countR :: Reduction s a -> s -> Int
-countR red = sumOf (foldR red . like 1)
+-- | Given and 'Reduction' and a function indicating which elements to keep
+-- remove those elements.
+limiting :: Reduct (->) s t a -> (Int -> Bool) -> s -> t
+limiting red = limit (indexing red)
+{-# INLINE limiting #-}
 
--- | count
-indiciesR :: IndexedReduction i s a -> s -> [i]
-indiciesR red = map fst . itoListOf (ifoldR red)
-
--- | 'DeepReduction' is reduction over a structure that have itself embedded in it.
 type DeepReduction s =
-  IndexedReduction [Int] s s
+  forall p. Indexable [Int] p => Reduct p s (Maybe s) s
 
 -- | Create a deep reduction from a reduction to itself. The first argument
 -- is the maximum depth.
-limitedDeepR :: Int -> Reduction a a -> DeepReduction a
-limitedDeepR n red pab =
+boundedDeepening ::
+  Int
+  -> Reduction s s
+  -> DeepReduction s
+boundedDeepening n red pab =
   go n id
   where
-    --  forall p f. (Indexable [Int] p, Applicative f) => s -> f (Maybe s)
+    red' = indexing red
     go 0 _ a = pure (Just a)
     go n' fi a =
       pure (*>)
       <*> indexed pab (fi []) a
-      <*> indexingR red (Indexed $ \x -> go (n' - 1) (fi . (x:)) ) a
-{-# INLINE limitedDeepR #-}
+      <*> red' (Indexed $ \x -> go (n' - 1) (fi . (x:))) a
+{-# INLINE boundedDeepening #-}
 
--- | Like limitedDeepR, but with no max depth.
-deepR :: Reduction a a -> DeepReduction a
-deepR = limitedDeepR (-1)
+-- | Like 'boundedDeepening' but has no bound.
+deepening :: Reduction a a -> DeepReduction a
+deepening = boundedDeepening (-1)
+{-# INLINE deepening #-}
+
+-- -- | Like limitedDeepR, but with no max depth.
+-- deepR :: Reduction a a -> DeepReduction a
+-- deepR = boundedDeepR (-1)
+
+-- -- | 'DeepReduction' is reduction over a structure that have itself embedded in it.
+-- type DeepReduction s =
+--   IndexedReduction [Int] s s
 
 -- * Implementations
 
 -- | A list is reducable.
-listR :: Reduction [a] a
+listR :: SafeReduction [a] a
 listR pab =
-  fmap (Just . catMaybes) . itraverse (indexed pab)
+  fmap catMaybes . itraverse (indexed pab)
 
 -- | We can reduce the first element in a tuple
 fstR :: Reduction (a, b) a
-fstR = allR _1
+fstR = allOrNothing _1
 
 -- | We can reduce the second element in a tuple
 sndR :: Reduction (a, b) b
-sndR = allR _2
-
--- | Anything that is isomorphic is alos able to be reduced.
-isoR :: (a -> b) -> (b -> a) -> Reduction a b
-isoR ab ba = allR $ iso ab ba
+sndR = allOrNothing _2
 
 -- | We can reduce a 'Vector' by turning it into a list and back again.
-vectorR :: Reduction (V.Vector b) b
-vectorR = isoR V.toList V.fromList . listR
+vectorR :: SafeReduction (V.Vector b) b
+vectorR = iso V.toList V.fromList . listR
 
 -- | We can reduce a 'HM.HashMap' by turning it into a list and back again.
-hashmapR :: (HM.Hashable a, Eq a) => Reduction (HM.HashMap a b) b
-hashmapR = isoR HM.toList HM.fromList . listR . sndR
+hashmapR :: (HM.Hashable a, Eq a) => SafeReduction (HM.HashMap a b) b
+hashmapR = iso HM.toList HM.fromList . listR . sndR
 
 -- | JSON is reducable
-jsonR :: Reduction Value Value
+jsonR :: SafeReduction Value Value
 jsonR afb = \case
-  Array a -> fmap Array <$> (isoR V.toList V.fromList . listR) afb a
-  String t -> pure $ Just (String t)
-  Number s -> pure $ Just (Number s)
-  Bool b -> pure $ Just (Bool b)
-  Null -> pure $ Just Null
-  Object o -> fmap Object <$> (isoR HM.toList HM.fromList . listR . sndR) afb o
+  Array a -> Array <$> vectorR afb a
+  String t -> pure $ String t
+  Number s -> pure $ Number s
+  Bool b -> pure $ Bool b
+  Null -> pure $ Null
+  Object o -> Object <$> hashmapR afb o
 
-
-
--- -- | The trivial reduction, if any sub element is removed then the structure
--- -- cannot be constructed. This can be constructed for all elements.
--- drop :: Traversal' s b -> Reduction s b
--- allR t fab s = getCompose (t (Compose . fab) s)
-
--- justR :: Traversal (Maybe a) (Maybe a) a (Maybe a)
--- justR fab s =
---   case s of
---     Just a -> fab a
---     Nothing -> pure Nothing
-
-
-
-
--- -- | Count number of elements available for reduction.
--- countElements :: Reducability a b -> a -> Int
--- countElements red =
---   getSum . getConst . red (const $ Const (Sum 1))
-
--- -- | Limit the number of elements in a reducable structure.
--- limitElements :: (Int -> Bool) -> Reducability a b -> a -> (Maybe a)
--- limitElements keep red =
---   flip evalState 0 . red fm
---   where
---    fm :: a -> State Int (Maybe a)
---    fm e = do
---      x <- state (\i -> (i, i+1))
---      if keep x
---        then return $ Just e
---        else return $ Nothing
-
-
--- type IReducability s a =
---   IndexedTraversal Int s (Maybe s) a (Maybe a)
-
--- type DeepReducability s =
---   IndexedTraversal [Int] s (Maybe s) s (Maybe s)
-
-
--- -- | Choose a reduction level. Usefull for doing Hierarchical Delta Debugging.
--- chooseReductionLevel :: Reducability a a -> Int -> Reducability a a
--- chooseReductionLevel red = go
---   where
---     go 0 = red
---     go n = red . go (n - 1)
-
--- -- | Count elements at level n.
--- deepCountElements :: Reducability a a -> Int -> a -> Int
--- deepCountElements red n =
---   countElements (chooseReductionLevel red n)
-
--- -- | Limit elements at level n
--- deepLimitElements :: (Int -> Bool) -> Reducability a a -> Int -> a -> (Maybe a)
--- deepLimitElements keep red n =
---   limitElements keep (chooseReductionLevel red n)
+-- | A 'T.Tree' is reducable
+treeR :: SafeReduction (T.Tree a) (T.Tree a)
+treeR afb = \case
+  T.Node a f ->
+    T.Node a <$> listR afb f

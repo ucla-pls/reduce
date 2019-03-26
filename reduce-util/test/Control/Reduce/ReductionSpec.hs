@@ -16,26 +16,27 @@ spec :: Spec
 spec = do
   describe "list" $ do
     it "should iterate through a list" $ do
-      ("Hey" ^.. foldR listR ) `shouldBe` "Hey"
+      ("Hey" ^.. subelements listR ) `shouldBe` "Hey"
 
     it "should be able to count the number or reducable elements in " $ do
-      (countR listR "Hey") `shouldBe` 3
+      (lengthOf (subelements listR) "Hey") `shouldBe` 3
 
     it "should keep second element in a list " $ do
-      (limitR (== (1 :: Int)) (indexingR listR) "Hey") `shouldBe` Just "e"
+      (limiting listR (==1) "Hey") `shouldBe` "e"
 
   describe "json" $ do
     it "shold be countable" $ do
-      (countR jsonR (object [ "name" .= True, "other" .= False ]))
+      (lengthOf (subelements jsonR) (object [ "name" .= True, "other" .= False ]))
         `shouldBe` 2
 
     it "shold be countable" $ do
-      (limitR (== (1 :: Int)) (indexingR jsonR) (toJSON [ True, False ]))
-        `shouldBe` Just (toJSON [ False ])
+      (limiting jsonR (==1) (toJSON [ True, False ]))
+        `shouldBe` toJSON [ False ]
+
+    let v :: Value = toJSON [[True], [False, True]]
 
     it "should contain a deep tree of reduction" $ do
-      let v :: Value = toJSON [[True], [False, True]]
-      (itoListOf (ifoldR (deepR jsonR)) v)
+      itoListOf (deepsubelements (adventure jsonR)) v
         `shouldBe` ([ ([], toJSON [[True], [False, True]])
                     , ([0], toJSON [True])
                     , ([0,0], Bool True)
@@ -43,3 +44,13 @@ spec = do
                     , ([1,0], Bool False)
                     , ([1,1], Bool True)
                     ] :: [([Int], Value)])
+
+    it "should contain a deep tree of reduction" $ do
+      limit (deepening (adventure jsonR))
+        (\i -> i == [1, 0] || i == [1] || i == []) v
+        `shouldBe` Just (toJSON [[False]])
+
+    it "should remove everything if the root is not includeded" $ do
+      limit (deepening (adventure jsonR))
+        (\i -> i == [1, 0] || i == [1]) v
+        `shouldBe` Nothing
