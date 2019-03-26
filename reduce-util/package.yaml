@@ -50,6 +50,7 @@ dependencies:
 - free
 - aeson
 - unordered-containers
+- hashable
     
 ghc-options:
   - -Wall
