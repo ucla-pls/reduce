@@ -21,6 +21,9 @@ import           System.Directory
 -- lens
 import           Control.Lens
 
+-- aeson
+import           Data.Aeson
+
 -- text
 import qualified Data.Text.Lazy.Builder       as Builder
 
@@ -35,6 +38,7 @@ import           System.DirTree
 
 -- reduce-util
 import           Control.Reduce.Graph
+import           Control.Reduce.Reduction
 import           Control.Reduce.Util
 import           Control.Reduce.Util.Logger   as L
 import           Control.Reduce.Util.OptParse
@@ -53,6 +57,7 @@ data Format
 data FileFormat
   = Chars
   | Lines
+  | Json
   deriving (Show, Read, Ord, Eq)
 
 data DirFormat
@@ -78,6 +83,7 @@ parseFormat =
       let f = List.isPrefixOf str' in
       if | f "chars" -> FileFormat Chars
          | f "lines" -> FileFormat Lines
+         | f "json" -> FileFormat Json
          | f "files" -> DirFormat Files
          | f "filetree" -> DirFormat FileTree
          | True ->
@@ -196,23 +202,28 @@ run = do
                         logAndExit $ "Error while reading CSV file:\n" <> displayString msg
                       Right (edges' :: [Edge () BLC.ByteString]) -> do
                         red <- intsetReduction <$> view cnfReducerName
-                        return $ AbstractReduction red (toClosures edges' p)
+                        return $ AbstractProblem red (toClosures edges' p)
                   | otherwise ->
                     logAndExit ("Unknown dependency format " <> displayString csvfile)
                 Nothing -> do
                   red <- listReduction <$> view cnfReducerName
-                  return $ AbstractReduction red p
+                  return $ AbstractProblem red p
             Chars -> do
               red <- listReduction <$> view cnfReducerName
-              return $ AbstractReduction red
+              return $ AbstractProblem red
                 ( meassure (counted "chars") . toStringified id
                   $ liftProblem BLC.unpack BLC.pack problem
+                )
+            Json -> do
+              red <- hddReduction (adventure jsonR) <$> view cnfReducerName
+              return $ AbstractProblem red
+                ( liftProblem decode (maybe "" encode) problem
                 )
           Nothing ->
             logAndExit "Could not satisfy baseline"
 
       result <- handleErrors =<< withLogger
-        ( runAbstractReduction _cnfReductionOptions (_cnfWorkFolder </> "iterations") abred )
+        ( runAbstractProblem _cnfReductionOptions (_cnfWorkFolder </> "iterations") abred )
 
       output <- view cnfOutputFile
       L.phase ("Writing output to file " <> display output) $ do

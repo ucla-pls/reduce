@@ -184,9 +184,6 @@ binarySearch v n =
       | otherwise = Nothing
 {-# INLINE binarySearch #-}
 
-
-
-
 -- | Get a list of the edges in the graph.
 edges :: Graph e n -> [Edge e Vertex]
 edges Graph {..} =

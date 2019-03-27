@@ -35,6 +35,7 @@ dependencies:
 - filepath
 - dirtree
 - directory
+- aeson
   # - bytestring
   # - typed-process
   # - cryptohash-sha256

@@ -16,6 +16,7 @@ module Control.Reduce.Reduction
     Reduction
     , SafeReduction
     , Reduct
+    , DeepReduction
 
     -- ** Constructors
     , allOrNothing
@@ -24,6 +25,7 @@ module Control.Reduce.Reduction
     -- ** Accessing
     , subelements
     , deepsubelements
+    , indicesOf
     , getting
 
     -- * Algorithms
@@ -112,6 +114,12 @@ allOrNothing t fab s =
   getCompose (t (Compose . fab) s)
 {-# INLINE allOrNothing #-}
 
+
+-- | Get the indices of a reduction.
+indicesOf :: Reduct (Indexed i) s t a -> s -> [i]
+indicesOf p =
+  map fst . itoListOf (getting p)
+
 -- | limit
 limit :: Reduct (Indexed i) s t a -> (i -> Bool) -> s -> t
 limit red keep =
@@ -137,7 +145,7 @@ boundedDeepening n red pab =
   go n id
   where
     red' = indexing red
-    go 0 _ a = pure (Just a)
+    go 0 fi a = indexed pab (fi []) a
     go n' fi a =
       pure (*>)
       <*> indexed pab (fi []) a

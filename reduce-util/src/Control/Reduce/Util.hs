@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE DeriveFunctor       #-}
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE FlexibleInstances   #-}
@@ -24,6 +25,10 @@ module Control.Reduce.Util
   , intsetReduction
   , setReduction
 
+  , simpleReduction
+  , flatReduction
+  , hddReduction
+
   , Strategy
   , runReduction
 
@@ -41,6 +46,11 @@ module Control.Reduce.Util
   , module Control.Reduce.Metric
   , module Control.Reduce.Problem
   ) where
+
+import Debug.Trace
+
+-- lens
+import Control.Lens
 
 -- unliftio
 import           UnliftIO
@@ -113,14 +123,73 @@ check :: a -> ReductM a Bool
 check a = liftF $ Check a id
 
 -- | Do a reduction over a list
-listReduction :: ReducerName -> Strategy [x]
-listReduction red xs =
-  case red of
-    Ddmin  -> ddmin predc xs
-    Binary -> binaryReduction predc xs
-    Linear -> linearReduction predc xs
+listReductM :: ([x] -> a) -> ReducerName -> [x] -> ReductM a (Maybe a)
+listReductM c name lst =
+  fmap c <$> case name of
+    Ddmin  -> ddmin predc lst
+    Binary -> binaryReduction predc lst
+    Linear -> linearReduction predc lst
   where
-    predc = PredicateM check
+    predc = PredicateM $ check . c
+
+
+listReduction :: ReducerName -> Strategy [a]
+listReduction = listReductM id
+
+simpleReduction :: forall a b. SafeReduction a b -> ReducerName -> Strategy a
+simpleReduction red name a =
+  listReductM back name lst
+  where
+    lst = [0..lengthOf (subelements red) a]
+    back :: [Int] -> a
+    back xs =
+      let x = IS.fromList xs
+      in limiting red (`IS.member` x) a
+
+flatReduction :: forall a. Reduction a a -> ReducerName -> Strategy (Maybe a)
+flatReduction red name =
+  \case
+    Just a ->
+      listReductM back name lst
+      where
+        red' :: DeepReduction a
+        red' = deepening red
+        lst = [0..lengthOf (subelements red') a]
+        back xs =
+          let x = IS.fromList xs
+          in limiting red' (`IS.member` x) a
+    Nothing ->
+      return Nothing
+
+hddReduction :: forall a. Reduction a a -> ReducerName -> Strategy (Maybe a)
+hddReduction red name = \case
+  Just a ->
+    go 1 a
+  Nothing ->
+    return Nothing
+  where
+    go :: Int -> a -> ReductM (Maybe a) (Maybe (Maybe a))
+    go n x
+      | length reductionLayer > 0 = do
+        a <- listReductM back name (traceShowId reductionLayer)
+        case a of
+          Just (Just a') -> go (n+1) a'
+          _ -> return $ Just (Just x)
+     | otherwise =
+         return $ Just (Just x)
+        where
+          red' :: DeepReduction a
+          red' = boundedDeepening n red
+
+          items = indicesOf red' x
+          (parents, reductionLayer) = L.partition (\i -> length i < n) items
+
+          keep = S.fromList parents
+
+          back xs =
+            let keepers = keep `S.union` S.fromList xs
+            in limit red' (`S.member` keepers) x
+
 
 -- | Do a reduction over a list of sets
 setReduction :: Ord x => ReducerName -> Strategy [S.Set x]

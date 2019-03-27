@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 04c8888ff38961de975825b0f526ccc26c1a9c415792ba7273c51678d7348ae5
+-- hash: 2f2a261098e91bee76b1fd816411d6a386e312805a7bc6da401e1169f60fda93
 
 name:           red
 version:        0.1.0.0
@@ -32,7 +32,8 @@ library
   hs-source-dirs:
       src
   build-depends:
-      base >=4.7 && <5
+      aeson
+    , base >=4.7 && <5
     , bytestring
     , cassava
     , contravariant
@@ -57,7 +58,8 @@ executable red
       ./.
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      aeson
+    , base >=4.7 && <5
     , bytestring
     , cassava
     , contravariant
