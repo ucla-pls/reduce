@@ -1,6 +1,6 @@
-{-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Control.Reduce.GraphSpec where
 
 import           SpecHelper

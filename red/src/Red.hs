@@ -54,6 +54,12 @@ data Format
   | DirFormat DirFormat
   deriving (Show, Read, Ord, Eq)
 
+data TreeStrategy
+  = HddStrategy
+  | GraphStrategy
+  | FlatStrategy
+  deriving (Show, Read, Ord, Eq)
+
 data FileFormat
   = Chars
   | Lines
@@ -69,6 +75,23 @@ data MetricType
   = Counted
   | Displayed
   deriving (Show, Read, Ord, Eq)
+
+parseTreeStrategy :: Parser TreeStrategy
+parseTreeStrategy =
+  toStrategy . map toLower
+  <$> strOption
+  ( short 'T' <> long "tree-strategy" <> value "graph"
+    <> showDefault <> help "the reduction strategy for tree structures."
+    <> metavar "STRATEGY"
+  )
+  where
+    toStrategy str' =
+      let f = List.isPrefixOf str' in
+      if | f "graph" -> GraphStrategy
+         | f "hdd" -> HddStrategy
+         | f "flat" -> FlatStrategy
+         | True ->
+           error $ "Unknown format " ++ str'
 
 parseFormat :: Parser Format
 parseFormat =
@@ -111,6 +134,7 @@ data Config = Config
   , _cnfLoggerConfig     :: !LoggerConfig
   , _cnfMetricType       :: !MetricType
   , _cnfDependencies     :: !(Maybe FilePath)
+  , _cnfTreeStrategy     :: !TreeStrategy
   , _cnfFormat           :: !Format
   , _cnfReducerName      :: !ReducerName
   , _cnfWorkFolder       :: !FilePath
@@ -145,6 +169,9 @@ getConfigParser = do
 
   _cnfFormat <-
     parseFormat
+
+  _cnfTreeStrategy <-
+    parseTreeStrategy
 
   _cnfReducerName <-
     parseReducerName
@@ -215,7 +242,16 @@ run = do
                   $ liftProblem BLC.unpack BLC.pack problem
                 )
             Json -> do
-              red <- hddReduction (adventure jsonR) <$> view cnfReducerName
+              let
+                x :: Reduction Value Value -> ReducerName -> Strategy (Maybe Value)
+                x = case _cnfTreeStrategy of
+                    HddStrategy -> hddReduction
+                    GraphStrategy -> graphReduction
+                    FlatStrategy -> flatReduction
+
+                red :: Strategy (Maybe Value)
+                red = x (adventure jsonR) _cnfReducerName
+
               return $ AbstractProblem red
                 ( liftProblem decode (maybe "" encode) problem
                 )

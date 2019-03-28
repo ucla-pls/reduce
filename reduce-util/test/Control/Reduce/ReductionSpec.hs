@@ -41,13 +41,13 @@ spec = do
                     , ([0], toJSON [True])
                     , ([0,0], Bool True)
                     , ([1], toJSON [False, True])
-                    , ([1,0], Bool False)
+                    , ([0,1], Bool False)
                     , ([1,1], Bool True)
                     ] :: [([Int], Value)])
 
     it "should contain a deep tree of reduction" $ do
       limit (deepening (adventure jsonR))
-        (\i -> i == [1, 0] || i == [1] || i == []) v
+        (\i -> i == [0, 1] || i == [1] || i == []) v
         `shouldBe` Just (toJSON [[False]])
 
     it "should remove everything if the root is not includeded" $ do

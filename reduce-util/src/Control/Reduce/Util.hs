@@ -28,6 +28,7 @@ module Control.Reduce.Util
   , simpleReduction
   , flatReduction
   , hddReduction
+  , graphReduction
 
   , Strategy
   , runReduction
@@ -79,6 +80,7 @@ import           Control.Monad.Free.Church
 
 -- reduce-util
 import           Control.Reduce.Command
+import           Control.Reduce.Graph
 import           Control.Reduce.Reduction
 import           Control.Reduce.Metric
 import           Control.Reduce.Problem
@@ -190,6 +192,22 @@ hddReduction red name = \case
             let keepers = keep `S.union` S.fromList xs
             in limit red' (`S.member` keepers) x
 
+graphReduction :: forall a. Reduction a a -> ReducerName -> Strategy (Maybe a)
+graphReduction red name = \case
+  Just a -> do
+    let
+      red' :: DeepReduction a
+      red' = deepening red
+      items = indicesOf red' a
+      (graph, back) = buildGraphFromNodesAndEdges
+          [ (i, i) | i <- items ]
+          [ Edge a' rst () | a'@(_:rst) <- items ]
+      fn xs =
+        let x = IS.unions xs
+        in limit red' (maybe False (`IS.member` x) . back) a
+    intsetReduct fn name (closures graph)
+  Nothing ->
+    return Nothing
 
 -- | Do a reduction over a list of sets
 setReduction :: Ord x => ReducerName -> Strategy [S.Set x]
@@ -202,16 +220,19 @@ setReduction red xs =
     sxs = L.sortOn (S.size) xs
     predc = PredicateM check
 
--- | Do a reduction over an 'IntSet'
 intsetReduction :: ReducerName -> Strategy [IS.IntSet]
-intsetReduction red xs =
-  case red of
+intsetReduction = intsetReduct id
+
+-- | Do a reduction over an 'IntSet'
+intsetReduct :: ([IS.IntSet] -> a) -> ReducerName -> [IS.IntSet] -> ReductM a (Maybe a)
+intsetReduct fn red xs =
+  fmap fn <$> case red of
     Ddmin  -> ddmin predc sxs
     Binary -> genericBinaryReduction (IS.size . IS.unions) predc xs
     Linear -> linearReduction predc sxs
   where
     sxs = L.sortOn (IS.size) xs
-    predc = PredicateM check
+    predc = PredicateM (check . fn)
 
 runAbstractProblem ::
   ReductionOptions

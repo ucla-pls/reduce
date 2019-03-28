@@ -142,14 +142,14 @@ boundedDeepening ::
   -> Reduction s s
   -> DeepReduction s
 boundedDeepening n red pab =
-  go n id
+  go n []
   where
     red' = indexing red
-    go 0 fi a = indexed pab (fi []) a
+    go 0 fi a = indexed pab fi a
     go n' fi a =
       pure (*>)
-      <*> indexed pab (fi []) a
-      <*> red' (Indexed $ \x -> go (n' - 1) (fi . (x:))) a
+      <*> indexed pab fi a
+      <*> red' (Indexed $ \x -> go (n' - 1) (x:fi)) a
 {-# INLINE boundedDeepening #-}
 
 -- | Like 'boundedDeepening' but has no bound.
