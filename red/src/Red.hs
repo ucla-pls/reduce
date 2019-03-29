@@ -262,7 +262,8 @@ run = do
         Directory dir -> return $ dir
         _             -> logAndExit "File not a folder"
 
-      let cmd = setup (inputDirectoryWith (flip createFileLink) "input") $ makeCommand _cnfCommand
+      let cmd = setup (inputDirectoryWith (flip createFileLink) "input")
+            $ makeCommand _cnfCommand
 
       problem <- withLogger
         ( setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd dir ) >>= \case
@@ -285,7 +286,9 @@ run = do
         liftIO . writeDirTree (flip copyFile) output . directory $ result
 
     DirFormat FileTree -> do
-      dirtree <- liftIO $ readDirTree return _cnfInputFile
+      dirtree <- liftIO $ readDirTree makeAbsolute _cnfInputFile
+
+      liftIO $ print dirtree
 
       let cmd = setup (inputMaybeDirTreeWith (flip createFileLink) "input")
             $ makeCommand _cnfCommand
