@@ -65,10 +65,10 @@ parsePredicateOptions = do
   predOptPreserveExitCode <-
     not <$> switch (long "no-exitcode" <> help "ignore the exitcode.")
 
-  predOptPreserveStderr <-
+  predOptPreserveStdout <-
     switch (long "stdout" <> help "preserve stdout.")
 
-  predOptPreserveStdout <-
+  predOptPreserveStderr <-
     switch (long "stderr" <> help "preserve stderr.")
 
   pure $ PredicateOptions {..}

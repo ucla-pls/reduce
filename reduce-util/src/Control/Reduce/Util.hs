@@ -26,9 +26,13 @@ module Control.Reduce.Util
   , setReduction
 
   , simpleReduction
+
+  , TreeStrategy (..)
+  , treeReduction
   , flatReduction
   , hddReduction
   , graphReduction
+
 
   , Strategy
   , runReduction
@@ -124,19 +128,24 @@ data AbstractProblem b = forall a.
 check :: a -> ReductM a Bool
 check a = liftF $ Check a id
 
--- | Do a reduction over a list
-listReductM :: ([x] -> a) -> ReducerName -> [x] -> ReductM a (Maybe a)
-listReductM c name lst =
-  fmap c <$> case name of
-    Ddmin  -> ddmin predc lst
-    Binary -> binaryReduction predc lst
-    Linear -> linearReduction predc lst
-  where
-    predc = PredicateM $ check . c
+-- | Strategy for reducing trees
+data TreeStrategy
+  = HddStrategy
+  | GraphStrategy
+  | FlatStrategy
+  deriving (Show, Read, Ord, Eq)
 
-
-listReduction :: ReducerName -> Strategy [a]
-listReduction = listReductM id
+treeReduction ::
+  forall a.
+     Reduction a a
+  -> TreeStrategy
+  -> ReducerName
+  -> Strategy (Maybe a)
+treeReduction red strat =
+  case strat of
+    FlatStrategy -> flatReduction red
+    GraphStrategy -> graphReduction red
+    HddStrategy -> hddReduction red
 
 simpleReduction :: forall a b. SafeReduction a b -> ReducerName -> Strategy a
 simpleReduction red name a =
@@ -208,6 +217,20 @@ graphReduction red name = \case
     intsetReduct fn name (closures graph)
   Nothing ->
     return Nothing
+
+-- | Do a reduction over a list
+listReductM :: ([x] -> a) -> ReducerName -> [x] -> ReductM a (Maybe a)
+listReductM c name lst =
+  fmap c <$> case name of
+    Ddmin  -> ddmin predc lst
+    Binary -> binaryReduction predc lst
+    Linear -> linearReduction predc lst
+  where
+    predc = PredicateM $ check . c
+
+
+listReduction :: ReducerName -> Strategy [a]
+listReduction = listReductM id
 
 -- | Do a reduction over a list of sets
 setReduction :: Ord x => ReducerName -> Strategy [S.Set x]

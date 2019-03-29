@@ -54,12 +54,6 @@ data Format
   | DirFormat DirFormat
   deriving (Show, Read, Ord, Eq)
 
-data TreeStrategy
-  = HddStrategy
-  | GraphStrategy
-  | FlatStrategy
-  deriving (Show, Read, Ord, Eq)
-
 data FileFormat
   = Chars
   | Lines
@@ -111,6 +105,7 @@ parseFormat =
          | f "filetree" -> DirFormat FileTree
          | True ->
            error $ "Unknown format " ++ str'
+
 
 parseMetricType :: Parser MetricType
 parseMetricType =
@@ -218,43 +213,38 @@ run = do
 
       abred <- withLogger
         ( setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd bs ) >>= \case
-          Just problem -> case ff of
-            Lines -> do
-              let p = meassure (counted "lines") $ liftProblem BLC.lines BLC.unlines problem
-              case _cnfDependencies of
-                Just csvfile
-                  | takeExtension csvfile == ".csv" ->
-                    readEdgesCSV <$> liftIO (BLC.readFile csvfile) >>= \case
-                      Left msg ->
-                        logAndExit $ "Error while reading CSV file:\n" <> displayString msg
-                      Right (edges' :: [Edge () BLC.ByteString]) -> do
-                        red <- intsetReduction <$> view cnfReducerName
-                        return $ AbstractProblem red (toClosures edges' p)
-                  | otherwise ->
-                    logAndExit ("Unknown dependency format " <> displayString csvfile)
-                Nothing -> do
-                  red <- listReduction <$> view cnfReducerName
-                  return $ AbstractProblem red p
-            Chars -> do
-              red <- listReduction <$> view cnfReducerName
-              return $ AbstractProblem red
-                ( meassure (counted "chars") . toStringified id
-                  $ liftProblem BLC.unpack BLC.pack problem
-                )
-            Json -> do
-              let
-                x :: Reduction Value Value -> ReducerName -> Strategy (Maybe Value)
-                x = case _cnfTreeStrategy of
-                    HddStrategy -> hddReduction
-                    GraphStrategy -> graphReduction
-                    FlatStrategy -> flatReduction
+          Just problem -> do
+            liftIO . print $ (expectation problem)
+            case ff of
+              Lines -> do
+                let p = meassure (counted "lines") $ liftProblem BLC.lines BLC.unlines problem
+                case _cnfDependencies of
+                  Just csvfile
+                    | takeExtension csvfile == ".csv" ->
+                      readEdgesCSV <$> liftIO (BLC.readFile csvfile) >>= \case
+                        Left msg ->
+                          logAndExit $ "Error while reading CSV file:\n" <> displayString msg
+                        Right (edges' :: [Edge () BLC.ByteString]) -> do
+                          red <- intsetReduction <$> view cnfReducerName
+                          return $ AbstractProblem red (toClosures edges' p)
+                    | otherwise ->
+                      logAndExit ("Unknown dependency format " <> displayString csvfile)
+                  Nothing -> do
+                    red <- listReduction <$> view cnfReducerName
+                    return $ AbstractProblem red p
+              Chars -> do
+                red <- listReduction <$> view cnfReducerName
+                return $ AbstractProblem red
+                  ( meassure (counted "chars") . toStringified id
+                    $ liftProblem BLC.unpack BLC.pack problem
+                  )
+              Json -> do
+                let
+                  red = treeReduction (adventure jsonR) _cnfTreeStrategy _cnfReducerName
 
-                red :: Strategy (Maybe Value)
-                red = x (adventure jsonR) _cnfReducerName
-
-              return $ AbstractProblem red
-                ( liftProblem decode (maybe "" encode) problem
-                )
+                return $ AbstractProblem red
+                  ( liftProblem decode (maybe "" encode) problem
+                  )
           Nothing ->
             logAndExit "Could not satisfy baseline"
 
@@ -265,8 +255,7 @@ run = do
       L.phase ("Writing output to file " <> display output) $ do
         liftIO $ BLC.writeFile output result
 
-    DirFormat _ -> do
-
+    DirFormat Files -> do
       dirtree <- liftIO $ readDirTree return _cnfInputFile
 
       dir <- case dirTreeNode dirtree of
@@ -294,6 +283,32 @@ run = do
       output <- view cnfOutputFile
       L.phase ("Writing output to directory " <> display output) $ do
         liftIO . writeDirTree (flip copyFile) output . directory $ result
+
+    DirFormat FileTree -> do
+      dirtree <- liftIO $ readDirTree return _cnfInputFile
+
+      let cmd = setup (inputMaybeDirTreeWith (flip createFileLink) "input")
+            $ makeCommand _cnfCommand
+
+      problem <- withLogger
+        ( setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd (Just dirtree))
+        >>= \case
+        Just problem ->
+          return $ problem
+        Nothing ->
+          logAndExit "Could not satisfy baseline"
+
+      let red = treeReduction (adventure dirtreeR) _cnfTreeStrategy _cnfReducerName
+
+      result <- handleErrors =<< (withLogger $
+        runReduction _cnfReductionOptions (_cnfWorkFolder </> "iterations") red problem)
+
+      case result of
+        Just r -> do
+          L.phase ("Writing output to file " <> display _cnfOutputFile) $ do
+            liftIO . writeDirTree (flip copyFile) _cnfOutputFile $ r
+        Nothing ->
+          L.warn ("Minimal example required no file " <> display _cnfOutputFile)
 
   where
     handleErrors (s, r) = do

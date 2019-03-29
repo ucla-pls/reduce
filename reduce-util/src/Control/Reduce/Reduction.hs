@@ -43,6 +43,7 @@ module Control.Reduce.Reduction
     , hashmapR
     , jsonR
     , treeR
+    , dirtreeR
 
   ) where
 
@@ -61,6 +62,9 @@ import qualified Data.Hashable as HM
 
 -- vector
 import qualified Data.Vector as V
+
+-- dirtree
+import System.DirTree
 
 -- lens
 import Control.Lens
@@ -203,3 +207,11 @@ treeR :: SafeReduction (T.Tree a) (T.Tree a)
 treeR afb = \case
   T.Node a f ->
     T.Node a <$> listR afb f
+
+-- A Dirtree is reductable
+dirtreeR :: SafeReduction (DirTree a b) (DirTree a b)
+dirtreeR fn n =
+  DirTree <$> case dirTreeNode n of
+    File b -> pure $ File b
+    Symlink x -> pure $ Symlink x
+    Directory b -> Directory <$> (iso toFileList fromFileList . listR . sndR) fn b

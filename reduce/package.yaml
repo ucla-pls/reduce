@@ -22,18 +22,18 @@ dependencies:
 library:
   source-dirs:      src
 
-benchmarks:
-  reduce-stats:
-    main: StatsMain.hs
-    source-dirs: benchmark/stats
-    dependencies:
-      - reduce
-      - random
-      - attoparsec
-      - text
-      - optparse-applicative
-      - cassava
-      - bytestring
+# benchmarks:
+#   reduce-stats:
+#     main: StatsMain.hs
+#     source-dirs: benchmark/stats
+#     dependencies:
+#       - reduce
+#       - random
+#       - attoparsec
+#       - text
+#       - optparse-applicative
+#       - cassava
+#       - bytestring
 
 tests:
   reduce-test:

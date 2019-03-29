@@ -48,6 +48,7 @@ module Control.Reduce.Command
   , inputDirectoryWith
   , inputDirTree
   , inputDirTreeWith
+  , inputMaybeDirTreeWith
 
   , CmdOutput (..)
 
@@ -444,6 +445,17 @@ inputDirTreeWith f name dt = CmdInput $ do
     writeDirTree f name dt
     makeAbsolute name
   return $ mempty { ciValueMap = Map.singleton "" (CAFilePath name')}
+
+inputMaybeDirTreeWith ::
+  (FilePath -> a -> IO ())
+  -> String
+  -> (Maybe (DirTree Link a))
+  -> CmdInput
+inputMaybeDirTreeWith f name = \case
+  Just dt -> inputDirTreeWith f name dt
+  Nothing -> CmdInput . liftIO $ do
+    name' <- makeAbsolute name
+    return $ mempty { ciValueMap = Map.singleton "" (CAFilePath name')}
 
 inputFile ::
   String
