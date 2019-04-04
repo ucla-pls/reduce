@@ -301,12 +301,6 @@ vectorR = iso V.toList V.fromList . listR
 -- | We can reduce a 'HM.HashMap' by turning it into a list and back again.
 hashmapR :: (HM.Hashable a, Eq a) => Reduction (HM.HashMap a b) (a, b)
 hashmapR = iso HM.toList HM.fromList . listR
---- (
--- ((a, b) -> Maybe (a, b)) -> (x -> x)
--- (b -> Maybe b) -> ((a, b) -> Maybe (a, b))
--- _1 :: (b -> c) -> ((a, b) -> (a, c))
--- x :: ((a, b) -> (a, c)) -> (a , b) -> Maybe (a, b)
---
 
 -- | JSON is reducable
 jsonR :: Reduction Value Value
@@ -324,7 +318,7 @@ treeR afb = \case
   T.Node a f ->
     T.Node a <$> listR afb f
 
--- A Dirtree is reductable
+-- | A Dirtree is reductable
 dirtreeR :: Reduction (DirTree a b) (DirTree a b)
 dirtreeR fn n =
   DirTree <$> case dirTreeNode n of
