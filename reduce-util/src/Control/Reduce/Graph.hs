@@ -130,9 +130,11 @@ newtype Graph e n = Graph
 
 nodeLabels :: Graph e n -> V.Vector n
 nodeLabels = V.map nodeLabel . nodes
+{-# INLINE nodeLabels #-}
 
 empty :: Graph e n
 empty = Graph (V.empty)
+{-# INLINE empty #-}
 
 -- | Build a graph form an adjacency list.
 buildGraph :: (Ord key) => [(n, key, [(key, e)])] -> (Graph e n, key -> Maybe Vertex)

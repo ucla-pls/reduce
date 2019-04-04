@@ -239,11 +239,15 @@ run = do
                     $ liftProblem BLC.unpack BLC.pack problem
                   )
               Json -> do
-                let
-                  red = treeReduction (adventure jsonR) _cnfTreeStrategy _cnfReducerName
-
-                return $ AbstractProblem red
-                  ( liftProblem decode (maybe "" encode) problem
+                return $ AbstractProblem (treeStrategy _cnfTreeStrategy _cnfReducerName)
+                  ( meassure (counted "subtrees")
+                    . toReductionTree jsonR
+                    . refineProblem (
+                      \s -> case decode s of
+                        Just v -> (encode, v)
+                        Nothing -> fail "Could not decode the input"
+                      )
+                    $ problem
                   )
           Nothing ->
             logAndExit "Could not satisfy baseline"
@@ -290,28 +294,33 @@ run = do
 
       liftIO $ print dirtree
 
-      let cmd = setup (inputMaybeDirTreeWith (flip createFileLink) "input")
+      let cmd = setup (inputDirTreeWith (flip createFileLink) "input")
             $ makeCommand _cnfCommand
 
       problem <- withLogger
-        ( setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd (Just dirtree))
-        >>= \case
-        Just problem ->
-          return $ problem
+        ( setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline")
+          cmd
+          dirtree
+        ) >>= \case
+        Just problem -> do
+          return
+            ( meassure (counted "files and folders")
+              . toReductionTree dirtreeR
+              $ problem
+            )
         Nothing ->
           logAndExit "Could not satisfy baseline"
 
-      let red = treeReduction (adventure dirtreeR) _cnfTreeStrategy _cnfReducerName
+      result <- handleErrors =<< withLogger
+        ( runReduction
+          _cnfReductionOptions
+          (_cnfWorkFolder </> "iterations")
+          (treeStrategy _cnfTreeStrategy _cnfReducerName)
+          problem
+        )
 
-      result <- handleErrors =<< (withLogger $
-        runReduction _cnfReductionOptions (_cnfWorkFolder </> "iterations") red problem)
-
-      case result of
-        Just r -> do
-          L.phase ("Writing output to file " <> display _cnfOutputFile) $ do
-            liftIO . writeDirTree (flip copyFile) _cnfOutputFile $ r
-        Nothing ->
-          L.warn ("Minimal example required no file " <> display _cnfOutputFile)
+      L.phase ("Writing output to file " <> display _cnfOutputFile) $ do
+        liftIO . writeDirTree (flip copyFile) _cnfOutputFile $ result
 
   where
     handleErrors (s, r) = do

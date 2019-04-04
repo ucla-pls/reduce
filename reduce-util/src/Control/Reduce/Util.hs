@@ -25,11 +25,8 @@ module Control.Reduce.Util
   , intsetReduction
   , setReduction
 
-  , simpleReduction
-
   , TreeStrategy (..)
-  , treeReduction
-  , flatReduction
+  , treeStrategy
   , hddReduction
   , graphReduction
 
@@ -54,8 +51,6 @@ module Control.Reduce.Util
 
 import Debug.Trace
 
--- lens
-import Control.Lens
 
 -- unliftio
 import           UnliftIO
@@ -79,13 +74,15 @@ import qualified Data.Set                   as S
 import           Text.Printf
 import qualified Data.List as L
 
+-- vector
+import qualified Data.Vector as V
+
 -- free
 import           Control.Monad.Free.Church
 
 -- reduce-util
 import           Control.Reduce.Command
 import           Control.Reduce.Graph
-import           Control.Reduce.Reduction
 import           Control.Reduce.Metric
 import           Control.Reduce.Problem
 import qualified Control.Reduce.Util.Logger as L
@@ -128,95 +125,7 @@ data AbstractProblem b = forall a.
 check :: a -> ReductM a Bool
 check a = liftF $ Check a id
 
--- | Strategy for reducing trees
-data TreeStrategy
-  = HddStrategy
-  | GraphStrategy
-  | FlatStrategy
-  deriving (Show, Read, Ord, Eq)
 
-treeReduction ::
-  forall a.
-     Reduction a a
-  -> TreeStrategy
-  -> ReducerName
-  -> Strategy (Maybe a)
-treeReduction red strat =
-  case strat of
-    FlatStrategy -> flatReduction red
-    GraphStrategy -> graphReduction red
-    HddStrategy -> hddReduction red
-
-simpleReduction :: forall a b. SafeReduction a b -> ReducerName -> Strategy a
-simpleReduction red name a =
-  listReductM back name lst
-  where
-    lst = [0..lengthOf (subelements red) a]
-    back :: [Int] -> a
-    back xs =
-      let x = IS.fromList xs
-      in limiting red (`IS.member` x) a
-
-flatReduction :: forall a. Reduction a a -> ReducerName -> Strategy (Maybe a)
-flatReduction red name =
-  \case
-    Just a ->
-      listReductM back name lst
-      where
-        red' :: DeepReduction a
-        red' = deepening red
-        lst = [0..lengthOf (subelements red') a]
-        back xs =
-          let x = IS.fromList xs
-          in limiting red' (`IS.member` x) a
-    Nothing ->
-      return Nothing
-
-hddReduction :: forall a. Reduction a a -> ReducerName -> Strategy (Maybe a)
-hddReduction red name = \case
-  Just a ->
-    go 1 a
-  Nothing ->
-    return Nothing
-  where
-    go :: Int -> a -> ReductM (Maybe a) (Maybe (Maybe a))
-    go n x
-      | length reductionLayer > 0 = do
-        a <- listReductM back name (traceShowId reductionLayer)
-        case a of
-          Just (Just a') -> go (n+1) a'
-          _ -> return $ Just (Just x)
-     | otherwise =
-         return $ Just (Just x)
-        where
-          red' :: DeepReduction a
-          red' = boundedDeepening n red
-
-          items = indicesOf red' x
-          (parents, reductionLayer) = L.partition (\i -> length i < n) items
-
-          keep = S.fromList parents
-
-          back xs =
-            let keepers = keep `S.union` S.fromList xs
-            in limit red' (`S.member` keepers) x
-
-graphReduction :: forall a. Reduction a a -> ReducerName -> Strategy (Maybe a)
-graphReduction red name = \case
-  Just a -> do
-    let
-      red' :: DeepReduction a
-      red' = deepening red
-      items = indicesOf red' a
-      (graph, back) = buildGraphFromNodesAndEdges
-          [ (i, i) | i <- items ]
-          [ Edge a' rst () | a'@(_:rst) <- items ]
-      fn xs =
-        let x = IS.unions xs
-        in limit red' (maybe False (`IS.member` x) . back) a
-    intsetReduct fn name (closures graph)
-  Nothing ->
-    return Nothing
 
 -- | Do a reduction over a list
 listReductM :: ([x] -> a) -> ReducerName -> [x] -> ReductM a (Maybe a)
@@ -256,6 +165,50 @@ intsetReduct fn red xs =
   where
     sxs = L.sortOn (IS.size) xs
     predc = PredicateM (check . fn)
+
+-- | Strategy for reducing trees
+data TreeStrategy
+  = HddStrategy
+  | GraphStrategy
+  | FlatStrategy
+  deriving (Show, Read, Ord, Eq)
+
+treeStrategy ::
+  TreeStrategy
+  -> ReducerName
+  -> Strategy [[Int]]
+treeStrategy = \case
+    FlatStrategy -> listReduction
+    GraphStrategy -> graphReduction
+    HddStrategy -> hddReduction
+
+graphReduction :: ReducerName -> Strategy [[Int]]
+graphReduction name items =
+  let
+    (graph, _) = buildGraphFromNodesAndEdges
+        [ (i, i) | i <- items ]
+        [ Edge a' rst () | a'@(_:rst) <- items ]
+    labs = nodeLabels graph
+    fn =
+      fmap (labs V.!) . IS.toAscList . IS.unions
+  in intsetReduct fn name (closures graph)
+
+hddReduction :: ReducerName -> Strategy [[Int]]
+hddReduction name = go 1
+  where
+    go :: Int -> Strategy [[Int]]
+    go n items
+      | length reductionLayer > 0 = do
+        listReductM back name (traceShowId reductionLayer) >>= \case
+          Just items' -> go (n+1) items'
+          Nothing -> return $ Just items
+     | otherwise =
+       return $ Just items
+        where
+          (reductionLayer, rest) = L.partition (\i -> length i == n) items
+          keep = S.fromList rest
+          back = S.toAscList . S.union keep . S.fromList
+
 
 runAbstractProblem ::
   ReductionOptions

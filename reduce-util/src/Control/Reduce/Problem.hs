@@ -1,14 +1,14 @@
-{-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE TupleSections              #-}
-{-# LANGUAGE ExistentialQuantification  #-}
-{-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE GADTs                      #-}
-{-# LANGUAGE KindSignatures             #-}
-{-# LANGUAGE LambdaCase                 #-}
-{-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE RankNTypes                 #-}
-{-# LANGUAGE RecordWildCards            #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE DataKinds                 #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE GADTs                     #-}
+{-# LANGUAGE KindSignatures            #-}
+{-# LANGUAGE LambdaCase                #-}
+{-# LANGUAGE OverloadedStrings         #-}
+{-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE RecordWildCards           #-}
+{-# LANGUAGE ScopedTypeVariables       #-}
+{-# LANGUAGE TupleSections             #-}
 {-|
 Module      : Control.Reduce.Problem
 Copyright   : (c) Christian Gram Kalhauge, 2019
@@ -21,26 +21,29 @@ This module defines a reduction problem.
 module Control.Reduce.Problem where
 
 -- vector
-import qualified Data.Vector                      as V
+import qualified Data.Vector                as V
 
 -- lens
 import           Control.Lens
 
 -- base
 import           Control.Monad
-import           Data.Maybe
-import           Data.Semigroup
 import           Data.Functor
+import           Data.Maybe
+import qualified Data.List.NonEmpty as NE
+import           Data.Semigroup
 
 
 -- containers
-import qualified Data.IntSet as IS
+import qualified Data.IntSet                as IS
+import qualified Data.Set                   as S
 
 -- reduce-util
 import           Control.Reduce.Command
+import           Control.Reduce.Reduction
 import           Control.Reduce.Graph
-import qualified Control.Reduce.Util.Logger       as L
 import           Control.Reduce.Metric
+import qualified Control.Reduce.Util.Logger as L
 
 -- | A Problem is something that we can reduce, by running a program on with the
 -- correct inputs.
@@ -81,6 +84,30 @@ toClosures edges' = refineProblem refined
       where
         fs = map (nodeLabel . (nodes graph V.!)) . IS.toList . IS.unions
         (graph, _) = buildGraphFromNodesAndEdges (map (\a -> (a,a)) items) edges'
+
+-- | Given a 'Reduction' from s given t, make the problem to reduce
+-- a list of t's with indicies.
+toReductionList :: Reduction s t -> Problem s b -> Problem (V.Vector (Maybe t)) b
+toReductionList red =
+  refineProblem $ \s ->
+    ( flip (limiting red) s . (\v i -> maybe False (const True) $ v V.!? i)
+    , V.map Just . V.fromList $ toListOf (subelements red) $ s
+    )
+
+-- | Get an inde
+toReductionTree' :: Reduction s s -> Problem s b -> Problem (S.Set (NE.NonEmpty Int)) b
+toReductionTree' red =
+  refineProblem $ \s ->
+    ( flip (limit $ treeReduction red) s . flip S.member
+    , S.fromList $ indicesOf (treeReduction red) s
+    )
+
+toReductionTree :: Reduction s s -> Problem s b -> Problem [[Int]] b
+toReductionTree red =
+  liftProblem
+  (fmap NE.toList . S.toAscList)
+  (S.fromList . catMaybes . fmap NE.nonEmpty)
+  . toReductionTree' red
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
 toIndexed :: Problem [a] b -> Problem [Int] b
