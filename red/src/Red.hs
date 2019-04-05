@@ -49,6 +49,10 @@ import qualified Data.List                    as List
 import           System.Exit
 
 
+-- red
+import           Control.Reduce.Language.C
+
+
 data Format
   = FileFormat FileFormat
   | DirFormat DirFormat
@@ -58,6 +62,7 @@ data FileFormat
   = Chars
   | Lines
   | Json
+  | CFile
   deriving (Show, Read, Ord, Eq)
 
 data DirFormat
@@ -98,14 +103,14 @@ parseFormat =
   where
     toFormat str' =
       let f = List.isPrefixOf str' in
-      if | f "chars" -> FileFormat Chars
-         | f "lines" -> FileFormat Lines
+      if | f "lines" -> FileFormat Lines
+         | f "cfile" -> FileFormat CFile
+         | f "chars" -> FileFormat Chars
          | f "json" -> FileFormat Json
          | f "files" -> DirFormat Files
          | f "filetree" -> DirFormat FileTree
          | True ->
            error $ "Unknown format " ++ str'
-
 
 parseMetricType :: Parser MetricType
 parseMetricType =
@@ -206,13 +211,49 @@ run = do
   Config {..} <- ask
 
   case _cnfFormat of
+    FileFormat CFile -> do
+      (cedges, cfile) <- (liftIO $ parseCFilePre _cnfInputFile) >>= \case
+        Right p ->
+          return (cEdges p, RCTranslUnit p)
+        Left msg -> logAndExit (display msg)
+
+      liftIO $ print cedges
+
+      let
+        cmd = setup (inputFile (takeFileName _cnfInputFile) . printCFile ) $ makeCommand _cnfCommand
+        problemDesc = setupProblem
+          _cnfPredicateOptions
+          (_cnfWorkFolder </> "baseline")
+          cmd cfile
+
+      problem <- withLogger problemDesc >>= \case
+        Just problem -> return
+          . meassure (counted "tokens")
+          . toReductionTree cR
+          $ problem
+        Nothing ->
+          logAndExit "Could not satisfy baseline"
+
+      result <- handleErrors =<< withLogger
+        ( runReduction
+          _cnfReductionOptions
+          (_cnfWorkFolder </> "iterations")
+          (treeStrategy _cnfTreeStrategy _cnfReducerName)
+          problem
+        )
+
+      output <- view cnfOutputFile
+      L.phase ("Writing output to file " <> display output) $ do
+        liftIO $ BLC.writeFile output (printCFile result)
+
     FileFormat ff -> do
       bs <- liftIO $ BLC.readFile _cnfInputFile
 
-      let cmd = setup (inputFile "input") $ makeCommand _cnfCommand
+      let
+        cmd = setup (inputFile "input") $ makeCommand _cnfCommand
+        problemDesc = setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd bs
 
-      abred <- withLogger
-        ( setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd bs ) >>= \case
+      abred <- withLogger problemDesc >>= \case
           Just problem -> do
             liftIO . print $ (expectation problem)
             case ff of
@@ -244,11 +285,12 @@ run = do
                     . toReductionTree jsonR
                     . refineProblem (
                       \s -> case decode s of
-                        Just v -> (encode, v)
+                        Just v  -> (encode, v)
                         Nothing -> fail "Could not decode the input"
                       )
                     $ problem
                   )
+              CFile -> undefined
           Nothing ->
             logAndExit "Could not satisfy baseline"
 

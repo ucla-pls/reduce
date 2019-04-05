@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 2f2a261098e91bee76b1fd816411d6a386e312805a7bc6da401e1169f60fda93
+-- hash: 0f63cf8ac781ec9a82add1035321c5d70a3edc0a5aa0d71b613d445d4ac3f66b
 
 name:           red
 version:        0.1.0.0
@@ -26,6 +26,7 @@ source-repository head
 
 library
   exposed-modules:
+      Control.Reduce.Language.C
       Red
   other-modules:
       Paths_red
@@ -40,9 +41,11 @@ library
     , directory
     , dirtree
     , filepath
+    , language-c
     , lens
     , mtl
     , optparse-applicative
+    , pretty
     , reduce
     , reduce-util
     , text
@@ -66,9 +69,11 @@ executable red
     , directory
     , dirtree
     , filepath
+    , language-c
     , lens
     , mtl
     , optparse-applicative
+    , pretty
     , red
     , reduce
     , reduce-util

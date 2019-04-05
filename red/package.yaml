@@ -36,12 +36,9 @@ dependencies:
 - dirtree
 - directory
 - aeson
-  # - bytestring
-  # - typed-process
-  # - cryptohash-sha256
-  # - async
-  # - stm
-  # - mtl
+- language-c
+- pretty
+- containers
 
 library:
   source-dirs: src
