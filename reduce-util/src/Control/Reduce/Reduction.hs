@@ -47,6 +47,7 @@ module Control.Reduce.Reduction
     , deepSubelements
 
     -- * Implementations
+    , maybeR
     , listR
     , vectorR
     , hashmapR

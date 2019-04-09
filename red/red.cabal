@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 0f63cf8ac781ec9a82add1035321c5d70a3edc0a5aa0d71b613d445d4ac3f66b
+-- hash: f9ce01d9c2f66db65aae185a7a242c50daeb9a1e60f8624583e64887be972896
 
 name:           red
 version:        0.1.0.0
@@ -37,6 +37,7 @@ library
     , base >=4.7 && <5
     , bytestring
     , cassava
+    , containers
     , contravariant
     , directory
     , dirtree
@@ -46,6 +47,7 @@ library
     , mtl
     , optparse-applicative
     , pretty
+    , pretty-simple
     , reduce
     , reduce-util
     , text
@@ -65,6 +67,7 @@ executable red
     , base >=4.7 && <5
     , bytestring
     , cassava
+    , containers
     , contravariant
     , directory
     , dirtree
@@ -74,6 +77,7 @@ executable red
     , mtl
     , optparse-applicative
     , pretty
+    , pretty-simple
     , red
     , reduce
     , reduce-util

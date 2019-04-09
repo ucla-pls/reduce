@@ -43,8 +43,12 @@ import           Control.Reduce.Util
 import           Control.Reduce.Util.Logger   as L
 import           Control.Reduce.Util.OptParse
 
+-- pretty
+import Text.Pretty.Simple (pShow)
+
 -- base
 import           Data.Char
+import           Data.Functor
 import qualified Data.List                    as List
 import           System.Exit
 
@@ -212,12 +216,17 @@ run = do
 
   case _cnfFormat of
     FileFormat CFile -> do
-      (cedges, cfile) <- (liftIO $ parseCFilePre _cnfInputFile) >>= \case
+      (cedges, cfile') <- (liftIO $ parseCFilePre _cnfInputFile) >>= \case
         Right p ->
-          return (cEdges p, RCTranslUnit p)
-        Left msg -> logAndExit (display msg)
+          return (cEdges p,  p)
+        Left msg ->
+          logAndExit (display msg)
 
-      liftIO $ print cedges
+      trace . displayText $ pShow (cfile' $> ())
+      trace . displayText $ pShow (debuglst (RCTranslUnit cfile'))
+      trace $ display cedges
+
+      let cfile = RCTranslUnit cfile'
 
       let
         cmd = setup (inputFile (takeFileName _cnfInputFile) . printCFile ) $ makeCommand _cnfCommand
@@ -238,7 +247,7 @@ run = do
         ( runReduction
           _cnfReductionOptions
           (_cnfWorkFolder </> "iterations")
-          (treeStrategy _cnfTreeStrategy _cnfReducerName)
+          (treeStrategy cedges _cnfTreeStrategy _cnfReducerName)
           problem
         )
 
@@ -280,7 +289,7 @@ run = do
                     $ liftProblem BLC.unpack BLC.pack problem
                   )
               Json -> do
-                return $ AbstractProblem (treeStrategy _cnfTreeStrategy _cnfReducerName)
+                return $ AbstractProblem (treeStrategy [] _cnfTreeStrategy _cnfReducerName)
                   ( meassure (counted "subtrees")
                     . toReductionTree jsonR
                     . refineProblem (
@@ -357,7 +366,7 @@ run = do
         ( runReduction
           _cnfReductionOptions
           (_cnfWorkFolder </> "iterations")
-          (treeStrategy _cnfTreeStrategy _cnfReducerName)
+          (treeStrategy [] _cnfTreeStrategy _cnfReducerName)
           problem
         )
 

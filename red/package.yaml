@@ -39,6 +39,7 @@ dependencies:
 - language-c
 - pretty
 - containers
+- pretty-simple
 
 library:
   source-dirs: src

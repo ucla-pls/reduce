@@ -174,20 +174,21 @@ data TreeStrategy
   deriving (Show, Read, Ord, Eq)
 
 treeStrategy ::
-  TreeStrategy
+  [Edge () [Int]]
+  -> TreeStrategy
   -> ReducerName
   -> Strategy [[Int]]
-treeStrategy = \case
+treeStrategy edgs = \case
     FlatStrategy -> listReduction
-    GraphStrategy -> graphReduction
+    GraphStrategy -> graphReduction edgs
     HddStrategy -> hddReduction
 
-graphReduction :: ReducerName -> Strategy [[Int]]
-graphReduction name items =
+graphReduction :: [Edge () [Int]] -> ReducerName -> Strategy [[Int]]
+graphReduction edgs name items =
   let
     (graph, _) = buildGraphFromNodesAndEdges
         [ (i, i) | i <- items ]
-        [ Edge a' rst () | a'@(_:rst) <- items ]
+        ([ Edge a' rst () | a'@(_:rst) <- items ] ++ edgs)
     labs = nodeLabels graph
     fn =
       fmap (labs V.!) . IS.toAscList . IS.unions
