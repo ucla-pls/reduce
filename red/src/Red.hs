@@ -19,7 +19,7 @@ import           Control.Monad.Reader
 import           System.Directory
 
 -- lens
-import           Control.Lens
+import           Control.Lens hiding ((<.>))
 
 -- aeson
 import           Data.Aeson
@@ -134,7 +134,7 @@ parseMetricType =
 
 data Config = Config
   { _cnfInputFile        :: !FilePath
-  , _cnfOutputFile       :: !FilePath
+  , _cnfOutputFile       :: !(Maybe FilePath)
   , _cnfLoggerConfig     :: !LoggerConfig
   , _cnfMetricType       :: !MetricType
   , _cnfDependencies     :: !(Maybe FilePath)
@@ -155,7 +155,7 @@ getConfigParser = do
     long "input-file"
     <> short 'i'
 
-  _cnfOutputFile <- strOption $
+  _cnfOutputFile <- optional . strOption $
     long "output-file"
     <> short 'o'
 
@@ -251,7 +251,7 @@ run = do
           problem
         )
 
-      output <- view cnfOutputFile
+      output <- findOutputFile _cnfInputFile _cnfOutputFile
       L.phase ("Writing output to file " <> display output) $ do
         liftIO $ BLC.writeFile output (printCFile result)
 
@@ -259,7 +259,7 @@ run = do
       bs <- liftIO $ BLC.readFile _cnfInputFile
 
       let
-        cmd = setup (inputFile "input") $ makeCommand _cnfCommand
+        cmd = setup (inputFile (takeFileName _cnfInputFile)) $ makeCommand _cnfCommand
         problemDesc = setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd bs
 
       abred <- withLogger problemDesc >>= \case
@@ -306,7 +306,7 @@ run = do
       result <- handleErrors =<< withLogger
         ( runAbstractProblem _cnfReductionOptions (_cnfWorkFolder </> "iterations") abred )
 
-      output <- view cnfOutputFile
+      output <- findOutputFile _cnfInputFile _cnfOutputFile
       L.phase ("Writing output to file " <> display output) $ do
         liftIO $ BLC.writeFile output result
 
@@ -336,7 +336,7 @@ run = do
       result <- handleErrors =<< (withLogger $
         runReduction _cnfReductionOptions (_cnfWorkFolder </> "iterations") red problem)
 
-      output <- view cnfOutputFile
+      output <- findOutputFile _cnfInputFile _cnfOutputFile
       L.phase ("Writing output to directory " <> display output) $ do
         liftIO . writeDirTree (flip copyFile) output . directory $ result
 
@@ -370,8 +370,9 @@ run = do
           problem
         )
 
-      L.phase ("Writing output to file " <> display _cnfOutputFile) $ do
-        liftIO . writeDirTree (flip copyFile) _cnfOutputFile $ result
+      output <- findOutputFile _cnfInputFile _cnfOutputFile
+      L.phase ("Writing output to file " <> display output) $ do
+        liftIO . writeDirTree (flip copyFile) output $ result
 
   where
     handleErrors (s, r) = do
@@ -385,6 +386,25 @@ run = do
         Nothing ->
           return ()
       return r
+
+    findOutputFile input = \case
+      Just output -> return output
+      Nothing -> do
+        let endings = "orig":[ "v" ++ show i | i <- [1..]]
+        newpath <- liftIO $ firstEnding endings
+        L.debug $ "Copying input file to " <> display newpath
+        liftIO $ renamePath input newpath
+        return input
+
+      where
+        firstEnding (e:rest) = do
+          a <- doesPathExist (input <.> e)
+          if a
+          then firstEnding rest
+          else return (input <.> e)
+        firstEnding [] =
+          undefined
+
 
 logAndExit ::
   (HasLogger env, MonadReader env m, MonadIO m)
