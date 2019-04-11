@@ -26,9 +26,11 @@ import           System.Directory
 import           Data.Char                        (toLower)
 import qualified Data.List                        as List
 import           Control.Monad
+import           Control.Monad.IO.Class
 
--- temporary
-import           System.IO.Temp
+-- unlifio
+import           UnliftIO.Temporary
+import           UnliftIO
 
 -- reduce-util
 import           Control.Reduce.Util
@@ -73,7 +75,24 @@ parsePredicateOptions = do
 
   pure $ PredicateOptions {..}
 
-parseWorkFolder :: String -> Parser (IO FilePath)
+data WorkFolder
+  = TempWorkFolder !String
+  | DefinedWorkFolder !Bool !FilePath
+  deriving (Show, Eq)
+
+withWorkFolder :: (MonadUnliftIO m) => WorkFolder -> (FilePath -> m a) -> m a
+withWorkFolder wf fn =
+  case wf of
+    DefinedWorkFolder useForce folder -> do
+      fld <- liftIO $ do
+        when useForce $ removePathForcibly folder
+        createDirectory folder
+        makeAbsolute folder
+      fn fld
+    TempWorkFolder template -> do
+      withSystemTempDirectory template fn
+
+parseWorkFolder :: String -> Parser WorkFolder
 parseWorkFolder template = do
   workFolder <-
     Just <$> strOption
@@ -87,18 +106,11 @@ parseWorkFolder template = do
   useForce <-
     switch ( long "force" <> short 'f' <> help "delete the work folder if it already exists." )
 
-  pure $
-    ioWorkFolder workFolder useForce
-  where
-    ioWorkFolder workFolder useForce =
-      makeAbsolute =<< case workFolder of
-        Just folder -> do
-          when useForce $ removePathForcibly folder
-          createDirectory folder
-          return $ folder
-        Nothing -> do
-          createTempDirectory "." template
-
+  pure $ case workFolder of
+    Just folder -> do
+      DefinedWorkFolder useForce folder
+    Nothing -> do
+      TempWorkFolder $ template
 
 parseReductionOptions :: Parser (ReductionOptions)
 parseReductionOptions = do

@@ -141,7 +141,7 @@ data Config = Config
   , _cnfTreeStrategy     :: !TreeStrategy
   , _cnfFormat           :: !Format
   , _cnfReducerName      :: !ReducerName
-  , _cnfWorkFolder       :: !FilePath
+  , _cnfWorkFolder       :: !WorkFolder
   , _cnfPredicateOptions :: !PredicateOptions
   , _cnfReductionOptions :: !ReductionOptions
   , _cnfCommand          :: !CommandTemplate
@@ -151,9 +151,8 @@ makeLenses ''Config
 
 getConfigParser :: Parser (IO Config)
 getConfigParser = do
-  _cnfInputFile <- strOption $
-    long "input-file"
-    <> short 'i'
+  _cnfInputFile <- strArgument $
+    metavar "INPUT" <> help "the input file or folder"
 
   _cnfOutputFile <- optional . strOption $
     long "output-file"
@@ -180,7 +179,7 @@ getConfigParser = do
   _cnfReducerName <-
     parseReducerName
 
-  ioWorkFolder <-
+  _cnfWorkFolder <-
     parseWorkFolder "_red"
 
   _cnfPredicateOptions <-
@@ -193,7 +192,6 @@ getConfigParser = do
     parseCommandTemplate
 
   pure $ do
-    _cnfWorkFolder <- ioWorkFolder
     _cnfCommand <- either fail return =<< ioCommand
     return $ Config {..}
 
@@ -214,7 +212,7 @@ run :: ReaderT Config IO ()
 run = do
   Config {..} <- ask
 
-  case _cnfFormat of
+  withWorkFolder _cnfWorkFolder $ \workfolder -> case _cnfFormat of
     FileFormat CFile -> do
       (cedges, cfile') <- (liftIO $ parseCFilePre _cnfInputFile) >>= \case
         Right p ->
@@ -232,7 +230,7 @@ run = do
         cmd = setup (inputFile (takeFileName _cnfInputFile) . printCFile ) $ makeCommand _cnfCommand
         problemDesc = setupProblem
           _cnfPredicateOptions
-          (_cnfWorkFolder </> "baseline")
+          (workfolder </> "baseline")
           cmd cfile
 
       problem <- withLogger problemDesc >>= \case
@@ -246,7 +244,7 @@ run = do
       result <- handleErrors =<< withLogger
         ( runReduction
           _cnfReductionOptions
-          (_cnfWorkFolder </> "iterations")
+          (workfolder </> "iterations")
           (treeStrategy cedges _cnfTreeStrategy _cnfReducerName)
           problem
         )
@@ -260,7 +258,7 @@ run = do
 
       let
         cmd = setup (inputFile (takeFileName _cnfInputFile)) $ makeCommand _cnfCommand
-        problemDesc = setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd bs
+        problemDesc = setupProblem _cnfPredicateOptions (workfolder </> "baseline") cmd bs
 
       abred <- withLogger problemDesc >>= \case
           Just problem -> do
@@ -304,7 +302,7 @@ run = do
             logAndExit "Could not satisfy baseline"
 
       result <- handleErrors =<< withLogger
-        ( runAbstractProblem _cnfReductionOptions (_cnfWorkFolder </> "iterations") abred )
+        ( runAbstractProblem _cnfReductionOptions (workfolder </> "iterations") abred )
 
       output <- findOutputFile _cnfInputFile _cnfOutputFile
       L.phase ("Writing output to file " <> display output) $ do
@@ -321,7 +319,7 @@ run = do
             $ makeCommand _cnfCommand
 
       problem <- withLogger
-        ( setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline") cmd dir ) >>= \case
+        ( setupProblem _cnfPredicateOptions (workfolder </> "baseline") cmd dir ) >>= \case
         Just problem ->
           return
           . meassure (counted "files")
@@ -334,7 +332,7 @@ run = do
       red <- listReduction <$> view cnfReducerName
 
       result <- handleErrors =<< (withLogger $
-        runReduction _cnfReductionOptions (_cnfWorkFolder </> "iterations") red problem)
+        runReduction _cnfReductionOptions (workfolder </> "iterations") red problem)
 
       output <- findOutputFile _cnfInputFile _cnfOutputFile
       L.phase ("Writing output to directory " <> display output) $ do
@@ -349,7 +347,7 @@ run = do
             $ makeCommand _cnfCommand
 
       problem <- withLogger
-        ( setupProblem _cnfPredicateOptions (_cnfWorkFolder </> "baseline")
+        ( setupProblem _cnfPredicateOptions (workfolder </> "baseline")
           cmd
           dirtree
         ) >>= \case
@@ -365,7 +363,7 @@ run = do
       result <- handleErrors =<< withLogger
         ( runReduction
           _cnfReductionOptions
-          (_cnfWorkFolder </> "iterations")
+          (workfolder </> "iterations")
           (treeStrategy [] _cnfTreeStrategy _cnfReducerName)
           problem
         )
@@ -390,7 +388,7 @@ run = do
     findOutputFile input = \case
       Just output -> return output
       Nothing -> do
-        let endings = "orig":[ "v" ++ show i | i <- [1..]]
+        let endings = "orig":[ "v" ++ show i | i <- [(1 :: Int)..]]
         newpath <- liftIO $ firstEnding endings
         L.debug $ "Copying input file to " <> display newpath
         liftIO $ renamePath input newpath
