@@ -230,7 +230,7 @@ cEdges ctu = do
     getLargestPrefix fi etos =
       L.maximumBy (
           comparing (\a ->
-                       if L.isPrefixOf fi a || L.isPrefixOf a fi
+                       if L.isSuffixOf fi a
                        then 0
                        else L.length . L.takeWhile id . zipWith (==) (reverse fi) . reverse $ a
                     )
@@ -254,13 +254,20 @@ cEdges ctu = do
              )
          ) <>
          ( getting iters._RCFunDef <.
-           _CFunDef . _2._CDeclr._1._Just
+           _CFunDef._2.defs
          )
        )
+
+    defs :: Fold CDeclr Ident
+    defs = cosmosOf deepdeclr . (_CDeclr._1._Just)
 
     deepdecl :: Fold CDecl CDecl
     deepdecl =
       _CDecl._1.folded._CTypeSpec._CSUType._1._CStruct._3._Just.folded
+
+    deepdeclr :: Fold CDeclr CDeclr
+    deepdeclr =
+      _CDeclr._2.folded._CFunDeclr._1._Right._1.folded._CDecl._2.folded._1._Just
 
     func = ctu' ^@..
       getting iters._RCFunDef._CFunDef <.
@@ -302,6 +309,8 @@ cEdges ctu = do
 
     iters :: TreeReduction CRed
     iters = treeReduction cR
+
+
 
 -- | Emidiate (non-reducable) childern of a CStat
 statStats :: Traversal' CStat CStat

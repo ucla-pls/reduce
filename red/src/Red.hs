@@ -212,7 +212,8 @@ run :: ReaderT Config IO ()
 run = do
   Config {..} <- ask
 
-  withWorkFolder _cnfWorkFolder $ \workfolder -> case _cnfFormat of
+  withWorkFolder _cnfWorkFolder $ \workfolder ->
+    L.info ("Work folder: " <> display workfolder) >> case _cnfFormat of
     FileFormat CFile -> do
       (cedges, cfile') <- (liftIO $ parseCFilePre _cnfInputFile) >>= \case
         Right p ->
