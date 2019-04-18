@@ -125,8 +125,6 @@ data AbstractProblem b = forall a.
 check :: a -> ReductM a Bool
 check a = liftF $ Check a id
 
-
-
 -- | Do a reduction over a list
 listReductM :: ([x] -> a) -> ReducerName -> [x] -> ReductM a (Maybe a)
 listReductM c name lst =
@@ -209,7 +207,6 @@ hddReduction name = go 1
           (reductionLayer, rest) = L.partition (\i -> length i == n) items
           keep = S.fromList rest
           back = S.toAscList . S.union keep . S.fromList
-
 
 runAbstractProblem ::
   ReductionOptions
