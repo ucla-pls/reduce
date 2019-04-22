@@ -51,6 +51,7 @@ import           Data.Char
 import           Data.Functor
 import qualified Data.List                    as List
 import           System.Exit
+import           GHC.IO.Encoding (setLocaleEncoding, utf8)
 
 
 -- red
@@ -199,7 +200,9 @@ instance HasLogger Config where
   loggerL = cnfLoggerConfig
 
 main :: IO ()
+
 main = do
+  setLocaleEncoding utf8
   config <- join . execParser $
     A.info (getConfigParser <**> helper)
     ( fullDesc
