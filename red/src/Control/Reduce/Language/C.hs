@@ -21,6 +21,10 @@ module Control.Reduce.Language.C
 
   , CRed (..)
   , cR
+
+  , defs
+  , uses
+
   , cEdges
 
   , statStats
@@ -69,7 +73,7 @@ import qualified Text.PrettyPrint           as PP
 import qualified Data.Map.Strict            as Map
 
 -- lens
-import           Control.Lens
+import           Control.Lens hiding (uses)
 import           Data.Data.Lens             (uniplate)
 
 -- language-c
@@ -82,7 +86,6 @@ import           Control.Reduce.Reduction
 data CRed
   = RCTranslUnit CTranslUnit
   | RCStat CStat
-
   | RCDecl CDecl
   | RCFunDef CFunDef
   | RCAsmExt (CStrLit, NodeInfo)
@@ -104,8 +107,6 @@ debuglst crd =
         RCDecl a -> PP.render . pretty $ a
         RCFunDef a -> PP.render . pretty $ a
         RCAsmExt (a,b) -> PP.render . pretty $ CAsmExt a b
-
-
 
 printCFile :: CRed -> BLC.ByteString
 printCFile = \case
@@ -197,6 +198,134 @@ cR (pab :: CRed -> f (Maybe CRed)) = \case
   --     _ -> pure c
 
 
+type Idents a = Getting (Endo [(NE.NonEmpty Int, Ident)]) a Ident
+
+groupOf :: CRed -> Idents CRed -> Map.Map Ident [[Int]]
+groupOf c l =
+  fmap (reverse . ($ []) . appEndo)
+  . Map.fromListWith (<>)
+  . map (\(i, a) -> (a, Endo (NE.toList i:)))
+  $ c ^@.. (getting $ treeReduction cR) <. l
+
+
+defs :: CTranslUnit -> Map.Map Ident [[Int]]
+defs (RCTranslUnit -> c) =
+  groupOf c $ (_RCFunDef . functionDefs <> _RCDecl . declDefs)
+  where
+    functionDefs :: Idents CFunDef
+    functionDefs =
+      _CFunDef._2.defs
+
+    declDefs :: Idents CDecl
+    declDefs = cosmosOf deepdecl . declSnd
+
+    declSnd :: Idents CDecl
+    declSnd fa =
+      \case
+        -- Forward declaration
+        CDecl specs [] a -> do
+          specs' <- (folded._CTypeSpec.forwardTypeDefs) fa specs
+          return $ CDecl specs' [] a
+        CDecl specs xs a -> do
+          specs' <- (folded._CTypeSpec.typeDefs) fa specs
+          xs' <- (folded._1._Just._CDeclr._1._Just) fa xs
+          return $ CDecl specs' xs' a
+
+    forwardTypeDefs :: Idents CTypeSpec
+    forwardTypeDefs fa = \case
+      CSUType (CStruct tag mid md attr a') a -> do
+        mid' <- _Just fa mid
+        return $ CSUType (CStruct tag mid' md attr a') a
+      CEnumType (CEnum mid mds attr a') a -> do
+        mid' <- _Just fa mid
+        mds' <- (_Just.folded._1) fa mds
+        return $ CEnumType (CEnum mid' mds' attr a') a
+      a -> pure a
+
+    typeDefs :: Idents CTypeSpec
+    typeDefs fa = \case
+      CSUType (CStruct tag mid md attr a') a -> do
+        mid' <- case md of
+          Just _ -> _Just fa mid
+          Nothing -> pure mid
+        return $ CSUType (CStruct tag mid' md attr a') a
+      CEnumType (CEnum mid mds attr a') a -> do
+        mid' <- case mds of
+          Just _ -> _Just fa mid
+          Nothing -> pure mid
+        mds' <- (_Just.folded._1) fa mds
+        return $ CEnumType (CEnum mid' mds' attr a') a
+      a -> pure a
+
+    -- | Get all definitions in a CDeclr
+    defs :: Fold CDeclr Ident
+    defs = cosmosOf deepdeclr . (_CDeclr._1._Just)
+
+
+uses :: CTranslUnit -> [(Ident, [Int])]
+uses (RCTranslUnit -> c) =
+  map (\(a, i) -> (i, NE.toList a))
+  . itoListOf (
+    (getting $ treeReduction cR) <. (_RCStat . stmtVars <> _RCDecl . declVars)
+    )
+  $ c
+
+  where
+    stmtVars :: Idents CStat
+    stmtVars =
+      cosmosOnOf statExprs exprs . _CVar . _1
+
+    declVars :: Idents CDecl
+    declVars =
+      cosmosOf deepdecl . ( declSnd <> declExprs . exprVars)
+
+    declSnd :: Idents CDecl
+    declSnd fa =
+      \case
+        -- Forward declaration
+        CDecl specs [] a -> do
+          specs' <- (folded._CTypeSpec.forwardTypeVars) fa specs
+          return $ CDecl specs' [] a
+        CDecl specs xs a -> do
+          specs' <- (folded._CTypeSpec.typeVars) fa specs
+          return $ CDecl specs' xs a
+        a -> pure a
+
+    forwardTypeVars :: Idents CTypeSpec
+    forwardTypeVars fa = \case
+      -- CSUType (CStruct tag mid md attr a') a -> do
+      --   mid' <- _Just fa mid
+      --   return $ CSUType (CStruct tag mid' md attr a') a
+      -- CEnumType (CEnum mid mds attr a') a -> do
+      --   mid' <- _Just fa mid
+      --   mds' <- (_Just.folded._1) fa mds
+      --   return $ CEnumType (CEnum mid' mds' attr a') a
+      a -> pure a
+
+    typeVars :: Idents CTypeSpec
+    typeVars fa = \case
+      CEnumType (CEnum mid mds attr a') a -> do
+        mds' <- (_Just.folded._2._Just.exprVars) fa mds
+        return $ CEnumType (CEnum mid mds' attr a') a
+      CSUType (CStruct tag mid md attr a') a -> do
+        mid' <- case md of
+          Just _ -> pure mid
+          Nothing -> _Just fa mid
+        return $ CSUType (CStruct tag mid' md attr a') a
+      CTypeDef i a -> do
+        i' <- fa i
+        return $ CTypeDef i' a
+      a -> pure a
+
+    exprVars :: Idents CExpr
+    exprVars =
+      cosmosOf exprs._CVar._1
+
+defuses :: CTranslUnit -> [Edge Ident [Int]]
+defuses c = []
+  where
+    u = uses c
+    d = defs c
 
 
 cEdges :: CTranslUnit -> [Edge () [Int]]
@@ -261,13 +390,6 @@ cEdges ctu = do
     defs :: Fold CDeclr Ident
     defs = cosmosOf deepdeclr . (_CDeclr._1._Just)
 
-    deepdecl :: Fold CDecl CDecl
-    deepdecl =
-      _CDecl._1.folded._CTypeSpec._CSUType._1._CStruct._3._Just.folded
-
-    deepdeclr :: Fold CDeclr CDeclr
-    deepdeclr =
-      _CDeclr._2.folded._CFunDeclr._1._Right._1.folded._CDecl._2.folded._1._Just
 
     func = ctu' ^@..
       getting iters._RCFunDef._CFunDef <.
@@ -310,6 +432,31 @@ cEdges ctu = do
     iters :: TreeReduction CRed
     iters = treeReduction cR
 
+deepdecl :: Fold CDecl CDecl
+deepdecl =
+  _CDecl._1.folded._CTypeSpec.typeSpecDecl
+
+  where
+    typeSpecDecl :: Fold CTypeSpec CDecl
+    typeSpecDecl fab = \case
+      CAtomicType d a -> do
+        d' <- fab d
+        pure $ CAtomicType d' a
+
+      CTypeOfType d a -> do
+        d' <- fab d
+        pure $ CTypeOfType d' a
+
+      CSUType (CStruct tg i ds atr a') a -> do
+        ds' <- (folded.folded) fab ds
+        pure $ CSUType (CStruct tg i ds' atr a') a
+
+      a -> pure a
+
+
+deepdeclr :: Fold CDeclr CDeclr
+deepdeclr =
+  _CDeclr._2.folded._CFunDeclr._1._Right._1.folded._CDecl._2.folded._1._Just
 
 
 -- | Emidiate (non-reducable) childern of a CStat
@@ -365,13 +512,28 @@ declExprs :: Traversal' CDecl CExpr
 declExprs fab =
   \case
     CDecl spc decs a -> do
+      spc' <- (traverse.declSpecHelper) fab spc
       decs' <- (traverse.declHelper) fab decs
-      pure $ CDecl spc decs' a
+      pure $ CDecl spc' decs' a
     CStaticAssert e c a -> do
       e' <- fab e
       pure $ CStaticAssert e' c a
 
   where
+    declSpecHelper fab' =
+      \case
+        CAlignSpec (CAlignAsExpr e a') -> do
+          e' <- fab' e
+          pure $ CAlignSpec (CAlignAsExpr e' a')
+        CTypeSpec (CTypeOfExpr e a) -> do
+          e' <- fab' e
+          pure $ CTypeSpec (CTypeOfExpr e' a)
+        CTypeSpec (CSUType s a) -> do
+          pure $ CTypeSpec (CSUType s a)
+        CTypeSpec (CEnumType e a) -> do
+          pure $ CTypeSpec (CEnumType e a)
+        a -> pure a
+
     declHelper fab' (a, b, c) =
       (,,)
       <$> pure a
@@ -441,6 +603,9 @@ _CSUType = prism' (\(i,x) -> CSUType i x) $ \case CSUType i a -> Just (i, a); _ 
 _CEnumType :: Prism' CTypeSpec (CEnum, NodeInfo)
 _CEnumType = prism' (\(i,x) -> CEnumType i x) $
   \case CEnumType i a -> Just (i, a); _ -> Nothing
+
+_CEnum :: Iso' CEnum (Maybe Ident, Maybe [(Ident, Maybe (CExpr))], [CAttr], NodeInfo)
+_CEnum = iso (\(CEnum a b c d) -> (a, b, c, d)) (\(a, b, c, d) -> CEnum a b c d)
 
 _CTypeSpec :: Prism' CDeclSpec CTypeSpec
 _CTypeSpec = prism' CTypeSpec $ \case CTypeSpec a -> Just a; _ -> Nothing

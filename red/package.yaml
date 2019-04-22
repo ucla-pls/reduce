@@ -69,3 +69,4 @@ tests:
     dependencies:
     - red
     - hspec
+    - neat-interpolation >= 0.3.2.4
