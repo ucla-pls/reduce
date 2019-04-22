@@ -24,6 +24,7 @@ module Control.Reduce.Language.C
 
   , defs
   , uses
+  , defuses
 
   , cEdges
 
@@ -61,6 +62,7 @@ import qualified Data.List                  as L
 import qualified Data.List.NonEmpty         as NE
 import           Data.Monoid
 import           Debug.Trace
+import           Data.Bifunctor
 
 
 -- bytestring
@@ -92,7 +94,6 @@ data CRed
   deriving (Show)
 
 makePrisms ''CRed
-
 
 debuglst :: CRed -> [([Int], String)]
 debuglst crd =
@@ -214,7 +215,7 @@ defs (RCTranslUnit -> c) =
   where
     functionDefs :: Idents CFunDef
     functionDefs =
-      _CFunDef._2.defs
+      _CFunDef._2.declrIdent
 
     declDefs :: Idents CDecl
     declDefs = cosmosOf deepdecl . declSnd
@@ -230,6 +231,7 @@ defs (RCTranslUnit -> c) =
           specs' <- (folded._CTypeSpec.typeDefs) fa specs
           xs' <- (folded._1._Just._CDeclr._1._Just) fa xs
           return $ CDecl specs' xs' a
+        a -> pure a
 
     forwardTypeDefs :: Idents CTypeSpec
     forwardTypeDefs fa = \case
@@ -258,15 +260,15 @@ defs (RCTranslUnit -> c) =
       a -> pure a
 
     -- | Get all definitions in a CDeclr
-    defs :: Fold CDeclr Ident
-    defs = cosmosOf deepdeclr . (_CDeclr._1._Just)
+    declrIdent :: Fold CDeclr Ident
+    declrIdent = cosmosOf deepdeclr . (_CDeclr._1._Just)
 
 
 uses :: CTranslUnit -> [(Ident, [Int])]
 uses (RCTranslUnit -> c) =
   map (\(a, i) -> (i, NE.toList a))
   . itoListOf (
-    (getting $ treeReduction cR) <. (_RCStat . stmtVars <> _RCDecl . declVars)
+    (getting $ treeReduction cR) <. (_RCStat . stmtVars <> _RCDecl . declVars <> _RCFunDef . funVars)
     )
   $ c
 
@@ -278,6 +280,16 @@ uses (RCTranslUnit -> c) =
     declVars :: Idents CDecl
     declVars =
       cosmosOf deepdecl . ( declSnd <> declExprs . exprVars)
+
+    funVars :: Idents CFunDef
+    funVars =
+      _CFunDef.
+      ( _1.folded._CTypeSpec.typeVars
+        <> _2._CDeclr._2
+        .folded._CFunDeclr._1._Right
+        ._1.folded._CDecl
+        ._1.folded._CTypeSpec.typeVars
+      )
 
     declSnd :: Idents CDecl
     declSnd fa =
@@ -292,21 +304,17 @@ uses (RCTranslUnit -> c) =
         a -> pure a
 
     forwardTypeVars :: Idents CTypeSpec
-    forwardTypeVars fa = \case
-      -- CSUType (CStruct tag mid md attr a') a -> do
-      --   mid' <- _Just fa mid
-      --   return $ CSUType (CStruct tag mid' md attr a') a
-      -- CEnumType (CEnum mid mds attr a') a -> do
-      --   mid' <- _Just fa mid
-      --   mds' <- (_Just.folded._1) fa mds
-      --   return $ CEnumType (CEnum mid' mds' attr a') a
+    forwardTypeVars _ = \case
       a -> pure a
 
     typeVars :: Idents CTypeSpec
     typeVars fa = \case
       CEnumType (CEnum mid mds attr a') a -> do
+        mid' <- case mds of
+          Just _ -> pure mid
+          Nothing -> _Just fa mid
         mds' <- (_Just.folded._2._Just.exprVars) fa mds
-        return $ CEnumType (CEnum mid mds' attr a') a
+        return $ CEnumType (CEnum mid' mds' attr a') a
       CSUType (CStruct tag mid md attr a') a -> do
         mid' <- case md of
           Just _ -> pure mid
@@ -322,27 +330,31 @@ uses (RCTranslUnit -> c) =
       cosmosOf exprs._CVar._1
 
 defuses :: CTranslUnit -> [Edge Ident [Int]]
-defuses c = []
+defuses c = do
+  (i, x) <- uses c
+  case Map.lookup i m of
+    Just defs' ->
+      return $ Edge x (firstPrevious x defs') i
+    Nothing  -> mzero
   where
-    u = uses c
-    d = defs c
+    m :: Map.Map Ident [[Int]]
+    m = defs c
 
+    firstPrevious x ds =
+      L.maximumBy (comparing fn) ds
+      where
+        fn d
+          | L.isSuffixOf x d =
+            (0, -1)
+          | otherwise =
+            ( L.length . L.takeWhile id . zipWith (==) (reverse x) $ reverse d
+            , head d
+            )
 
 cEdges :: CTranslUnit -> [Edge () [Int]]
 cEdges ctu = do
-  variableEdges ++ labelEdges
+  map (first (const ())) (defuses ctu) ++ labelEdges
   where
-    variableEdges = do
-      (NE.toList -> fi, ident) <- func ++ stms ++ decl
-      traceM $ "types: " ++ show (Map.toList types & traverse._1 %~ identToString)
-      traceM $ "func: " ++ makeNice func
-      traceM $ "stms: " ++ makeNice stms
-      traceM $ "decl: " ++ makeNice decl
-      case Map.lookup ident types of
-        Just etos ->
-          return $ Edge fi (getLargestPrefix fi etos) ()
-        Nothing  -> mzero
-
     labelEdges = do
       traceM $ "labels: " ++ show (Map.toList labels & traverse._1 %~ identToString)
       traceM $ "usages: " ++ makeNice labelUsages
@@ -365,57 +377,6 @@ cEdges ctu = do
                     )
           )
         etos
-
-    types :: Map.Map Ident [[Int]]
-    types =
-      fmap (($ []) . appEndo)
-      . Map.fromListWith (<>)
-      . map (\(i, a) -> (a, Endo (NE.toList i:)))
-      $ ctu' ^@..
-       ( ( getting iters._RCDecl <.
-           cosmosOf deepdecl.
-          _CDecl.(
-             _1.folded._CTypeSpec.(
-                 _CSUType._1._CStruct._2._Just
-             )
-             <>
-             _2.folded._1._Just._CDeclr._1._Just
-             )
-         ) <>
-         ( getting iters._RCFunDef <.
-           _CFunDef._2.defs
-         )
-       )
-
-    defs :: Fold CDeclr Ident
-    defs = cosmosOf deepdeclr . (_CDeclr._1._Just)
-
-
-    func = ctu' ^@..
-      getting iters._RCFunDef._CFunDef <.
-      ( _1.folded._TypeId
-        <> _2._CDeclr._2
-        .folded._CFunDeclr._1._Right
-        ._1.folded._CDecl
-        ._1.folded._TypeId
-      )
-
-    stms = ctu' ^@..
-      getting iters._RCStat <. cosmosOnOf statExprs exprs . _CVar . _1
-
-    decl = ctu' ^@..
-      getting iters._RCDecl <.
-      (cosmosOf deepdecl.
-       ( _CDecl._1.folded._TypeId
-       <> cosmosOnOf declExprs exprs._CVar._1
-       )
-      )
-
-    _TypeId =
-      _CTypeSpec.
-      ( _CTypeDef._1
-      <> _CSUType._1._CStruct._2._Just
-      )
 
     labels =
       fmap (($ []) . appEndo)

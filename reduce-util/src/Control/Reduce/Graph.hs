@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns        #-}
+{-# LANGUAGE DeriveFunctor        #-}
 {-# LANGUAGE FlexibleInstances        #-}
 {-# LANGUAGE DeriveGeneric        #-}
 {-# LANGUAGE LambdaCase          #-}
@@ -70,6 +71,7 @@ import           Data.Foldable
 import qualified Data.List                   as L
 import           Data.Maybe                  (catMaybes)
 import           Data.Void
+import           Data.Bifunctor
 
 -- import Debug.Trace
 
@@ -103,7 +105,11 @@ type Vertex = Int
 
 -- | An `Edge`
 data Edge e n = Edge !n !n !e
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, Functor)
+
+instance Bifunctor Edge where
+  first f (Edge a b e) = (Edge a b (f e))
+  second = fmap
 
 -- | A `Node` is a label, and a list of edges.
 data Node e n = Node

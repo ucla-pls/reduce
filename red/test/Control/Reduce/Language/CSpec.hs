@@ -2,7 +2,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Control.Reduce.Language.CSpec where
 
-import Data.ByteString as BS
+-- base
+import qualified Data.List.NonEmpty as NE
+import Data.Bifunctor
 
 -- text
 import qualified Data.Text as Text
@@ -20,12 +22,10 @@ import NeatInterpolation (text)
 -- red
 import Control.Reduce.Language.C
 import Control.Reduce.Reduction
+import Control.Reduce.Graph
 
--- map
+-- containers
 import qualified Data.Map.Strict as Map
-
--- base
-import qualified Data.List.NonEmpty as NE
 
 import SpecHelper
 
@@ -42,6 +42,8 @@ spec = do
         shouldMatchList (fmap (over _1 identToString) . Map.toList $ defs ex) l
   let hasUses l = it "has uses" $ \ex ->
         shouldMatchList (fmap (over _1 identToString) $ uses ex) l
+  let hasDefUses l = it "has def-uses" $ \ex ->
+        shouldMatchList (fmap (first identToString) $ defuses ex) l
 
   describeC "an empty file"
     [text|
@@ -49,6 +51,7 @@ spec = do
     hasItems []
     hasDefs []
     hasUses []
+    hasDefUses []
 
 
   describeC "a single function"
@@ -57,6 +60,7 @@ spec = do
     hasItems [[0]]
     hasDefs [("f", [[0]])]
     hasUses []
+    hasDefUses []
 
 
   describeC "functions with declarations and definitions"
@@ -67,6 +71,7 @@ spec = do
     hasItems [[0], [1], [2], [0, 2]]
     hasDefs [("g", [[0],[1]]), ("f", [[2]])]
     hasUses [("g", [0,2])]
+    hasDefUses [Edge [0,2] [1] "g"]
 
 
   describeC "structs"
@@ -83,6 +88,26 @@ spec = do
       , ("two", [[2]])
       ]
     hasUses [("List", [1]), ("List", [2]), ("one", [2]) ]
+    hasDefUses
+      [ Edge [2] [1] "one"
+      , Edge [2] [1] "List"
+      , Edge [1] [0] "List"
+      ]
+
+  describeC "structs 2 "
+    [text| struct Const { int item; };
+           void f(struct Const a) {}
+         |] $ do
+    hasItems [[0], [1]]
+    hasDefs
+      [("Const", [[0]])
+      , ("item", [[0]])
+      , ("a", [[1]])
+      , ("f", [[1]])
+      ]
+    hasUses [("Const", [1])]
+    hasDefUses [Edge [1] [0] "Const" ]
+
 
   describeC "enums"
     [text| int a = 0;
@@ -99,15 +124,23 @@ spec = do
       , ("Maybe", [[2]])
       , ("x", [[3]])
       ]
-    hasUses [("a", [2]), ("Working", [3])]
+    hasUses [("a", [2]), ("Working", [3]), ("State", [3])]
+    hasDefUses
+      [ Edge [2] [0] "a"
+      , Edge [3] [2] "State"
+      , Edge [3] [2] "Working"
+      ]
 
   describeC "typedefs"
     [text| typedef int kmh;
            kmh speed = 0;
          |] $ do
-     hasItems [ [0], [1] ]
-     hasDefs [("kmh", [[0]]), ("speed", [[1]])]
-     hasUses [("kmh", [1])]
+    hasItems [ [0], [1] ]
+    hasDefs [("kmh", [[0]]), ("speed", [[1]])]
+    hasUses [("kmh", [1])]
+    hasDefUses
+      [ Edge [1] [0] "kmh"
+      ]
 
 defineC :: String -> Text.Text -> CTranslUnit
 defineC str bs =
