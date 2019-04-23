@@ -275,7 +275,7 @@ uses (RCTranslUnit -> c) =
   where
     stmtVars :: Idents CStat
     stmtVars =
-      cosmosOnOf statExprs exprs . _CVar . _1
+      statExprs . exprVars
 
     declVars :: Idents CDecl
     declVars =
@@ -283,13 +283,10 @@ uses (RCTranslUnit -> c) =
 
     funVars :: Idents CFunDef
     funVars =
-      _CFunDef.
-      ( _1.folded._CTypeSpec.typeVars
-        <> _2._CDeclr._2
-        .folded._CFunDeclr._1._Right
-        ._1.folded._CDecl
-        ._1.folded._CTypeSpec.typeVars
-      )
+      _CFunDef. ( _1.folded._CTypeSpec.typeVars <> _2.declrVars)
+
+    declrVars :: Idents CDeclr
+    declrVars = _CDeclr._2.folded._CFunDeclr._1._Right._1.folded.declVars
 
     declSnd :: Idents CDecl
     declSnd fa =
@@ -300,7 +297,8 @@ uses (RCTranslUnit -> c) =
           return $ CDecl specs' [] a
         CDecl specs xs a -> do
           specs' <- (folded._CTypeSpec.typeVars) fa specs
-          return $ CDecl specs' xs a
+          xs' <- (folded._1._Just.declrVars) fa xs
+          return $ CDecl specs' xs' a
         a -> pure a
 
     forwardTypeVars :: Idents CTypeSpec

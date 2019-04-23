@@ -72,4 +72,6 @@ tests:
     dependencies:
     - red
     - hspec
+    - hspec-core
     - neat-interpolation >= 0.3.2.4
+    - hspec-expectations-pretty-diff

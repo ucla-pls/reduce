@@ -34,6 +34,10 @@ describeC :: String -> Text.Text -> SpecWith CTranslUnit -> Spec
 describeC desc txt =
   before (return $ defineC "" txt) . describe desc
 
+fdescribeC :: String -> Text.Text -> SpecWith CTranslUnit -> Spec
+fdescribeC desc txt =
+  before (return $ defineC "" txt) . fdescribe desc
+
 spec :: Spec
 spec = do
   let hasItems l = it "has items" $ \ex ->
@@ -96,14 +100,31 @@ spec = do
 
   describeC "structs 2 "
     [text| struct Const { int item; };
-           void f(struct Const a) {}
+           void f(struct Const a) {
+             struct Const a1;
+             }
+         |] $ do
+    hasItems [[0], [1], [0, 1]]
+    hasDefs
+      [("Const", [[0]])
+      , ("item", [[0]])
+      , ("a", [[1]])
+      , ("a1", [[0, 1]])
+      , ("f", [[1]])
+      ]
+    hasUses [("Const", [1]), ("Const", [0, 1])]
+    hasDefUses [Edge [1] [0] "Const", Edge [0,1] [0] "Const"]
+
+  describeC "structs 3"
+    [text| struct Const { int item;} c;
+           struct Const x;
          |] $ do
     hasItems [[0], [1]]
     hasDefs
       [("Const", [[0]])
       , ("item", [[0]])
-      , ("a", [[1]])
-      , ("f", [[1]])
+      , ("c", [[0]])
+      , ("x", [[1]])
       ]
     hasUses [("Const", [1])]
     hasDefUses [Edge [1] [0] "Const" ]
@@ -131,15 +152,25 @@ spec = do
       , Edge [3] [2] "Working"
       ]
 
-  describeC "typedefs"
+  describeC "function"
     [text| typedef int kmh;
-           kmh speed = 0;
+           void f(kmh x);
          |] $ do
-    hasItems [ [0], [1] ]
-    hasDefs [("kmh", [[0]]), ("speed", [[1]])]
-    hasUses [("kmh", [1])]
+        hasItems [ [0], [1]]
+        hasDefs [("kmh", [[0]]), ("f", [[1]])]
+        hasUses [("kmh", [1])]
+
+  describeC "typedefs"
+    [text| typedef struct x kmh;
+           kmh speed = 0;
+           void f(kmh x);
+         |] $ do
+    hasItems [ [0], [1], [2]]
+    hasDefs [("kmh", [[0]]), ("speed", [[1]]), ("f", [[2]])]
+    hasUses [("kmh", [1]), ("kmh", [2]), ("x", [0]) ]
     hasDefUses
       [ Edge [1] [0] "kmh"
+      , Edge [2] [0] "kmh"
       ]
 
 defineC :: String -> Text.Text -> CTranslUnit
@@ -147,3 +178,10 @@ defineC str bs =
   case parseC (Text.encodeUtf8 bs) (initPos str) of
     Right x -> x
     Left m -> error $ show m
+
+
+newtype NeverEq a = NeverEq a
+  deriving (Show)
+
+instance Eq (NeverEq a) where
+  _ == _ = False
