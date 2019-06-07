@@ -160,7 +160,6 @@ binaryReduction (asMaybeGuard -> p) es =
 -- multiple minima. In that case there is a big difference between
 -- returning a single set of size N or 2 sets of size 1. We want to strive to
 -- return as small final set as possible.
---
 
 -- | Like a the binary reductor, but uses a generic cost function. Is functionally
 -- equivilent to 'binaryReduction' if the const function is 'List.length'.
@@ -249,10 +248,9 @@ splitSet n s =
 cases :: MonadPlus m => [m a] -> m a
 cases = msum
 
--- |
+-- | Take the solution if it exist.
 takeIfSolution :: Monad m => GuardM m a -> a -> m a
 takeIfSolution p a = runGuardM p a $> a
-
 
 -- ** Conversion
 -- | Transform a IReducer to a Reducer

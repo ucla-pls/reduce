@@ -34,9 +34,9 @@ describeC :: String -> Text.Text -> SpecWith CTranslUnit -> Spec
 describeC desc txt =
   before (return $ defineC "" txt) . describe desc
 
-fdescribeC :: String -> Text.Text -> SpecWith CTranslUnit -> Spec
-fdescribeC desc txt =
-  before (return $ defineC "" txt) . fdescribe desc
+-- fdescribeC :: String -> Text.Text -> SpecWith CTranslUnit -> Spec
+-- fdescribeC desc txt =
+--   before (return $ defineC "" txt) . fdescribe desc
 
 spec :: Spec
 spec = do

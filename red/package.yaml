@@ -50,7 +50,7 @@ library:
 executables:
   red:
     main:                Main.hs
-    source-dirs:         .
+    source-dirs:         app
     ghc-options:
       - -threaded
       - -rtsopts
@@ -73,5 +73,5 @@ tests:
     - red
     - hspec
     - hspec-core
-    - neat-interpolation >= 0.3.2.4
+    - neat-interpolation >= 0.3
     - hspec-expectations-pretty-diff

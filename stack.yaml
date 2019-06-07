@@ -1,9 +1,7 @@
-resolver: lts-13.13
+resolver: lts-12.26
 packages:
 - reduce
 - reduce-util
 - red
-- location:
-    git: https://github.com/kalhauge/dirtree
-    commit: 56b8163e10d322ac9beac35bef46ca2d76facb8d
-  extra-dep: true
+extra-deps:
+- dirtree-0.0.1

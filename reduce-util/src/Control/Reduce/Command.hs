@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs             #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
@@ -234,7 +235,6 @@ runCommandWithLogger workDir Command {..} a lg = do
           Nothing -> return ()
         tell "\n"
 
-
 -- | A command template. These templates contains information about how to run
 -- a command given an `CmdInput`.
 data CommandTemplate = CommandTemplate
@@ -313,7 +313,7 @@ instance Semigroup CmdArgument where
 
 parseCmdArgument :: String -> Either String CmdArgument
 parseCmdArgument arg =
-  first errorBundlePretty $ parse ((foldr1 (<>) <$> many cliArgumentP) <* eof) arg arg
+  parsePretty ((foldr1 (<>) <$> many cliArgumentP) <* eof) arg arg
   where
     cliArgumentP :: Parsec Void String CmdArgument
     cliArgumentP =
@@ -538,3 +538,11 @@ exitCodeToInt :: ExitCode -> Int
 exitCodeToInt = \case
   ExitSuccess -> 0
   ExitFailure n -> n
+
+parsePretty :: Parsec Void String a -> String -> String -> Either String a
+parsePretty parser name bs =
+#if MIN_VERSION_megaparsec(7,0,0)
+  first errorBundlePretty $ parse parser name bs
+#else
+  first parseErrorPretty $ parse parser name bs
+#endif

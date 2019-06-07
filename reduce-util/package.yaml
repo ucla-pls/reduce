@@ -43,10 +43,10 @@ dependencies:
 - containers
 - lens
 - vector
-- megaparsec >= 6.5.0 && < 7.1.0
+- megaparsec >= 6.5.0 && < 7.0.0
 - cassava
 - profunctors
-- dirtree >= 0.1.0
+- dirtree >= 0.0.1
 - free
 - aeson
 - unordered-containers

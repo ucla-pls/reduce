@@ -1,4 +1,5 @@
 {-# LANGUAGE ApplicativeDo       #-}
+{-# LANGUAGE OverloadedStrings       #-}
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE RankNTypes          #-}
@@ -21,6 +22,9 @@ import           Options.Applicative
 
 -- directory
 import           System.Directory
+
+-- text
+import qualified Data.Text as Text
 
 -- base
 import           Data.Char                        (toLower)
@@ -48,6 +52,7 @@ parseCommandTemplate =
   ( long "timelimit"
     <> short 'T'
     <> metavar "SECS"
+    <> hidden
     <> value (-1)
     <> showDefault
     <> help (
@@ -63,17 +68,22 @@ parseCommandTemplate =
 
 
 parsePredicateOptions :: Parser PredicateOptions
-parsePredicateOptions = do
-  predOptPreserveExitCode <-
-    not <$> switch (long "no-exitcode" <> help "ignore the exitcode.")
-
-  predOptPreserveStdout <-
-    switch (long "stdout" <> help "preserve stdout.")
-
-  predOptPreserveStderr <-
-    switch (long "stderr" <> help "preserve stderr.")
-
-  pure $ PredicateOptions {..}
+parsePredicateOptions = handler <$> option str
+  ( long "preserve"
+    <> short 'p'
+    <> help "a comma separated list of what to preserve. Choose from out, err, and exit. "
+    <> value "exit"
+    <> showDefault
+    <> hidden
+    )
+  where
+    handler input =
+      let ms = map Text.strip . Text.splitOn "," . Text.pack $ input
+      in PredicateOptions
+         { predOptPreserveExitCode = List.elem "exit" ms || List.elem "exitcode" ms
+         , predOptPreserveStdout = List.elem "out" ms || List.elem "stdout" ms
+         , predOptPreserveStderr = List.elem "err" ms || List.elem "stderr" ms
+         }
 
 data WorkFolder
   = TempWorkFolder !String
@@ -99,12 +109,16 @@ parseWorkFolder template = do
     ( long "work-folder"
       <> short 'W'
       <> help "the work folder."
+      <> hidden
       <> showDefault
     )
     <|> pure Nothing
 
-  useForce <-
-    switch ( long "force" <> short 'f' <> help "delete the work folder if it already exists." )
+  useForce <- switch $
+    long "force"
+    <> short 'f'
+    <> hidden
+    <> help "delete the work folder if it already exists."
 
   pure $ case workFolder of
     Just folder -> do
@@ -119,6 +133,7 @@ parseReductionOptions = do
       <> metavar "SECS"
       <> value (-1)
       <> showDefault
+      <> hidden
       <> help "the maximum seconds to run all predicates, negative means no timelimit."
 
   redOptMaxIterations <- option auto $
@@ -126,11 +141,13 @@ parseReductionOptions = do
     <> metavar "ITERS"
     <> value (-1)
     <> showDefault
+      <> hidden
     <> help "the maximum number of time to run the predicate, negative means no limit."
 
   redOptKeepFolders <- switch $
     long "keep-folders"
     <> short 'K'
+    <> hidden
     <> help "keep the work folders after use?"
 
   pure $ ReductionOptions {..}
@@ -147,33 +164,36 @@ parseReductionOptions = do
   --       <> showDefault)
 
 reducerNameFromString :: String -> Maybe ReducerName
-reducerNameFromString = \case
-  "ddmin" -> Just Ddmin
-  "linear" -> Just Linear
-  "binary" -> Just Binary
-  _ -> Nothing
+reducerNameFromString a
+  | match "ddmin" = Just Ddmin
+  | match "linear" = Just Linear
+  | match "binary" = Just Binary
+  | otherwise = Nothing
+  where
+    match = Text.isPrefixOf (Text.toLower . Text.pack $ a)
 
 parseReducerName :: Parser ReducerName
 parseReducerName =
   option (maybeReader (reducerNameFromString . map toLower))
   ( long "reducer"
     <> short 'R'
-    <> help "the reducing algorithm to use."
+    <> help "the reducing algorithm to use. Choose from ddmin, linear, or binary. (default: \"binary\")"
+    <> metavar "RED"
     <> value Binary
-    <> showDefault
   )
 
 parseLoggerConfig :: Parser LoggerConfig
 parseLoggerConfig =
   mklogger
   <$> ( parseLogLevel
-        <$> (length <$> many (flag' () (short 'v' <> help "make it more verbose.")))
-        <*> (length <$> many (flag' () (short 'q' <> help "make it more quiet.")))
+        <$> (length <$> many (flag' () (short 'v' <> hidden <> help "make it more verbose.")))
+        <*> (length <$> many (flag' () (short 'q' <> hidden <> help "make it more quiet.")))
       )
   <*> option auto
   ( short 'D'
     <> long "log-depth"
     <> help "set the log depth."
+    <> hidden
     <> value (-1)
     <> showDefault
   )

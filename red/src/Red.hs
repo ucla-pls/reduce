@@ -152,11 +152,12 @@ makeLenses ''Config
 
 getConfigParser :: Parser (IO Config)
 getConfigParser = do
-  _cnfInputFile <- strArgument $
-    metavar "INPUT" <> help "the input file or folder"
 
   _cnfOutputFile <- optional . strOption $
     long "output-file"
+    <> hidden
+    <> metavar "OUTPUT"
+    <> help "specifies where to put the output"
     <> short 'o'
 
   _cnfLoggerConfig <-
@@ -167,8 +168,8 @@ getConfigParser = do
 
   _cnfDependencies <- optional
     . strOption
-    $ long "dependencies"
-    <> short 'd'
+    $ long "deps"
+    <> hidden
     <> help "A csv file with edges between the dependencies. The headers should be 'from','to','label'."
 
   _cnfFormat <-
@@ -189,6 +190,9 @@ getConfigParser = do
   _cnfReductionOptions <-
     parseReductionOptions
 
+  _cnfInputFile <- strArgument $
+    metavar "INPUT" <> help "the input file or folder"
+
   ioCommand <-
     parseCommandTemplate
 
@@ -200,7 +204,6 @@ instance HasLogger Config where
   loggerL = cnfLoggerConfig
 
 main :: IO ()
-
 main = do
   setLocaleEncoding utf8
   config <- join . execParser $
@@ -266,10 +269,13 @@ run = do
 
       abred <- withLogger problemDesc >>= \case
           Just problem -> do
-            liftIO . print $ (expectation problem)
             case ff of
               Lines -> do
-                let p = meassure (counted "lines") $ liftProblem BLC.lines BLC.unlines problem
+                let p = case _cnfMetricType of
+                      Counted ->
+                        meassure (counted "lines") $ liftProblem BLC.lines BLC.unlines problem
+                      Displayed ->
+                        liftProblem BLC.lines BLC.unlines problem
                 case _cnfDependencies of
                   Just csvfile
                     | takeExtension csvfile == ".csv" ->
@@ -344,8 +350,6 @@ run = do
 
     DirFormat FileTree -> do
       dirtree <- liftIO $ readDirTree makeAbsolute _cnfInputFile
-
-      liftIO $ print dirtree
 
       let cmd = setup (inputDirTreeWith (flip createFileLink) "input")
             $ makeCommand _cnfCommand

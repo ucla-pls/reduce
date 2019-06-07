@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns        #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveFunctor        #-}
 {-# LANGUAGE FlexibleInstances        #-}
 {-# LANGUAGE DeriveGeneric        #-}
@@ -310,10 +311,17 @@ closuresN :: Ord n => Graph e n -> [ S.Set n ]
 closuresN g =
    map (unsafeLabeledSet g . IS.toList) $ closures g
 
+parsePretty :: Parsec Void T.Text a -> String -> T.Text -> Either String  a
+parsePretty parser name bs =
+#if MIN_VERSION_megaparsec(7,0,0)
+  first errorBundlePretty $ parse parser name bs
+#else
+  first parseErrorPretty $ parse parser name bs
+#endif
+
 -- | Read TGF
 readTGF :: String -> T.Text -> Either String (Graph T.Text T.Text)
-readTGF name bs =
-  either (Left . errorBundlePretty) Right $ parse parser name bs
+readTGF = parsePretty parser
   where
     parser :: Parsec Void T.Text (Graph T.Text T.Text)
     parser = do
