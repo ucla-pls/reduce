@@ -75,11 +75,6 @@ data DirFormat
   | FileTree
   deriving (Show, Read, Ord, Eq)
 
-data MetricType
-  = Counted
-  | Displayed
-  deriving (Show, Read, Ord, Eq)
-
 parseTreeStrategy :: Parser TreeStrategy
 parseTreeStrategy =
   toStrategy . map toLower
@@ -106,38 +101,21 @@ parseFormat =
     <> metavar "FORMAT"
   )
   where
-    toFormat str' =
-      let f = List.isPrefixOf str' in
-      if | f "lines" -> FileFormat Lines
-         | f "cfile" -> FileFormat CFile
-         | f "chars" -> FileFormat Chars
-         | f "json" -> FileFormat Json
-         | f "files" -> DirFormat Files
-         | f "filetree" -> DirFormat FileTree
-         | True ->
-           error $ "Unknown format " ++ str'
-
-parseMetricType :: Parser MetricType
-parseMetricType =
-  toMetricType . map toLower
-  <$> strOption
-  ( short 'm' <> value "counted"
-    <> showDefault <> help "the metric type of the input."
-    <> metavar "METRIC"
-  )
-  where
-    toMetricType str' =
-      let f = List.isPrefixOf str' in
-      if | f "counted" -> Counted
-         | f "displayed" -> Displayed
-         | True ->
-           error $ "Unknown metric type " ++ str'
+    toFormat str'
+      | f "lines" = FileFormat Lines
+      | f "cfile" = FileFormat CFile
+      | f "chars" = FileFormat Chars
+      | f "json" = FileFormat Json
+      | f "files" = DirFormat Files
+      | f "filetree" = DirFormat FileTree
+      | otherwise =
+        error $ "Unknown format " ++ str'
+      where f = List.isPrefixOf str'
 
 data Config = Config
   { _cnfInputFile        :: !FilePath
   , _cnfOutputFile       :: !(Maybe FilePath)
   , _cnfLoggerConfig     :: !LoggerConfig
-  , _cnfMetricType       :: !MetricType
   , _cnfDependencies     :: !(Maybe FilePath)
   , _cnfTreeStrategy     :: !TreeStrategy
   , _cnfFormat           :: !Format
@@ -163,14 +141,12 @@ getConfigParser = do
   _cnfLoggerConfig <-
     parseLoggerConfig
 
-  _cnfMetricType <-
-    parseMetricType
-
   _cnfDependencies <- optional
     . strOption
     $ long "deps"
+    <> metavar "CSV_FILE"
     <> hidden
-    <> help "A csv file with edges between the dependencies. The headers should be 'from','to','label'."
+    <> help "A csv file with edges between the dependencies. The headers should be 'from','to', and optionally 'label'."
 
   _cnfFormat <-
     parseFormat
@@ -203,8 +179,8 @@ getConfigParser = do
 instance HasLogger Config where
   loggerL = cnfLoggerConfig
 
-main :: IO ()
-main = do
+entry :: IO ()
+entry = do
   setLocaleEncoding utf8
   config <- join . execParser $
     A.info (getConfigParser <**> helper)
@@ -271,15 +247,11 @@ run = do
           Just problem -> do
             case ff of
               Lines -> do
-                let p = case _cnfMetricType of
-                      Counted ->
-                        meassure (counted "lines") $ liftProblem BLC.lines BLC.unlines problem
-                      Displayed ->
-                        liftProblem BLC.lines BLC.unlines problem
+                let p = meassure (counted "lines") $ liftProblem BLC.lines BLC.unlines problem
                 case _cnfDependencies of
                   Just csvfile
                     | takeExtension csvfile == ".csv" ->
-                      readEdgesCSV <$> liftIO (BLC.readFile csvfile) >>= \case
+                      readEdgesCSV () <$> liftIO (BLC.readFile csvfile) >>= \case
                         Left msg ->
                           logAndExit $ "Error while reading CSV file:\n" <> displayString msg
                         Right (edges' :: [Edge () BLC.ByteString]) -> do

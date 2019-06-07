@@ -144,11 +144,11 @@ parseReductionOptions = do
       <> hidden
     <> help "the maximum number of time to run the predicate, negative means no limit."
 
-  redOptKeepFolders <- switch $
-    long "keep-folders"
-    <> short 'K'
-    <> hidden
-    <> help "keep the work folders after use?"
+  -- redOptKeepFolders <- switch $
+  --   long "keep-folders"
+  --   <> short 'K'
+  --   <> hidden
+  --   <> help "keep the work folders after use?"
 
   pure $ ReductionOptions {..}
 

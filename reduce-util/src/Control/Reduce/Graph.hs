@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns        #-}
+{-# LANGUAGE OverloadedStrings        #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveFunctor        #-}
 {-# LANGUAGE FlexibleInstances        #-}
@@ -70,7 +71,7 @@ import           Control.Monad.ST
 import           Data.Char
 import           Data.Foldable
 import qualified Data.List                   as L
-import           Data.Maybe                  (catMaybes)
+import           Data.Maybe                  (catMaybes, fromMaybe)
 import           Data.Void
 import           Data.Bifunctor
 
@@ -348,17 +349,27 @@ readTGF = parsePretty parser
     skipSpace =
       void $ takeWhileP Nothing (== ' ')
 
-instance (C.FromField e, C.FromField n) => C.FromRecord (Edge e n) where
+instance (C.FromField e, C.FromField n) => C.FromRecord (Edge (Maybe e) n) where
+  parseRecord v
+    | length v == 2 =
+      Edge <$> v C..! 0 <*> v C..! 1 <*> pure Nothing
+    | length v == 3 =
+      Edge <$> v C..! 0 <*> v C..! 1 <*> (Just <$> v C..! 2)
+    | otherwise =
+      mzero
 
+instance (C.FromField e, C.FromField n) => C.FromNamedRecord (Edge (Maybe e) n) where
+  parseNamedRecord m =
+    Edge <$> m C..: "from" <*> m C..: "to" <*> ((Just <$> m C..: "label") <|> pure Nothing)
 
-  -- | Read a csv file of edges
-readEdgesCSV :: (C.FromField n, C.FromField e) => BL.ByteString -> Either String [Edge e n]
-readEdgesCSV bs = V.toList <$> C.decode C.HasHeader bs
+-- | Read a csv file of edges, given a default e to load if nothings is found in "label".
+readEdgesCSV :: (C.FromField n, C.FromField e) => e -> BL.ByteString -> Either String [Edge e n]
+readEdgesCSV e bs = V.toList . V.map (first $ fromMaybe e) . snd <$> C.decodeByName bs
 {-# INLINE readEdgesCSV #-}
 
 -- | Read a csv file of edges
-readCSV :: (C.FromField a, C.FromField b, Ord a) => [a] -> BL.ByteString -> Either String (Graph b a)
-readCSV nodes bs = do
-  x <- readEdgesCSV bs
+readCSV :: (C.FromField a, C.FromField b, Ord a) => b -> [a] -> BL.ByteString -> Either String (Graph b a)
+readCSV def nodes bs = do
+  x <- readEdgesCSV def bs
   return . fst $ buildGraphFromNodesAndEdges (map (\a -> (a,a)) nodes) x
 {-# INLINE readCSV #-}

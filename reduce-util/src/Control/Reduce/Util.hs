@@ -100,7 +100,7 @@ data ReducerName
 data ReductionOptions = ReductionOptions
   { redOptTotalTimeout  :: !Double
   , redOptMaxIterations :: !Int
-  , redOptKeepFolders   :: !Bool
+  -- , redOptKeepFolders   :: !Bool
   } deriving (Show, Eq)
 
 data ReductionException
