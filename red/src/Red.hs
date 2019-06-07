@@ -1,4 +1,5 @@
 {-# LANGUAGE ApplicativeDo       #-}
+{-# LANGUAGE GADTs       #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE MultiWayIf          #-}
 {-# LANGUAGE OverloadedStrings   #-}
@@ -47,40 +48,72 @@ import           Control.Reduce.Util.OptParse
 import Text.Pretty.Simple (pShow)
 
 -- base
-import           Data.Char
+import           Data.Char hiding (Format)
 import           Data.Functor
 import qualified Data.List                    as List
 import           System.Exit
 import           GHC.IO.Encoding (setLocaleEncoding, utf8)
 
-
 -- red
 import           Control.Reduce.Language.C
 
+data Config = Config
+  { _cnfInputFile        :: !FilePath
+  , _cnfOutputFile       :: !(Maybe FilePath)
+  , _cnfLoggerConfig     :: !LoggerConfig
+  , _cnfDependencies     :: !(Maybe FilePath)
+  , _cnfTreeStrategy     :: !TreeStrategy
+  , _cnfFormat           :: !(Maybe Format)
+  , _cnfReducerName      :: !ReducerName
+  , _cnfWorkFolder       :: !WorkFolder
+  , _cnfPredicateOptions :: !PredicateOptions
+  , _cnfReductionOptions :: !ReductionOptions
+  , _cnfCommand          :: !CommandTemplate
+  } deriving (Show)
 
-data Format
-  = FileFormat FileFormat
-  | DirFormat DirFormat
-  deriving (Show, Read, Ord, Eq)
 
-data FileFormat
-  = Chars
-  | Lines
-  | Json
-  | CFile
-  deriving (Show, Read, Ord, Eq)
+data Format = forall s a. Format
+  { formatName :: String
+  , formatRecognizer :: FilePath -> IO Bool
+  , formatReader :: FilePath -> IO a
+  , formatWriter :: FilePath -> a -> IO ()
+  , formatProblem :: Problem s a
+  }
 
-data DirFormat
-  = Files
-  | FileTree
-  deriving (Show, Read, Ord, Eq)
+instance Show Format where
+  show = formatName
+
+linesFormat :: Format
+linesFormat = Format
+  "lines"
+  (const (return True))
+  (fmap BLC.lines . BLC.readFile)
+  (\fp x -> BLC.writeFile fp (BLC.unlines x))
+
+
+predictFormat :: FilePath -> [Format] -> IO Format
+predictFormat fp = \case
+  format:rest -> do
+    b <- formatRecognizer format fp
+    if b
+      then return format
+      else predictFormat fp rest
+  [] -> error $ "Could not find a matching format for " ++ show fp
+
+makeLenses ''Config
 
 parseTreeStrategy :: Parser TreeStrategy
 parseTreeStrategy =
   toStrategy . map toLower
   <$> strOption
-  ( short 'T' <> long "tree-strategy" <> value "graph"
-    <> showDefault <> help "the reduction strategy for tree structures."
+  ( short 's'
+    <> long "strategy"
+    <> value "graph"
+    <> hidden
+    <> showDefault <> help (
+      "the reduction strategy for tree structures "
+      ++ "(graph, hdd, flat)."
+      )
     <> metavar "STRATEGY"
   )
   where
@@ -92,51 +125,52 @@ parseTreeStrategy =
          | True ->
            error $ "Unknown format " ++ str'
 
-parseFormat :: Parser Format
-parseFormat =
-  toFormat . map toLower
-  <$> strOption
-  ( short 'F' <> long "format" <> value "lines"
-    <> showDefault <> help "the format of the input."
-    <> metavar "FORMAT"
-  )
-  where
-    toFormat str'
-      | f "lines" = FileFormat Lines
-      | f "cfile" = FileFormat CFile
-      | f "chars" = FileFormat Chars
-      | f "json" = FileFormat Json
-      | f "files" = DirFormat Files
-      | f "filetree" = DirFormat FileTree
-      | otherwise =
-        error $ "Unknown format " ++ str'
-      where f = List.isPrefixOf str'
-
-data Config = Config
-  { _cnfInputFile        :: !FilePath
-  , _cnfOutputFile       :: !(Maybe FilePath)
-  , _cnfLoggerConfig     :: !LoggerConfig
-  , _cnfDependencies     :: !(Maybe FilePath)
-  , _cnfTreeStrategy     :: !TreeStrategy
-  , _cnfFormat           :: !Format
-  , _cnfReducerName      :: !ReducerName
-  , _cnfWorkFolder       :: !WorkFolder
-  , _cnfPredicateOptions :: !PredicateOptions
-  , _cnfReductionOptions :: !ReductionOptions
-  , _cnfCommand          :: !CommandTemplate
-  } deriving (Show)
-
-makeLenses ''Config
-
-getConfigParser :: Parser (IO Config)
-getConfigParser = do
-
-  _cnfOutputFile <- optional . strOption $
-    long "output-file"
+parseFormat :: [Format] -> Parser (Maybe Format)
+parseFormat formats = do
+  name <- optional . strOption $
+    long "format"
+    <> value (formatName . last $ formats)
+    <> showDefaultWith id
     <> hidden
-    <> metavar "OUTPUT"
-    <> help "specifies where to put the output"
-    <> short 'o'
+    <> help (
+      "force the format of the input, otherwise it will automatically choose " ++
+      "(" ++ List.intercalate ", " names ++ ")"
+      ++ "."
+    )
+    <> metavar "FORMAT"
+  pure (select name)
+  where
+    names = map formatName formats
+
+    select = \case
+      Just n ->
+        List.find (List.isPrefixOf (map toLower n). formatName) formats
+      Nothing -> Nothing
+
+
+  -- toFormat . map toLower
+  -- <$> strOption
+  -- ( short 'F' <> long "format" <> value "lines"
+  --   <> showDefault <> help "the format of the input."
+  --   <> metavar "FORMAT"
+  -- )
+  -- where
+  --   toFormat str'
+  --     | f "lines" = FileFormat Lines
+  --     | f "cfile" = FileFormat CFile
+  --     | f "chars" = FileFormat Chars
+  --     | f "json" = FileFormat Json
+  --     | f "files" = DirFormat Files
+  --     | f "filetree" = DirFormat FileTree
+  --     | otherwise =
+  --       error $ "Unknown format " ++ str'
+  --     where f = List.isPrefixOf str'
+
+
+getConfigParser :: [Format] ->  Parser (IO Config)
+getConfigParser formats = do
+  _cnfOutputFile <-
+    parseOutputFile
 
   _cnfLoggerConfig <-
     parseLoggerConfig
@@ -149,7 +183,7 @@ getConfigParser = do
     <> help "A csv file with edges between the dependencies. The headers should be 'from','to', and optionally 'label'."
 
   _cnfFormat <-
-    parseFormat
+    parseFormat formats
 
   _cnfTreeStrategy <-
     parseTreeStrategy
@@ -182,212 +216,218 @@ instance HasLogger Config where
 entry :: IO ()
 entry = do
   setLocaleEncoding utf8
+
+  let formats =
+        [ linesFormat
+        ]
+
   config <- join . execParser $
-    A.info (getConfigParser <**> helper)
+    A.info (getConfigParser formats <**> helper)
     ( fullDesc
     <> header "red"
     <> progDesc "A command line tool for reducing almost anything."
     )
-  runReaderT run config
 
-run :: ReaderT Config IO ()
-run = do
+  runReaderT (run formats) config
+
+run :: [Format] -> ReaderT Config IO ()
+run formats = do
   Config {..} <- ask
 
-  withWorkFolder _cnfWorkFolder $ \workfolder ->
-    L.info ("Work folder: " <> display workfolder) >> case _cnfFormat of
-    FileFormat CFile -> do
-      (cedges, cfile') <- (liftIO $ parseCFilePre _cnfInputFile) >>= \case
-        Right p ->
-          return (cEdges p,  p)
-        Left msg ->
-          logAndExit (display msg)
+  withWorkFolder _cnfWorkFolder $ \workfolder -> do
+    L.info ("Work folder: " <> display workfolder)
 
-      trace . displayText $ pShow (cfile' $> ())
-      trace . displayText $ pShow (debuglst (RCTranslUnit cfile'))
-      trace $ display cedges
+    format <- case _cnfFormat of
+      Just f -> return f
+      Nothing -> liftIO $ predictFormat _cnfInputFile formats
 
-      let cfile = RCTranslUnit cfile'
+    runFormat format
 
-      let
-        cmd = setup (inputFile (takeFileName _cnfInputFile) . printCFile ) $ makeCommand _cnfCommand
-        problemDesc = setupProblem
-          _cnfPredicateOptions
-          (workfolder </> "baseline")
-          cmd cfile
+runFormat :: Format -> ReaderT Config IO ()
+runFormat format@Format {..} = do
+  Config {..} <- ask
+  a <- liftIO $ formatReader _cnfInputFile
 
-      problem <- withLogger problemDesc >>= \case
-        Just problem -> return
-          . meassure (counted "tokens")
-          . toReductionTree cR
-          $ problem
-        Nothing ->
-          logAndExit "Could not satisfy baseline"
+  output <- findOutputFile _cnfInputFile _cnfOutputFile
+  L.phase ("Writing output to file " <> display output) $ do
+    liftIO $ formatWriter output a
 
-      result <- handleErrors =<< withLogger
-        ( runReduction
-          _cnfReductionOptions
-          (workfolder </> "iterations")
-          (treeStrategy cedges _cnfTreeStrategy _cnfReducerName)
-          problem
-        )
+--   withWorkFolder _cnfWorkFolder $ \workfolder ->
+--     L.info ("Work folder: " <> display workfolder) >> case _cnfFormat of
+--     FileFormat CFile -> do
+--       (cedges, cfile') <- (liftIO $ parseCFilePre _cnfInputFile) >>= \case
+--         Right p ->
+--           return (cEdges p,  p)
+--         Left msg ->
+--           logAndExit (display msg)
 
-      output <- findOutputFile _cnfInputFile _cnfOutputFile
-      L.phase ("Writing output to file " <> display output) $ do
-        liftIO $ BLC.writeFile output (printCFile result)
+--       trace . displayText $ pShow (cfile' $> ())
+--       trace . displayText $ pShow (debuglst (RCTranslUnit cfile'))
+--       trace $ display cedges
 
-    FileFormat ff -> do
-      bs <- liftIO $ BLC.readFile _cnfInputFile
+--       let cfile = RCTranslUnit cfile'
 
-      let
-        cmd = setup (inputFile (takeFileName _cnfInputFile)) $ makeCommand _cnfCommand
-        problemDesc = setupProblem _cnfPredicateOptions (workfolder </> "baseline") cmd bs
+--       let
+--         cmd = setup (inputFile (takeFileName _cnfInputFile) . printCFile ) $ makeCommand _cnfCommand
+--         problemDesc = setupProblem
+--           _cnfPredicateOptions
+--           (workfolder </> "baseline")
+--           cmd cfile
 
-      abred <- withLogger problemDesc >>= \case
-          Just problem -> do
-            case ff of
-              Lines -> do
-                let p = meassure (counted "lines") $ liftProblem BLC.lines BLC.unlines problem
-                case _cnfDependencies of
-                  Just csvfile
-                    | takeExtension csvfile == ".csv" ->
-                      readEdgesCSV () <$> liftIO (BLC.readFile csvfile) >>= \case
-                        Left msg ->
-                          logAndExit $ "Error while reading CSV file:\n" <> displayString msg
-                        Right (edges' :: [Edge () BLC.ByteString]) -> do
-                          red <- intsetReduction <$> view cnfReducerName
-                          return $ AbstractProblem red (toClosures edges' p)
-                    | otherwise ->
-                      logAndExit ("Unknown dependency format " <> displayString csvfile)
-                  Nothing -> do
-                    red <- listReduction <$> view cnfReducerName
-                    return $ AbstractProblem red p
-              Chars -> do
-                red <- listReduction <$> view cnfReducerName
-                return $ AbstractProblem red
-                  ( meassure (counted "chars") . toStringified id
-                    $ liftProblem BLC.unpack BLC.pack problem
-                  )
-              Json -> do
-                return $ AbstractProblem (treeStrategy [] _cnfTreeStrategy _cnfReducerName)
-                  ( meassure (counted "subtrees")
-                    . toReductionTree jsonR
-                    . refineProblem (
-                      \s -> case decode s of
-                        Just v  -> (encode, v)
-                        Nothing -> fail "Could not decode the input"
-                      )
-                    $ problem
-                  )
-              CFile -> undefined
-          Nothing ->
-            logAndExit "Could not satisfy baseline"
+--       problem <- withLogger problemDesc >>= \case
+--         Just problem -> return
+--           . meassure (counted "tokens")
+--           . toReductionTree cR
+--           $ problem
+--         Nothing ->
+--           logAndExit "Could not satisfy baseline"
 
-      result <- handleErrors =<< withLogger
-        ( runAbstractProblem _cnfReductionOptions (workfolder </> "iterations") abred )
+--       result <- handleErrors =<< withLogger
+--         ( runReduction
+--           _cnfReductionOptions
+--           (workfolder </> "iterations")
+--           (treeStrategy cedges _cnfTreeStrategy _cnfReducerName)
+--           problem
+--         )
 
-      output <- findOutputFile _cnfInputFile _cnfOutputFile
-      L.phase ("Writing output to file " <> display output) $ do
-        liftIO $ BLC.writeFile output result
+--       output <- findOutputFile _cnfInputFile _cnfOutputFile
+--       L.phase ("Writing output to file " <> display output) $ do
+--         liftIO $ BLC.writeFile output (printCFile result)
 
-    DirFormat Files -> do
-      dirtree <- liftIO $ readDirTree return _cnfInputFile
+--     FileFormat ff -> do
+--       bs <- liftIO $ BLC.readFile _cnfInputFile
 
-      dir <- case dirTreeNode dirtree of
-        Directory dir -> return $ dir
-        _             -> logAndExit "File not a folder"
+--       let
+--         cmd = setup (inputFile (takeFileName _cnfInputFile)) $ makeCommand _cnfCommand
+--         problemDesc = setupProblem _cnfPredicateOptions (workfolder </> "baseline") cmd bs
 
-      let cmd = setup (inputDirectoryWith (flip createFileLink) "input")
-            $ makeCommand _cnfCommand
+--       abred <- withLogger problemDesc >>= \case
+--           Just problem -> do
+--             case ff of
+--               Lines -> do
+--                 let p = meassure (counted "lines") $ liftProblem BLC.lines BLC.unlines problem
+--                 case _cnfDependencies of
+--                   Just csvfile
+--                     | takeExtension csvfile == ".csv" ->
+--                       readEdgesCSV () <$> liftIO (BLC.readFile csvfile) >>= \case
+--                         Left msg ->
+--                           logAndExit $ "Error while reading CSV file:\n" <> displayString msg
+--                         Right (edges' :: [Edge () BLC.ByteString]) -> do
+--                           red <- intsetReduction <$> view cnfReducerName
+--                           return $ AbstractProblem red (toClosures edges' p)
+--                     | otherwise ->
+--                       logAndExit ("Unknown dependency format " <> displayString csvfile)
+--                   Nothing -> do
+--                     red <- listReduction <$> view cnfReducerName
+--                     return $ AbstractProblem red p
+--               Chars -> do
+--                 red <- listReduction <$> view cnfReducerName
+--                 return $ AbstractProblem red
+--                   ( meassure (counted "chars") . toStringified id
+--                     $ liftProblem BLC.unpack BLC.pack problem
+--                   )
+--               Json -> do
+--                 return $ AbstractProblem (treeStrategy [] _cnfTreeStrategy _cnfReducerName)
+--                   ( meassure (counted "subtrees")
+--                     . toReductionTree jsonR
+--                     . refineProblem (
+--                       \s -> case decode s of
+--                         Just v  -> (encode, v)
+--                         Nothing -> fail "Could not decode the input"
+--                       )
+--                     $ problem
+--                   )
+--               CFile -> undefined
+--           Nothing ->
+--             logAndExit "Could not satisfy baseline"
 
-      problem <- withLogger
-        ( setupProblem _cnfPredicateOptions (workfolder </> "baseline") cmd dir ) >>= \case
-        Just problem ->
-          return
-          . meassure (counted "files")
-          . toStringified (\(key, _) -> last . show . length $ key)
-          . liftProblem toDeepFileList fromDeepFileList
-          $ problem
-        Nothing ->
-          logAndExit "Could not satisfy baseline"
+--       result <- handleErrors =<< withLogger
+--         ( runAbstractProblem _cnfReductionOptions (workfolder </> "iterations") abred )
 
-      red <- listReduction <$> view cnfReducerName
+--       output <- findOutputFile _cnfInputFile _cnfOutputFile
+--       L.phase ("Writing output to file " <> display output) $ do
+--         liftIO $ BLC.writeFile output result
 
-      result <- handleErrors =<< (withLogger $
-        runReduction _cnfReductionOptions (workfolder </> "iterations") red problem)
+--     DirFormat Files -> do
+--       dirtree <- liftIO $ readDirTree return _cnfInputFile
 
-      output <- findOutputFile _cnfInputFile _cnfOutputFile
-      L.phase ("Writing output to directory " <> display output) $ do
-        liftIO . writeDirTree (flip copyFile) output . directory $ result
+--       dir <- case dirTreeNode dirtree of
+--         Directory dir -> return $ dir
+--         _             -> logAndExit "File not a folder"
 
-    DirFormat FileTree -> do
-      dirtree <- liftIO $ readDirTree makeAbsolute _cnfInputFile
+--       let cmd = setup (inputDirectoryWith (flip createFileLink) "input")
+--             $ makeCommand _cnfCommand
 
-      let cmd = setup (inputDirTreeWith (flip createFileLink) "input")
-            $ makeCommand _cnfCommand
+--       problem <- withLogger
+--         ( setupProblem _cnfPredicateOptions (workfolder </> "baseline") cmd dir ) >>= \case
+--         Just problem ->
+--           return
+--           . meassure (counted "files")
+--           . toStringified (\(key, _) -> last . show . length $ key)
+--           . liftProblem toDeepFileList fromDeepFileList
+--           $ problem
+--         Nothing ->
+--           logAndExit "Could not satisfy baseline"
 
-      problem <- withLogger
-        ( setupProblem _cnfPredicateOptions (workfolder </> "baseline")
-          cmd
-          dirtree
-        ) >>= \case
-        Just problem -> do
-          return
-            ( meassure (counted "files and folders")
-              . toReductionTree dirtreeR
-              $ problem
-            )
-        Nothing ->
-          logAndExit "Could not satisfy baseline"
+--       red <- listReduction <$> view cnfReducerName
 
-      result <- handleErrors =<< withLogger
-        ( runReduction
-          _cnfReductionOptions
-          (workfolder </> "iterations")
-          (treeStrategy [] _cnfTreeStrategy _cnfReducerName)
-          problem
-        )
+--       result <- handleErrors =<< (withLogger $
+--         runReduction _cnfReductionOptions (workfolder </> "iterations") red problem)
 
-      output <- findOutputFile _cnfInputFile _cnfOutputFile
-      L.phase ("Writing output to file " <> display output) $ do
-        liftIO . writeDirTree (flip copyFile) output $ result
+--       output <- findOutputFile _cnfInputFile _cnfOutputFile
+--       L.phase ("Writing output to directory " <> display output) $ do
+--         liftIO . writeDirTree (flip copyFile) output . directory $ result
 
-  where
-    handleErrors (s, r) = do
-      case s of
-        Just ReductionTimedOut ->
-          L.warn "Reduction timed out"
-        Just ReductionIterationsExceeded ->
-          L.warn "The max iterations reached while reducing"
-        Just ReductionFailed ->
-          L.warn "No reduction possible"
-        Nothing ->
-          return ()
-      return r
+--     DirFormat FileTree -> do
+--       dirtree <- liftIO $ readDirTree makeAbsolute _cnfInputFile
 
-    findOutputFile input = \case
-      Just output -> return output
-      Nothing -> do
-        let endings = "orig":[ "v" ++ show i | i <- [(1 :: Int)..]]
-        newpath <- liftIO $ firstEnding endings
-        L.debug $ "Copying input file to " <> display newpath
-        liftIO $ renamePath input newpath
-        return input
+--       let cmd = setup (inputDirTreeWith (flip createFileLink) "input")
+--             $ makeCommand _cnfCommand
 
-      where
-        firstEnding (e:rest) = do
-          a <- doesPathExist (input <.> e)
-          if a
-          then firstEnding rest
-          else return (input <.> e)
-        firstEnding [] =
-          undefined
+--       problem <- withLogger
+--         ( setupProblem _cnfPredicateOptions (workfolder </> "baseline")
+--           cmd
+--           dirtree
+--         ) >>= \case
+--         Just problem -> do
+--           return
+--             ( meassure (counted "files and folders")
+--               . toReductionTree dirtreeR
+--               $ problem
+--             )
+--         Nothing ->
+--           logAndExit "Could not satisfy baseline"
+
+--       result <- handleErrors =<< withLogger
+--         ( runReduction
+--           _cnfReductionOptions
+--           (workfolder </> "iterations")
+--           (treeStrategy [] _cnfTreeStrategy _cnfReducerName)
+--           problem
+--         )
+
+--       output <- findOutputFile _cnfInputFile _cnfOutputFile
+--       L.phase ("Writing output to file " <> display output) $ do
+--         liftIO . writeDirTree (flip copyFile) output $ result
+
+--   where
+--     handleErrors (s, r) = do
+--       case s of
+--         Just ReductionTimedOut ->
+--           L.warn "Reduction timed out"
+--         Just ReductionIterationsExceeded ->
+--           L.warn "The max iterations reached while reducing"
+--         Just ReductionFailed ->
+--           L.warn "No reduction possible"
+--         Nothing ->
+--           return ()
+--       return r
 
 
-logAndExit ::
-  (HasLogger env, MonadReader env m, MonadIO m)
-  => Builder.Builder
-  -> m b
-logAndExit bldr = do
-  L.err bldr
-  liftIO $ exitWith (ExitFailure 1)
+-- logAndExit ::
+--   (HasLogger env, MonadReader env m, MonadIO m)
+--   => Builder.Builder
+--   -> m b
+-- logAndExit bldr = do
+--   L.err bldr
+--   liftIO $ exitWith (ExitFailure 1)

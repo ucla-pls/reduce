@@ -204,6 +204,15 @@ parseLoggerConfig =
     parseLogLevel lvl quiet =
       boundedToEnum (2 - lvl + quiet)
 
+parseOutputFile :: Parser (Maybe FilePath)
+parseOutputFile =
+  optional . strOption $
+    long "output-file"
+    <> hidden
+    <> metavar "OUTPUT"
+    <> help "specifies where to put the output"
+    <> short 'o'
+
 
 boundedToEnum :: (Bounded a, Enum a) => Int -> a
 boundedToEnum i =

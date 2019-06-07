@@ -25,11 +25,12 @@ module Control.Reduce.Util
   , intsetReduction
   , setReduction
 
+  , findOutputFile
+
   , TreeStrategy (..)
   , treeStrategy
   , hddReduction
   , graphReduction
-
 
   , Strategy
   , runReduction
@@ -65,6 +66,10 @@ import qualified Data.ByteString.Lazy.Char8 as BLC
 -- mtl
 import           Control.Monad.Except
 import           Control.Monad.State
+import           Control.Monad.Reader
+
+-- filepath
+import           System.FilePath
 
 -- containers
 import qualified Data.IntSet                as IS
@@ -264,3 +269,22 @@ runReduction (ReductionOptions {..}) wf reduction p@(Problem {..}) = do
         modify (\(i, _) -> (i, a))
 
       f success
+
+findOutputFile :: (MonadIO m, L.HasLogger c, MonadReader c m) => FilePath -> Maybe FilePath -> m FilePath
+findOutputFile input = \case
+  Just output -> return output
+  Nothing -> do
+    let endings = "orig":[ "v" ++ show i | i <- [(1 :: Int)..]]
+    newpath <- liftIO $ firstEnding endings
+    L.info $ "Moving input file to " <> L.display newpath
+    liftIO $ renamePath input newpath
+    return input
+
+  where
+    firstEnding (e:rest) = do
+      a <- doesPathExist (input <.> e)
+      if a
+      then firstEnding rest
+      else return (input <.> e)
+    firstEnding [] =
+      undefined
