@@ -28,11 +28,20 @@ import           Control.Lens
 
 -- base
 import           Control.Monad
+import           Control.Monad.IO.Class
 import           Data.Functor
 import           Data.Maybe
 import qualified Data.List.NonEmpty as NE
 import           Data.Semigroup
 
+-- filepath
+import System.FilePath
+
+-- dirtree
+import  System.DirTree
+
+-- bytestring
+import qualified Data.ByteString.Lazy as BL
 
 -- containers
 import qualified Data.IntSet                as IS
@@ -45,39 +54,41 @@ import           Control.Reduce.Graph
 import           Control.Reduce.Metric
 import qualified Control.Reduce.Util.Logger as L
 
+type Input = DirTree Link BL.ByteString
+
 -- | A Problem is something that we can reduce, by running a program on with the
 -- correct inputs.
-data Problem s a = Problem
+data Problem s = Problem
   { initial     :: !s
-  , store       :: s -> a
+  , store       :: s -> Input
   , metric      :: AnyMetric s
   , expectation :: !Expectation
-  , command     :: !(Command a (Maybe CmdOutput))
+  , command     :: !(Command Input (Maybe CmdOutput))
   }
 
 -- | Update the problem. This is useful if some partial reduction was achieved.
-updateProblem :: (s -> s) -> Problem s a -> Problem s a
+updateProblem :: (s -> s) -> Problem s -> Problem s
 updateProblem fs p@Problem{..} = p { initial = fs initial }
 
 -- | Set the problem to a new begining value
-resetProblem :: s -> Problem s a -> Problem s a
+resetProblem :: s -> Problem s -> Problem s
 resetProblem s = updateProblem (const s)
 
 -- | Lift the problem to a new domain. Requires that the new domain is
 -- isomorphic to the original domain.
-liftProblem :: (s -> t) -> (t -> s) -> Problem s a -> Problem t a
+liftProblem :: (s -> t) -> (t -> s) -> Problem s -> Problem t
 liftProblem st ts =
   refineProblem ((ts,) . st)
 
 -- | Given the original definition of the problem, refine the problem.
-refineProblem :: (s -> (t -> s, t)) -> Problem s a -> Problem t a
+refineProblem :: (s -> (t -> s, t)) -> Problem s -> Problem t
 refineProblem f Problem {..} =
   Problem t (store . tf) (tf `contramap` metric) expectation command
   where
     (tf, t) = f initial
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
-toClosures :: Ord n => [Edge e n] -> Problem [n] b -> Problem [IS.IntSet] b
+toClosures :: Ord n => [Edge e n] -> Problem [n] -> Problem [IS.IntSet]
 toClosures edges' = refineProblem refined
   where
     refined items = (fs, closures graph)
@@ -87,7 +98,7 @@ toClosures edges' = refineProblem refined
 
 -- | Given a 'Reduction' from s given t, make the problem to reduce
 -- a list of t's with indicies.
-toReductionList :: Reduction s t -> Problem s b -> Problem (V.Vector (Maybe t)) b
+toReductionList :: Reduction s t -> Problem s -> Problem (V.Vector (Maybe t))
 toReductionList red =
   refineProblem $ \s ->
     ( flip (limiting red) s . (\v i -> maybe False (const True) $ v V.!? i)
@@ -95,14 +106,14 @@ toReductionList red =
     )
 
 -- | Get an inde
-toReductionTree' :: Reduction s s -> Problem s b -> Problem (S.Set (NE.NonEmpty Int)) b
+toReductionTree' :: Reduction s s -> Problem s -> Problem (S.Set (NE.NonEmpty Int))
 toReductionTree' red =
   refineProblem $ \s ->
     ( flip (limit $ treeReduction red) s . flip S.member
     , S.fromList $ indicesOf (treeReduction red) s
     )
 
-toReductionTree :: Reduction s s -> Problem s b -> Problem [[Int]] b
+toReductionTree :: Reduction s s -> Problem s -> Problem [[Int]]
 toReductionTree red =
   liftProblem
   (fmap NE.toList . S.toAscList)
@@ -110,15 +121,15 @@ toReductionTree red =
   . toReductionTree' red
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
-toIndexed :: Problem [a] b -> Problem [Int] b
+toIndexed :: Problem [a] -> Problem [Int]
 toIndexed = toIndexed' . toFixedLenght
 
 -- | Make the problem fixed length.
-toFixedLenght :: Problem [a] b -> Problem (V.Vector (Maybe a)) b
+toFixedLenght :: Problem [a] -> Problem (V.Vector (Maybe a))
 toFixedLenght = liftProblem (V.map Just . V.fromList) (catMaybes . V.toList)
 
 -- | Turn a problem of reducing maybe values to one of reducting a list of integers.
-toIndexed' :: Problem (V.Vector (Maybe a)) b -> Problem [Int] b
+toIndexed' :: Problem (V.Vector (Maybe a)) -> Problem [Int]
 toIndexed' Problem {..} =
   Problem indicies (store . displ) (displ `contramap` metric) expectation command
   where
@@ -127,26 +138,42 @@ toIndexed' Problem {..} =
    displ ids = nothings V.// [(i, join $ initial V.!? i) | i <- ids]
 
 -- | Create a stringed version that also measures the cl
-toStringified :: (a -> Char) -> Problem [a] b -> Problem [Int] b
+toStringified :: (a -> Char) -> Problem [a] -> Problem [Int]
 toStringified fx =
   toIndexed'
   . meassure (Stringify . V.toList . V.map (maybe '·' fx))
   . toFixedLenght
 
 -- | Add a metric to the problem
-meassure :: Metric r => (s -> r) -> Problem s a -> Problem s a
+meassure :: Metric r => (s -> r) -> Problem s -> Problem s
 meassure sr p =
   p { metric = addMetric sr . metric $ p }
 
 
--- | Setup the problem.
 setupProblem ::
+  FilePath
+  -> CommandTemplate
+  -> PredicateOptions
+  -> FilePath
+  -> L.Logger (Maybe (Problem Input))
+setupProblem inputf template opts workDir = do
+  dirtree <- L.phase "Reading inputs" $ do
+    liftIO $ readDirTree BL.readFile inputf
+
+  setupProblemFromCommand opts workDir
+    (setup (inputDirTree (takeBaseName inputf) ) $ makeCommand template)
+    dirtree
+  where
+
+
+-- | Setup the problem from a command.
+setupProblemFromCommand ::
   PredicateOptions
   -> FilePath
-  -> Command a (Maybe CmdOutput)
-  -> a
-  -> L.Logger (Maybe (Problem a a))
-setupProblem opts workDir cmd a =
+  -> Command Input (Maybe CmdOutput)
+  -> Input
+  -> L.Logger (Maybe (Problem Input))
+setupProblemFromCommand opts workDir cmd a =
   L.phase "Calculating Initial Problem" $
   (resultOutput <$> runCommand workDir cmd a) >>= \case
   Just output ->
@@ -155,9 +182,8 @@ setupProblem opts workDir cmd a =
   Nothing ->
     return Nothing
 
-
 checkSolution ::
-  Problem a b
+  Problem a
   -> FilePath
   -> a
   -> L.Logger (CmdResult (Maybe CmdOutput), Bool)

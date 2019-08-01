@@ -98,7 +98,7 @@ spec = do
   describe "readCSV" $ do
     it "can read a larger CSV formatted graph" $ do
       file <- BL.readFile "test/data/example-graph.csv"
-      let r = readCSV [0..16 :: Int] file
+      let r = readCSV () [0..16 :: Int] file
       case r of
         Left t -> do
           putStrLn t

@@ -5,11 +5,9 @@ module Control.Reduce.ReductionSpec where
 
 import           SpecHelper
 
-import           Control.Lens hiding ((.=))
-
-import           Control.Reduce.Reduction
-
-import           Data.Aeson
+-- import           Control.Lens hiding ((.=))
+-- import           Control.Reduce.Reduction
+-- import           Data.Aeson
 
 
 spec :: Spec
