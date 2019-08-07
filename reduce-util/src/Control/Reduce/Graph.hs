@@ -12,7 +12,7 @@
 Module      : Control.Reduce.Graph
 Description : A module for representing graphs
 Copyright   : (c) Christian Kalhauge
-License     : MIT
+License     : BSD3
 Maintainer  : kalhauge@cs.ucla.edu
 
 A module for handling graphs to do reduction. This module builds on the

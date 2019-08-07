@@ -74,18 +74,25 @@ newtype LoggerT m a =
 instance MonadUnliftIO m => MonadUnliftIO (LoggerT m) where
   withRunInIO inner = LoggerT $ withRunInIO $ \run -> inner (run . runLoggerT)
 
-
 type Logger = LoggerT IO
 
 withLogger :: (MonadReader env m, HasLogger env, MonadIO m) => LoggerT IO a -> m a
 withLogger m =
   liftIO . runReaderT (runLoggerT m) =<< view loggerL
 
+runLogger :: LoggerConfig -> Logger a -> IO a
+runLogger lc m =
+  liftIO $ runReaderT (runLoggerT m) lc
+
 defaultLogger :: LoggerConfig
 defaultLogger = LoggerConfig INFO 0 0 stderr (IndentionFormat "│ " "├ " "└ ") False
 
 silentLogger :: LoggerConfig
 silentLogger = defaultLogger { silent = True }
+
+withLoggerConfig :: Monad m => (LoggerConfig -> m a) -> LoggerT m a
+withLoggerConfig = LoggerT . ReaderT
+{-# INLINE withLoggerConfig #-}
 
 sPutStr :: MonadIO m => LoggerConfig -> m Builder.Builder -> m ()
 sPutStr LoggerConfig {..} m =

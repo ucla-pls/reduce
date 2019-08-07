@@ -68,7 +68,7 @@ data Config = Config
   , _cnfWorkFolder       :: !WorkFolder
   , _cnfPredicateOptions :: !PredicateOptions
   , _cnfReductionOptions :: !ReductionOptions
-  , _cnfCommand          :: !CommandTemplate
+  , _cnfCommand          :: !CmdTemplate
   } deriving (Show)
 
 
@@ -204,7 +204,7 @@ getConfigParser formats = do
     metavar "INPUT" <> help "the input file or folder"
 
   ioCommand <-
-    parseCommandTemplate
+    parseCmdTemplate
 
   pure $ do
     _cnfCommand <- either fail return =<< ioCommand

@@ -8,7 +8,7 @@
 {-|
 Module      : Control.Reduce.Util.OptParse
 Copyright   : (c) Christian Gram Kalhauge, 2018
-License     : MIT
+License     : BSD3
 Maintainer  : kalhauge@cs.ucla.edu
 
 This module contains the options parsers for the config files of
@@ -38,6 +38,7 @@ import           UnliftIO
 
 -- reduce-util
 import           Control.Reduce.Util
+import           Control.Reduce.Command
 import           Control.Reduce.Util.Logger
 
 data InputFrom
@@ -45,9 +46,9 @@ data InputFrom
   | FromFile FilePath
   deriving (Show, Eq)
 
-parseCommandTemplate :: Parser (IO (Either String CommandTemplate))
-parseCommandTemplate =
-  createCommandTemplate
+parseCmdTemplate :: Parser (IO (Either String CmdTemplate))
+parseCmdTemplate =
+  createCmdTemplate
   <$> option auto
   ( long "timelimit"
     <> short 'T'
@@ -128,7 +129,7 @@ parseWorkFolder template = do
 
 parseReductionOptions :: Parser (ReductionOptions)
 parseReductionOptions = do
-  redOptTotalTimeout <- option auto $
+  _redTotalTimelimit <- option auto $
     long "total-time"
       <> metavar "SECS"
       <> value (-1)
@@ -136,19 +137,32 @@ parseReductionOptions = do
       <> hidden
       <> help "the maximum seconds to run all predicates, negative means no timelimit."
 
-  redOptMaxIterations <- option auto $
+  _redMaxIterations <- option auto $
     long "max-iterations"
     <> metavar "ITERS"
     <> value (-1)
     <> showDefault
-      <> hidden
+    <> hidden
     <> help "the maximum number of time to run the predicate, negative means no limit."
 
-  -- redOptKeepFolders <- switch $
-  --   long "keep-folders"
-  --   <> short 'K'
-  --   <> hidden
-  --   <> help "keep the work folders after use?"
+  _redKeepFolders <- fmap not . switch $
+    long "remove-folders"
+    <> hidden
+    <> help "keep the work folders after use?"
+
+  _redMetricsFile <- strOption $
+    long "metrics-files"
+    <> hidden
+    <> showDefault
+    <> value "metrics.csv"
+    <> help "an absolute or relative to the work-folder path of the metric file"
+
+  _redPredicateTimelimit <- option auto $
+    long "timelimit"
+    <> hidden
+    <> showDefault
+    <> value (60)
+    <> help "the timelimit of the predicate in seconds, negative means no limit"
 
   pure $ ReductionOptions {..}
 

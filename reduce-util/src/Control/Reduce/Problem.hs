@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds           #-}
 {-# LANGUAGE DataKinds                 #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts          #-}
@@ -8,6 +9,7 @@
 {-# LANGUAGE RankNTypes                #-}
 {-# LANGUAGE RecordWildCards           #-}
 {-# LANGUAGE ScopedTypeVariables       #-}
+{-# LANGUAGE TemplateHaskell           #-}
 {-# LANGUAGE TupleSections             #-}
 {-|
 Module      : Control.Reduce.Problem
@@ -15,10 +17,52 @@ Copyright   : (c) Christian Gram Kalhauge, 2019
 License     : MIT
 Maintainer  : kalhauge@cs.ucla.edu
 
-This module defines a reduction problem.
+This module defines a reduction problem and how to run it.
 -}
 
-module Control.Reduce.Problem where
+module Control.Reduce.Problem
+  (
+
+  -- * Problem
+    Problem (..)
+
+  -- ** Constructors
+  , setupProblem
+  , PredicateOptions (..)
+
+  -- ** Run The Problem
+  , MonadReductor
+  , runReductionProblem
+  , checkSolution
+
+  , ReductionOptions (..)
+  , defaultReductionOptions
+
+  -- ** Combinators
+
+
+  -- * Expectation
+
+  , Expectation (..)
+  , checkExpectation
+  , zipExpectation
+
+  ) where
+
+-- base
+import           Control.Monad
+import           Control.Monad.IO.Class
+import           Control.Exception          (AsyncException (..))
+import           Data.Functor
+import           Data.Time
+import           Text.Printf
+import qualified Data.List.NonEmpty         as NE
+import           Data.Maybe
+import           Data.Semigroup
+
+-- unlifio
+import           UnliftIO
+import           UnliftIO.Directory
 
 -- vector
 import qualified Data.Vector                as V
@@ -26,44 +70,204 @@ import qualified Data.Vector                as V
 -- lens
 import           Control.Lens
 
--- base
-import           Control.Monad
-import           Control.Monad.IO.Class
-import           Data.Functor
-import           Data.Maybe
-import qualified Data.List.NonEmpty as NE
-import           Data.Semigroup
+-- mtl
+import           Control.Monad.Reader.Class
 
 -- filepath
-import System.FilePath
+import           System.FilePath
 
 -- dirtree
-import  System.DirTree
+import           System.DirTree
 
 -- bytestring
-import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Lazy       as BL
 
 -- containers
 import qualified Data.IntSet                as IS
 import qualified Data.Set                   as S
 
+-- mtl
+import Control.Monad.Reader
+
+-- reduce
+import           Control.Reduce
+
 -- reduce-util
 import           Control.Reduce.Command
-import           Control.Reduce.Reduction
 import           Control.Reduce.Graph
 import           Control.Reduce.Metric
+import           Control.Reduce.Reduction
 import qualified Control.Reduce.Util.Logger as L
 
-type Input = DirTree Link BL.ByteString
+-- | The reduction options
+data ReductionOptions = ReductionOptions
+  { _redTotalTimelimit    :: !Double
+  -- ^ The total (wall-clock) time in seconds to run the reduction problem
+  -- (negative means infinite)
+  , _redMaxIterations   :: !Int
+  -- ^ The max number of invocations of the predicate (negative means infinite)
+  , _redKeepFolders     :: !Bool
+  -- ^ Whether to keep the folders or not
+  , _redMetricsFile        :: !FilePath
+  -- ^ An absolute path to the metrics files, or relative to the work-folder
+  , _redPredicateTimelimit :: !Double
+  -- ^ the timelimit of a single run of the predicate in seconds.
+  } deriving (Show, Eq)
 
--- | A Problem is something that we can reduce, by running a program on with the
--- correct inputs.
+-- | The default reduction options
+--
+-- @
+-- defaultReductionOptions = ReductionOptions
+--   { _redTotalTimelimit = -1
+--   , _redMaxIterations = -1
+--   , _redKeepFolders = True
+--   , _redMetricsFile = "metrics.csv"
+--   , _redPredicateTimelimit = 60
+--   }
+-- @
+defaultReductionOptions :: ReductionOptions
+defaultReductionOptions = ReductionOptions
+  { _redTotalTimelimit = -1
+  , _redMaxIterations = -1
+  , _redKeepFolders = True
+  , _redMetricsFile = "metrics.csv"
+  , _redPredicateTimelimit = 60
+  }
+
+makeClassy ''ReductionOptions
+
+-- | A short hand for a monad reductor
+type MonadReductor env m =
+  (HasReductionOptions env, L.HasLogger env, MonadReader env m, MonadUnliftIO m)
+
+-- | `runReduction` is the main function of this package. It is a wrapper
+-- around a strategy to make it work with a problem.
+runReductionProblem ::
+  forall a env m.
+  MonadReductor env m
+  => FilePath
+  -- ^ The work directory
+  -> Reducer IO a
+  -- ^ The reducer to use on the problem
+  -> Problem a
+  -- ^ The `Problem` to reduce
+  -> m (Maybe ReductionException, a)
+runReductionProblem wf reducer p = do
+  opts <- view reductionOptions
+  start <- liftIO $ getCurrentTime
+  lc <- view L.loggerL
+
+  env <- ask
+
+  createDirectory wf
+  withCurrentDirectory wf . liftIO $ do
+    record <- setupMetric (metric p) (opts ^. redMetricsFile)
+    iterRef <- newIORef 1
+    succRef <- newIORef (initial p)
+
+    ee <- goWith (initial p) $ \a -> flip runReaderT env $ do
+      (fp, diff) <- checkTimeouts start iterRef opts
+
+      time <- liftIO $ getCurrentTime
+      L.info $ "Trying (Iteration " <> L.displayString fp <> ")"
+      L.debug $ displayAnyMetric (metric p) a
+
+      (judgment, result) <- checkSolution fp p a
+
+      L.info $ (L.displayString $ showJudgment judgment)
+
+      liftIO $ record (MetricRow a diff fp judgment result)
+
+      let success = judgment == Success
+
+      when success $ writeIORef succRef a
+      return success
+
+    m <- readIORef succRef
+    return $ case ee of
+      Left e ->
+        (Just e, m)
+      Right a ->
+        maybe (Just ReductionFailed, m) (Nothing,) a
+  where
+    goWith a f = liftIO $ do
+      catches (Right <$> reducer (PredicateM f) a)
+        [ Handler $ \case
+            UserInterrupt -> return $ Left ReductionInterupted
+            x -> throwIO x
+        , Handler (return . Left)
+        ]
+
+    checkTimeouts start iterRef ReductionOptions{..} = do
+      now <- liftIO $ getCurrentTime
+      let diff = now `diffUTCTime` start
+      when (0 < _redTotalTimelimit && _redTotalTimelimit < realToFrac diff) $
+        throwIO $ ReductionTimedOut
+
+      iteration <- atomicModifyIORef iterRef (\i -> (i + 1, i))
+      when (0 < _redMaxIterations && _redMaxIterations < iteration) $
+        throwIO $ ReductionIterationsExceeded
+
+      return (printf "%04d" iteration, diff)
+
+-- | A Reduction Exception
+data ReductionException
+  = ReductionTimedOut
+  -- ^ The reduction timed out.
+  | ReductionIterationsExceeded
+  -- ^ The number of iterations was exceeded.
+  | ReductionFailed
+  -- ^ The reduction failed to find a reduction.
+  | ReductionInterupted
+  -- ^ The reduction was interrupted.
+  deriving (Show, Eq, Ord)
+
+instance Exception ReductionException
+
+
+-- | Given a folder to run in, check that a problem has been solved with `a`.
+-- this function should be run in some workfolder
+checkSolution ::
+  MonadReductor env m
+  => FilePath
+  -> Problem a
+  -> a
+  -> m (Judgment, Maybe (CmdResult (Maybe CmdOutputSummary)))
+checkSolution fp Problem{..} a = do
+  timelimit <- view redPredicateTimelimit
+  keepFolders <- view redKeepFolders
+  case input a of
+    Just i -> do
+      res <- fmap snd <$> L.withLogger (runCommand fp timelimit command i)
+      when keepFolders (removePathForcibly fp)
+      let judgment = case resultOutput res of
+            Just m
+              | checkExpectation expectation m ->
+                Success
+              | otherwise ->
+                Failure
+            Nothing ->
+              Timeout
+      return (judgment, Just res)
+    Nothing -> do
+      return (Bad, Nothing)
+
+-- * The Problem Type
+
+
+-- | A `ReductionProblem` is something that we can reduce, by running a program
+-- on with the correct inputs.
 data Problem s = Problem
   { initial     :: !s
-  , store       :: s -> Input
+  -- ^ An initial value to start reducing
+  , input       :: s -> Maybe CmdInput
+  -- ^ An way of computing a CmdInput from the problem
   , metric      :: AnyMetric s
+  -- ^ An way of computing metrics of s
   , expectation :: !Expectation
-  , command     :: !(Command Input (Maybe CmdOutput))
+  -- ^ The expected output of the CmdInput
+  , command     :: !CmdTemplate
+  -- ^ The command template to run.
   }
 
 -- | Update the problem. This is useful if some partial reduction was achieved.
@@ -83,9 +287,70 @@ liftProblem st ts =
 -- | Given the original definition of the problem, refine the problem.
 refineProblem :: (s -> (t -> s, t)) -> Problem s -> Problem t
 refineProblem f Problem {..} =
-  Problem t (store . tf) (tf `contramap` metric) expectation command
+  Problem t (input . tf) (tf `contramap` metric) expectation command
   where
     (tf, t) = f initial
+
+setupProblemFromFile ::
+  MonadReductor env m
+  => FilePath
+  -> CmdTemplate
+  -> FilePath
+  -> m (Maybe (Problem CmdInput))
+setupProblemFromFile workDir template inputf = do
+  dirtree <- L.phase "Reading inputs" $ do
+    liftIO $ readDirTree BL.readFile inputf
+
+  setupProblem workDir template (inputFromDirTree (takeBaseName inputf) dirtree)
+
+-- | Setup the problem from a command.
+setupProblem ::
+  MonadReductor env m
+  => FilePath
+  -> CmdTemplate
+  -> CmdInput
+  -> m (Maybe (Problem CmdInput))
+setupProblem workDir template a =
+  L.phase "Calculating Initial Problem" $
+  (resultOutput <$> runCommand workDir template a) >>= \case
+  Just output ->
+    return . Just
+    $ Problem a id emptyMetric (zipExpectation opts output) template
+  Nothing ->
+    return Nothing
+
+
+-- * Problem Refinements
+
+-- | Get an indexed list of elements, this enables us to differentiate between stuff.
+toIndexed :: Problem [a] -> Problem [Int]
+toIndexed = toIndexed' . toFixedLenght
+
+-- | Make the problem fixed length.
+toFixedLenght :: Problem [a] -> Problem (V.Vector (Maybe a))
+toFixedLenght = liftProblem (V.map Just . V.fromList) (catMaybes . V.toList)
+
+-- | Turn a problem of reducing maybe values to one of reducting a list of integers.
+toIndexed' :: Problem (V.Vector (Maybe a)) -> Problem [Int]
+toIndexed' Problem {..} =
+  Problem indicies (input . displ) (displ `contramap` metric) expectation command
+  where
+   nothings = V.map (const Nothing) initial
+   indicies = V.toList . V.map fst . V.indexed $ initial
+   displ ids = nothings V.// [(i, join $ initial V.!? i) | i <- ids]
+
+-- | Create a stringed version that also measures the cl
+toStringified :: (a -> Char) -> Problem [a] -> Problem [Int]
+toStringified fx =
+  toIndexed'
+  . meassure (Stringify . V.toList . V.map (maybe '·' fx))
+  . toFixedLenght
+
+-- | Add a metric to the problem
+meassure :: Metric r => (s -> r) -> Problem s -> Problem s
+meassure sr p =
+  p { metric = addMetric sr . metric $ p }
+
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
 toClosures :: Ord n => [Edge e n] -> Problem [n] -> Problem [IS.IntSet]
@@ -120,80 +385,6 @@ toReductionTree red =
   (S.fromList . catMaybes . fmap NE.nonEmpty)
   . toReductionTree' red
 
--- | Get an indexed list of elements, this enables us to differentiate between stuff.
-toIndexed :: Problem [a] -> Problem [Int]
-toIndexed = toIndexed' . toFixedLenght
-
--- | Make the problem fixed length.
-toFixedLenght :: Problem [a] -> Problem (V.Vector (Maybe a))
-toFixedLenght = liftProblem (V.map Just . V.fromList) (catMaybes . V.toList)
-
--- | Turn a problem of reducing maybe values to one of reducting a list of integers.
-toIndexed' :: Problem (V.Vector (Maybe a)) -> Problem [Int]
-toIndexed' Problem {..} =
-  Problem indicies (store . displ) (displ `contramap` metric) expectation command
-  where
-   nothings = V.map (const Nothing) initial
-   indicies = V.toList . V.map fst . V.indexed $ initial
-   displ ids = nothings V.// [(i, join $ initial V.!? i) | i <- ids]
-
--- | Create a stringed version that also measures the cl
-toStringified :: (a -> Char) -> Problem [a] -> Problem [Int]
-toStringified fx =
-  toIndexed'
-  . meassure (Stringify . V.toList . V.map (maybe '·' fx))
-  . toFixedLenght
-
--- | Add a metric to the problem
-meassure :: Metric r => (s -> r) -> Problem s -> Problem s
-meassure sr p =
-  p { metric = addMetric sr . metric $ p }
-
-
-setupProblem ::
-  FilePath
-  -> CommandTemplate
-  -> PredicateOptions
-  -> FilePath
-  -> L.Logger (Maybe (Problem Input))
-setupProblem inputf template opts workDir = do
-  dirtree <- L.phase "Reading inputs" $ do
-    liftIO $ readDirTree BL.readFile inputf
-
-  setupProblemFromCommand opts workDir
-    (setup (inputDirTree (takeBaseName inputf) ) $ makeCommand template)
-    dirtree
-  where
-
-
--- | Setup the problem from a command.
-setupProblemFromCommand ::
-  PredicateOptions
-  -> FilePath
-  -> Command Input (Maybe CmdOutput)
-  -> Input
-  -> L.Logger (Maybe (Problem Input))
-setupProblemFromCommand opts workDir cmd a =
-  L.phase "Calculating Initial Problem" $
-  (resultOutput <$> runCommand workDir cmd a) >>= \case
-  Just output ->
-    return . Just
-    $ Problem a id emptyMetric (zipExpectation opts output) cmd
-  Nothing ->
-    return Nothing
-
-checkSolution ::
-  Problem a
-  -> FilePath
-  -> a
-  -> L.Logger (CmdResult (Maybe CmdOutput), Bool)
-checkSolution Problem{..} fp a = do
-  -- L.info $ "Trying: " <> displayMetric m
-  res <- runCommand fp command $ store a
-  let success = checkExpectation expectation (resultOutput res)
-  -- L.info $ if success then "success" else "failure"
-  return (res, success)
-
 
 -- * Expectation
 
@@ -204,7 +395,7 @@ data PredicateOptions = PredicateOptions
   , predOptPreserveStderr   :: !Bool
   } deriving (Show, Eq)
 
--- | An `Expectation` can or cannot be meet by a `CmdOutput`
+-- | An `Expectation` can or cannot be meet by a `CmdOutputSummary`
 data Expectation = Expectation
   { expectedExitCode :: Maybe ExitCode
   , expectedStdout   :: Maybe Sha256
@@ -219,20 +410,17 @@ instance Semigroup Expectation where
       takeLast = with Last getLast
       with _to _from x y = fmap _from (fmap _to x <> fmap _to y)
 
--- | Zip the PredicateOptions with a CmdOutput to build an Expectation
-zipExpectation :: PredicateOptions -> CmdOutput -> Expectation
-zipExpectation PredicateOptions{..} CmdOutput{..} =
+-- | Zip the PredicateOptions with a CmdOutputSummary to build an Expectation
+zipExpectation :: PredicateOptions -> CmdOutputSummary -> Expectation
+zipExpectation PredicateOptions{..} CmdOutputSummary{..} =
   Expectation
   (guard predOptPreserveExitCode $> outputCode)
   (guard predOptPreserveStdout   $> outputOut)
   (guard predOptPreserveStderr   $> outputErr)
 
 -- | Check if the output matches the expectation.
-checkExpectation :: Expectation -> Maybe CmdOutput -> Bool
-checkExpectation Expectation{..} = \case
-  Just CmdOutput{..} ->
-    maybe True (outputCode ==) expectedExitCode
-    && maybe True (outputOut ==) expectedStdout
-    && maybe True (outputErr ==) expectedStderr
-  Nothing ->
-    False
+checkExpectation :: Expectation -> CmdOutputSummary -> Bool
+checkExpectation Expectation{..} CmdOutputSummary{..} =
+  maybe True (outputCode ==) expectedExitCode
+  && maybe True (outputOut ==) expectedStdout
+  && maybe True (outputErr ==) expectedStderr

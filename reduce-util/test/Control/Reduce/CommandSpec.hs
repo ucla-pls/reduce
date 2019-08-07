@@ -49,21 +49,21 @@ spec = do
       let Left y = x
       show y `shouldSatisfy` L.isSuffixOf "Expected file: does not exist"
 
-  describe "createCommandTemplate" $ do
+  describe "createCmdTemplate" $ do
     it "finds executable and parses commandline arguments" $ do
-      x <- createCommandTemplate 0 "echo" ["Hello, World"]
+      x <- createCmdTemplate 0 "echo" ["Hello, World"]
       x `shouldSatisfy` isRight
 
     it "returns left if it cannot find executable" $ do
-      x <- createCommandTemplate 0 "not/an/executable" []
+      x <- createCmdTemplate 0 "not/an/executable" []
       x `shouldSatisfy` isLeft
 
     it "returns left if not all files exists" $ do
-      x <- createCommandTemplate 0 "echo" ["%not-a-file.txt"]
+      x <- createCmdTemplate 0 "echo" ["%not-a-file.txt"]
       x `shouldSatisfy` isLeft
 
     it "returns left if it cannot parse the arguments" $ do
-      x <- createCommandTemplate 0 "echo" ["{"]
+      x <- createCmdTemplate 0 "echo" ["{"]
       x `shouldSatisfy` isLeft
 
   describe "evaluateArgument" $ do
@@ -90,13 +90,13 @@ spec = do
 
   describe "evaluateTemplate" $ do
     it "should prefix the command and arguments" $ do
-      evaluateTemplate (CommandTemplate (-1) "/some/prefix/hello.sh" [CAFilePath "/some/prefix/file", CAInput ""]) ("/some/prefix", "$VAR") (Map.singleton "" (CAFilePath "/some/prefix/file2"))
+      evaluateTemplate (CmdTemplate (-1) "/some/prefix/hello.sh" [CAFilePath "/some/prefix/file", CAInput ""]) ("/some/prefix", "$VAR") (Map.singleton "" (CAFilePath "/some/prefix/file2"))
       `shouldBe` ("$VAR/hello.sh" :: String, ["$VAR/file", "$VAR/file2" :: String])
 
   describe "templateToString" $ do
     it "should prefix the command and arguments" $ do
       templateToString
-        (CommandTemplate (-1)
+        (CmdTemplate (-1)
          "/some/prefix/hello.sh"
          [CAFilePath "/some/prefix/file", CAInput ""]
         ) ("/some/prefix", "$VAR")
@@ -105,5 +105,5 @@ spec = do
 
   -- describe "createShellScript" $ do
   --   it "can create a shell script" $ do
-  --     Right m <- createCommandTemplate "echo" ["Hello, World!"]
+  --     Right m <- createCmdTemplate "echo" ["Hello, World!"]
   --     createShellScript mempty "/workdir" m `shouldBe` ""

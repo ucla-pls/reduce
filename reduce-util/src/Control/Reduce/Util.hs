@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds           #-}
-{-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE DeriveFunctor       #-}
 {-# LANGUAGE DeriveGeneric       #-}
+{-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE FlexibleInstances   #-}
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE LambdaCase          #-}
@@ -15,43 +15,33 @@
 {-|
 Module      : Control.Reduce.Util
 Copyright   : (c) Christian Gram Kalhauge, 2018
-License     : MIT
+License     : BSD3
 Maintainer  : kalhauge@cs.ucla.edu
 
-This module provides utils, so that it is easier to write command-line reducers.
+This module provides utilities, so that it is easier to write command-line
+reducers.
+
 -}
 module Control.Reduce.Util
-  ( listReduction
-  , intsetReduction
-  , setReduction
+  (
 
-  , findOutputFile
-
-  , TreeStrategy (..)
-  , treeStrategy
-  , hddReduction
-  , graphReduction
-
-  , Strategy
-  , runReduction
-
-  , AbstractProblem (..)
-  , runAbstractProblem
-
-
-  , PredicateOptions (..)
-  , ReductionOptions (..)
-
+  reduction
+  , reductionWith
   , ReducerName (..)
-  , ReductionException (..)
 
-  , module Control.Reduce.Command
-  , module Control.Reduce.Metric
+  -- * Re-Exports
+
   , module Control.Reduce.Problem
+
+  -- * Utils
+  , findOutputFile
+  , versionInputFile
   ) where
 
-import Debug.Trace
-
+-- base
+import           Control.Exception          (AsyncException (..))
+import           Control.Monad
+import           Text.Printf
 
 -- unliftio
 import           UnliftIO
@@ -60,40 +50,41 @@ import           UnliftIO.Directory
 -- time
 import           Data.Time
 
--- bytestring
-import qualified Data.ByteString.Lazy.Char8 as BLC
-
--- mtl
-import           Control.Monad.Except
-import           Control.Monad.State
-import           Control.Monad.Reader
+-- lens
+import           Control.Lens hiding ((<.>))
 
 -- filepath
 import           System.FilePath
 
--- containers
-import qualified Data.IntSet                as IS
-import qualified Data.Set                   as S
-
--- base
-import           Text.Printf
-import qualified Data.List as L
-
--- vector
-import qualified Data.Vector as V
-
--- free
-import           Control.Monad.Free.Church
-
--- reduce-util
-import           Control.Reduce.Command
-import           Control.Reduce.Graph
-import           Control.Reduce.Metric
-import           Control.Reduce.Problem
-import qualified Control.Reduce.Util.Logger as L
+-- mtl
+import           Control.Monad.Reader
 
 -- reduce
 import           Control.Reduce
+
+-- -- containers
+-- import qualified Data.IntSet as IS
+
+-- -- vector
+-- import qualified Data.Vector as V
+
+-- reduce-util
+import           Control.Reduce.Metric
+-- import           Control.Reduce.Graph
+import           Control.Reduce.Problem
+import qualified Control.Reduce.Util.Logger as L
+
+-- | Like `reducitonWith` but in case you use the `Binary` reduction
+-- type the cost function is just the length of the list.
+reduction :: Monad m => ReducerName -> Reducer m [a]
+reduction = reductionWith length
+
+-- | Reduction given a cost function and the type of reduction.
+reductionWith :: Monad m => ([a] -> Int) -> ReducerName -> Reducer m [a]
+reductionWith cost = \case
+  Ddmin  -> ddmin
+  Linear -> linearReduction
+  Binary -> genericBinaryReduction cost
 
 -- | The name of the reducer
 data ReducerName
@@ -102,189 +93,143 @@ data ReducerName
   | Binary
   deriving (Show, Eq)
 
-data ReductionOptions = ReductionOptions
-  { redOptTotalTimeout  :: !Double
-  , redOptMaxIterations :: !Int
-  -- , redOptKeepFolders   :: !Bool
-  } deriving (Show, Eq)
 
-data ReductionException
-  = ReductionTimedOut
-  | ReductionIterationsExceeded
-  | ReductionFailed
-  deriving (Show)
+-- graphReduction :: Monad m => [Edge () k] -> ReducerName -> Reducer m [k]
+-- graphReduction edgs name pred items =
+--   let
+--     (graph, _) = buildGraphFromNodesAndEdges [ (i, i) | i <- items ] edgs
+--     labs = nodeLabels graph
+--     fn = fmap (labs V.!) . IS.toAscList . IS.unions
+--   in intsetReduction name pred (closures graph)
 
-instance Exception ReductionException
+-- -- | Do a reduction over an 'IntSet'
+-- intsetReduction ::
+--   Monad m =>
+--   ReducerName
+--   -> Reducer m [IS.IntSet]
+-- intsetReduction name =
+--   reduction (IS.size . IS.unions)
 
-data ReductF a f
-  = Check a (Bool -> f)
-  deriving (Functor)
+-- data ReductF a f
+--   = Check a (Bool -> f)
+--   deriving (Functor)
 
-type ReductM x = F (ReductF x)
+-- type ReductM x = F (ReductF x)
 
-type Strategy a = a -> ReductM a (Maybe a)
+-- type Strategy a = a -> ReductM a (Maybe a)
 
-data AbstractProblem b = forall a.
-  AbstractProblem (Strategy a) (Problem a b)
+-- data AbstractProblem a =
+--   AbstractProblem (Strategy a) (Problem a)
 
-check :: a -> ReductM a Bool
-check a = liftF $ Check a id
+-- check :: a -> ReductM a Bool
+-- check a = liftF $ Check a id
 
--- | Do a reduction over a list
-listReductM :: ([x] -> a) -> ReducerName -> [x] -> ReductM a (Maybe a)
-listReductM c name lst =
-  fmap c <$> case name of
-    Ddmin  -> ddmin predc lst
-    Binary -> binaryReduction predc lst
-    Linear -> linearReduction predc lst
+-- -- | Do a reduction over a list
+-- listReductM :: ([x] -> a) -> ReducerName -> [x] -> ReductM a (Maybe a)
+-- listReductM c name lst =
+--   fmap c <$> case name of
+--     Ddmin  -> ddmin predc lst
+--     Binary -> binaryReduction predc lst
+--     Linear -> linearReduction predc lst
+--   where
+--     predc = PredicateM $ check . c
+
+
+-- listReduction :: ReducerName -> Strategy [a]
+-- listReduction = listReductM id
+
+-- -- | Do a reduction over a list of sets
+-- setReduction :: Ord x => ReducerName -> Strategy [S.Set x]
+-- setReduction red xs =
+--   case red of
+--     Ddmin  -> ddmin predc sxs
+--     Binary -> genericBinaryReduction (S.size . S.unions) predc xs
+--     Linear -> linearReduction predc sxs
+--   where
+--     sxs = L.sortOn (S.size) xs
+--     predc = PredicateM check
+
+-- intsetReduction :: ReducerName -> Strategy [IS.IntSet]
+-- intsetReduction = intsetReduct id
+
+-- -- | Do a reduction over an 'IntSet'
+-- intsetReduct :: ([IS.IntSet] -> a) -> ReducerName -> [IS.IntSet] -> ReductM a (Maybe a)
+-- intsetReduct fn red xs =
+--   fmap fn <$> case red of
+--     Ddmin  -> ddmin predc sxs
+--     Binary -> genericBinaryReduction (IS.size . IS.unions) predc xs
+--     Linear -> linearReduction predc sxs
+--   where
+--     sxs = L.sortOn (IS.size) xs
+--     predc = PredicateM (check . fn)
+
+-- -- | Strategy for reducing trees
+-- data TreeStrategy
+--   = HddStrategy
+--   | GraphStrategy
+--   | FlatStrategy
+--   deriving (Show, Read, Ord, Eq)
+
+-- treeStrategy ::
+--   [Edge () [Int]]
+--   -> TreeStrategy
+--   -> ReducerName
+--   -> Strategy [[Int]]
+-- treeStrategy edgs = \case
+--     FlatStrategy -> listReduction
+--     GraphStrategy -> graphReduction edgs
+--     HddStrategy -> hddReduction
+
+
+-- hddReduction :: ReducerName -> Strategy [[Int]]
+-- hddReduction name = go 1
+--   where
+--     go :: Int -> Strategy [[Int]]
+--     go n items
+--       | length reductionLayer > 0 = do
+--         listReductM back name (traceShowId reductionLayer) >>= \case
+--           Just items' -> go (n+1) items'
+--           Nothing -> return $ Just items
+--      | otherwise =
+--        return $ Just items
+--         where
+--           (reductionLayer, rest) = L.partition (\i -> length i == n) items
+--           keep = S.fromList rest
+--           back = S.toAscList . S.union keep . S.fromList
+
+-- runAbstractProblem ::
+--   ReductionOptions
+--   -> FilePath
+--   -> AbstractProblem b
+--   -> L.Logger (Maybe ReductionException, b)
+-- runAbstractProblem opts fp (AbstractProblem red problem) =
+--   runReduction opts fp red problem
+
+
+-- | Given an input filename and maybe an output name, move
+-- either return the output or move the input name to a new version
+-- and return the input name.
+findOutputFile ::
+     (MonadIO m, L.HasLogger c, MonadReader c m)
+  => FilePath
+  -> Maybe FilePath
+  -> m FilePath
+findOutputFile input =
+  maybe (input <$ versionInputFile input) return
+
+-- | Given an input filename, add the extension 'orig' to the input file
+-- or if that file already exist create versions 'v1', 'v2', and so on.
+versionInputFile ::
+     (MonadIO m, L.HasLogger c, MonadReader c m)
+  => FilePath
+  -> m ()
+versionInputFile input = do
+  newpath <- liftIO $ firstAvailableEnding (1 :: Int) "orig"
+  L.info $ "Moving input file to " <> L.display newpath
+  liftIO $ renamePath input newpath
   where
-    predc = PredicateM $ check . c
-
-
-listReduction :: ReducerName -> Strategy [a]
-listReduction = listReductM id
-
--- | Do a reduction over a list of sets
-setReduction :: Ord x => ReducerName -> Strategy [S.Set x]
-setReduction red xs =
-  case red of
-    Ddmin  -> ddmin predc sxs
-    Binary -> genericBinaryReduction (S.size . S.unions) predc xs
-    Linear -> linearReduction predc sxs
-  where
-    sxs = L.sortOn (S.size) xs
-    predc = PredicateM check
-
-intsetReduction :: ReducerName -> Strategy [IS.IntSet]
-intsetReduction = intsetReduct id
-
--- | Do a reduction over an 'IntSet'
-intsetReduct :: ([IS.IntSet] -> a) -> ReducerName -> [IS.IntSet] -> ReductM a (Maybe a)
-intsetReduct fn red xs =
-  fmap fn <$> case red of
-    Ddmin  -> ddmin predc sxs
-    Binary -> genericBinaryReduction (IS.size . IS.unions) predc xs
-    Linear -> linearReduction predc sxs
-  where
-    sxs = L.sortOn (IS.size) xs
-    predc = PredicateM (check . fn)
-
--- | Strategy for reducing trees
-data TreeStrategy
-  = HddStrategy
-  | GraphStrategy
-  | FlatStrategy
-  deriving (Show, Read, Ord, Eq)
-
-treeStrategy ::
-  [Edge () [Int]]
-  -> TreeStrategy
-  -> ReducerName
-  -> Strategy [[Int]]
-treeStrategy edgs = \case
-    FlatStrategy -> listReduction
-    GraphStrategy -> graphReduction edgs
-    HddStrategy -> hddReduction
-
-graphReduction :: [Edge () [Int]] -> ReducerName -> Strategy [[Int]]
-graphReduction edgs name items =
-  let
-    (graph, _) = buildGraphFromNodesAndEdges
-        [ (i, i) | i <- items ]
-        ([ Edge a' rst () | a'@(_:rst) <- items ] ++ edgs)
-    labs = nodeLabels graph
-    fn =
-      fmap (labs V.!) . IS.toAscList . IS.unions
-  in intsetReduct fn name (closures graph)
-
-hddReduction :: ReducerName -> Strategy [[Int]]
-hddReduction name = go 1
-  where
-    go :: Int -> Strategy [[Int]]
-    go n items
-      | length reductionLayer > 0 = do
-        listReductM back name (traceShowId reductionLayer) >>= \case
-          Just items' -> go (n+1) items'
-          Nothing -> return $ Just items
-     | otherwise =
-       return $ Just items
-        where
-          (reductionLayer, rest) = L.partition (\i -> length i == n) items
-          keep = S.fromList rest
-          back = S.toAscList . S.union keep . S.fromList
-
-runAbstractProblem ::
-  ReductionOptions
-  -> FilePath
-  -> AbstractProblem b
-  -> L.Logger (Maybe ReductionException, b)
-runAbstractProblem opts fp (AbstractProblem red problem) =
-  runReduction opts fp red problem
-
-runReduction ::
-  ReductionOptions
-  -> FilePath
-  -> Strategy a
-  -> Problem a b
-  -> L.Logger (Maybe ReductionException, b)
-runReduction (ReductionOptions {..}) wf reduction p@(Problem {..}) = do
-  start <- liftIO $ getCurrentTime
-  createDirectory wf
-  withCurrentDirectory wf $ do
-    liftIO . BLC.writeFile "metrics.csv" $ headerString metric
-    (ee, (_, m)) <-
-      runStateT
-      (runExceptT . iterM (reduce start) $ reduction initial)
-      (0, initial)
-    return . fmap store $ case ee of
-      Left e  ->
-        (Just e, m)
-      Right a ->
-        maybe (Just ReductionFailed, m) (Nothing,) a
-  where
-    reduce start (Check a f) = do
-      iteration <- state (\(i, r) -> (i, (i + 1, r)))
-      now <- liftIO $ getCurrentTime
-
-      let
-        diff = now `diffUTCTime` start
-        fp = printf "%04d" iteration
-
-      when (0 < redOptTotalTimeout && redOptTotalTimeout < realToFrac diff) $
-        throwError $ ReductionTimedOut
-
-      when (0 < redOptMaxIterations && redOptMaxIterations < iteration) $
-        throwError $ ReductionIterationsExceeded
-
-      L.info $ "Trying: " <> displayAnyMetric metric a
-
-      (res, success) <- lift . lift  $ checkSolution p fp a
-
-      L.info $ if success then "success" else "failure"
-
-      liftIO . BLC.appendFile "metrics.csv" $
-        metricRowString metric (MetricRow a diff fp res success)
-
-      when success $ do
-        modify (\(i, _) -> (i, a))
-
-      f success
-
-findOutputFile :: (MonadIO m, L.HasLogger c, MonadReader c m) => FilePath -> Maybe FilePath -> m FilePath
-findOutputFile input = \case
-  Just output -> return output
-  Nothing -> do
-    let endings = "orig":[ "v" ++ show i | i <- [(1 :: Int)..]]
-    newpath <- liftIO $ firstEnding endings
-    L.info $ "Moving input file to " <> L.display newpath
-    liftIO $ renamePath input newpath
-    return input
-
-  where
-    firstEnding (e:rest) = do
-      a <- doesPathExist (input <.> e)
-      if a
-      then firstEnding rest
-      else return (input <.> e)
-    firstEnding [] =
-      undefined
+    firstAvailableEnding i e =
+      doesPathExist fileName >>= \case
+      True -> firstAvailableEnding (i + 1) ("v" ++ show i)
+      False -> return fileName
+      where fileName = input <.> e
