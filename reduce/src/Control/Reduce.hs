@@ -13,8 +13,7 @@ given a predicate reduces a set of items to a smaller set of items.
 
 -}
 module Control.Reduce
-  ( PredicateM (..)
-  , Reducer
+  ( Reducer
 
   -- ** Delta Debugging
   -- | Delta debugging as per Zeller and Hildebrandt 2002.
@@ -43,7 +42,6 @@ module Control.Reduce
   , genericBinaryReduction
 
   -- *** Set Binary Reduction
-  , GuardM (..)
   , ISetReducer
   , setBinaryReduction
   , toSetReducer
@@ -55,9 +53,7 @@ module Control.Reduce
 
 -- mtl
 import           Control.Monad.Trans.Maybe
-
--- contravariant
-import           Data.Functor.Contravariant            hiding (Predicate)
+import           Control.Monad.Trans
 
 -- base
 import           Control.Applicative
@@ -67,9 +63,6 @@ import qualified Data.IntSet                           as IS
 import qualified Data.List                             as L
 import qualified Data.Vector                           as V
 
--- reduce
-import           Data.Functor.Contravariant.PredicateM
-
 
 -- * Reducers
 
@@ -77,25 +70,25 @@ import           Data.Functor.Contravariant.PredicateM
 -- the smallest list of elements such that the predicate is still satisfied.
 -- The reducer will return nothing if no subset satisfies the predicate.
 type Reducer m s =
-  PredicateM m s -> s -> m (Maybe s)
+  (s -> m Bool) -> s -> m (Maybe s)
 
 -- | Like a 'Reducer', but uses an 'IS.IntSet' instead for performance gain.
 type IReducer m =
-  GuardM (MaybeT m) IS.IntSet -> IS.IntSet -> MaybeT m IS.IntSet
+  (IS.IntSet -> MaybeT m ()) -> IS.IntSet -> MaybeT m IS.IntSet
 
 -- ** Delta Debugging
 
 -- | An implmentation of ddmin.
 ddmin :: Monad m => Reducer m [e]
 ddmin p es = do
-  t' <- runPredicateM p []
+  t' <- p []
   if t'
     then return $ Just []
     else do
       mx <- unsafeDdmin p es
       case mx of
         Just x -> do
-          t <- runPredicateM p x
+          t <- p x
           return $ if t then Just x else Nothing
         Nothing -> return Nothing
 
@@ -118,7 +111,7 @@ ddmin' n test world =
     , return world
     ]
   where
-    testrec n' d = runGuardM test d >> ddmin' n' test d
+    testrec n' d = test d >> ddmin' n' test d
     deltas = splitSet n world
     size = IS.size world
 
@@ -128,17 +121,15 @@ ddmin' n test world =
 -- Runtime: \( O(n) \)
 linearReduction :: Monad m => Reducer m [e]
 linearReduction (asMaybeGuard -> p) xs = do
-  runMaybeT $ do
-    runGuardM p xs
-    unsafeLinearReduction p xs
+  runMaybeT $ p xs >> unsafeLinearReduction p xs
 
-unsafeLinearReduction :: MonadPlus m => GuardM m [e] -> [e] -> m [e]
+unsafeLinearReduction :: MonadPlus m => ([e] -> m ()) -> [e] -> m [e]
 unsafeLinearReduction p = go []
   where
     go !sol = \case
       [] -> return sol
       e:es' -> cases
-        [ runGuardM p (sol ++ es') >> go sol es'
+        [ p (sol ++ es') >> go sol es'
         , go (sol ++ [e]) es'
         ]
 
@@ -153,7 +144,7 @@ binaryReduction (asMaybeGuard -> p) es =
     go !sol !n = cases
       [ takeIfSolution p sol
       , do
-          r <- binarySearch (contramap range p) 0 n
+          r <- binarySearch (p . range) 0 n
           go (es L.!! (r - 1) : sol) (r - 1)
       ]
       where range i = L.take i es ++ sol
@@ -177,7 +168,7 @@ genericBinaryReduction cost (asMaybeGuard -> p) =
     go !sol (L.sortOn (cost . (:sol)) -> !as) = cases
       [ takeIfSolution p sol
       , do
-          r <- binarySearch (contramap range p) 0 (L.length as)
+          r <- binarySearch (p . range) 0 (L.length as)
           let (as', rs:_) = L.splitAt (r - 1) as
           go (rs:sol) as' <|> return (as' ++ rs:sol)
       ]
@@ -186,7 +177,7 @@ genericBinaryReduction cost (asMaybeGuard -> p) =
 -- | An 'ISetReducer' like a generic reducer but uses slightly optimized
 -- data-structures.
 type ISetReducer m =
-  PredicateM m IS.IntSet -> [IS.IntSet] -> m (Maybe [IS.IntSet])
+  (IS.IntSet -> m Bool) -> [IS.IntSet] -> m (Maybe [IS.IntSet])
 
 -- | SetBinaryReduction is much like regular binary reduction, but with
 -- one added feature. Since we want the smallest output set we have to
@@ -198,14 +189,14 @@ setBinaryReduction (asMaybeGuard -> pred') =
   where
     go (sol, h) (L.sortOn (IS.size . snd) -> !as) = do
       let u = V.fromList $ L.scanl (\a -> IS.union a . snd) h as
-      r <- binarySearch (contramap (V.unsafeIndex u) pred') 0 (V.length u - 1)
+      r <- binarySearch (pred' . V.unsafeIndex u)  0 (V.length u - 1)
       if r > 0
         then do
           let
             (as', (rs, ru):_) = L.splitAt (r - 1) as
             h' = IS.union h ru
           cases
-            [ runGuardM pred' h' >> return (rs:sol)
+            [ pred' h' >> return (rs:sol)
             , go (rs:sol, IS.union h ru)
                 [(a, s') | (a, s) <- as', let s' = s IS.\\ ru, not (IS.null s')]
                 <|> return (map fst as' ++ rs:sol)
@@ -218,11 +209,11 @@ setBinaryReduction (asMaybeGuard -> pred') =
 -- | binarySearch, returns a number between lw and hg that satisfies
 -- the predicate. It requires that if p is monotone.
 -- $p n = true then p n-1 = true$. fails if no such number exists.
-binarySearch :: (MonadPlus m) => GuardM m Int -> Int -> Int -> m Int
+binarySearch :: MonadPlus m => (Int -> m ()) -> Int -> Int -> m Int
 binarySearch p !lw !hg = do
-  let pivot = lw + ((hg - lw) `quot` 2)
+  let pivot = lw + (hg - lw `quot` 2)
   cases
-    [ runGuardM p pivot
+    [ p pivot
       >> if lw == pivot
           then return lw
           else binarySearch p lw (pivot -1) <|> return pivot
@@ -255,15 +246,20 @@ splitSet n s =
 cases :: MonadPlus m => [m a] -> m a
 cases = msum
 
--- | Take the solution if it exist.
-takeIfSolution :: Monad m => GuardM m a -> a -> m a
-takeIfSolution p a = runGuardM p a $> a
+-- | Make a Guard predicate instead of a boolean predicate
+asMaybeGuard :: Monad m => (s -> m Bool) -> s -> MaybeT m ()
+asMaybeGuard p s =
+  lift (p s) >>= guard
 
--- ** Conversion
+-- | Take the solution if it exist.
+takeIfSolution :: Monad m => (a -> m ()) -> a -> m a
+takeIfSolution p a = p a $> a
+
+
 -- | Transform a IReducer to a Reducer
 liftReducer :: Monad m => IReducer m -> Reducer m [e]
 liftReducer red pred' es = do
-  mr <- runMaybeT $ red (contramap unset (asMaybeGuard pred')) world
+  mr <- runMaybeT $ red (asMaybeGuard pred'. unset) world
   return $ unset <$> mr
   where
     refs = V.fromList es
@@ -273,12 +269,12 @@ liftReducer red pred' es = do
 -- | Transform a ISetReducer to a Reducer
 toSetReducer :: Monad m => Reducer m [IS.IntSet] -> ISetReducer m
 toSetReducer red pred' es =
-  red (contramap IS.unions pred') $ L.sortOn IS.size es
+  red (pred' . IS.unions) $ L.sortOn IS.size es
 
 -- | Transform a ISetReducer to a Reducer
 liftISetReducer :: Monad m => ISetReducer m -> Reducer m [a]
 liftISetReducer red pred' es = do
-  mr <- red (contramap unset pred') world
+  mr <- red (pred' . unset) world
   return $ unset . IS.unions <$> mr
   where
     refs = V.fromList es
