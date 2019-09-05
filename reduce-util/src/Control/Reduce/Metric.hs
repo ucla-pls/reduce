@@ -26,7 +26,6 @@ import Data.Csv                         as C
 
 -- time
 import           Data.Time
-import           Data.Time.Format
 
 -- lens
 import           Control.Lens hiding ((.=))

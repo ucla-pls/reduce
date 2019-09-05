@@ -29,6 +29,7 @@ module Control.Reduce.Command
   , setupCommand
   , CmdInput (..)
   , emptyInput
+  , inputFromDirTree
   , CmdResult (..)
   , CmdOutputSummary (..)
 
@@ -123,7 +124,8 @@ import           System.Process.Consume
 -- | Run a command in a way that makes the results reproducable. This
 -- method stores the command and the results in the workfolder.
 runCommand ::
-  FilePath
+  (L.HasLogger env, MonadReader env m, MonadUnliftIO m)
+  => FilePath
   -- ^ the workfolder to setup the command in.
   -> Double
   -- ^ the timelimit
@@ -131,7 +133,7 @@ runCommand ::
   -- ^ the template to describe the command.
   -> CmdInput
   -- ^ the input to the command.
-  -> Logger (CmdResult (FilePath, Maybe CmdOutputSummary))
+  -> m (CmdResult (FilePath, Maybe CmdOutputSummary))
   -- ^ A logged results of the command.
 runCommand workDir cmdTimelimit cmdTemplate cmdInput = do
   (tp, pr) <- timedPhase "setup" $ do
@@ -205,8 +207,19 @@ data CmdInput = CmdInput
   -- ^ A `DirTree` of files to be in the working directory of the command.
   } deriving (Show, Eq)
 
+-- | Creates an empty input.
 emptyInput :: CmdInput
 emptyInput = CmdInput Map.empty Nothing Nothing
+
+-- | Creates an input from a `DirTree` given a name of the file.
+-- This function also sets up the key '{}' to point to the dirtree
+inputFromDirTree :: String -> DirTree Link BL.ByteString -> CmdInput
+inputFromDirTree fileName dirtree =
+  emptyInput
+  { ciValueMap = Map.singleton "" (CAJoin (CAConst "input") (CAConst fileName))
+  , ciDirectoryContent =
+      Just $ directoryFromFiles [(fileName, dirtree)]
+  }
 
 -- | Creates a reporducable command in a workding directory of choice.
 -- returns the absolute path of the command to run.

@@ -28,9 +28,10 @@ module Control.Reduce.Problem
 
   -- ** Constructors
   , setupProblem
+  , setupProblemFromFile
   , PredicateOptions (..)
 
-  -- ** Run The Problem
+  -- ** Run the problem
   , MonadReductor
   , runReductionProblem
   , checkSolution
@@ -39,7 +40,15 @@ module Control.Reduce.Problem
   , defaultReductionOptions
 
   -- ** Combinators
+  , updateProblem
+  , resetProblem
+  , liftProblem
 
+  -- ** Problem Refinements
+  , toReductionList
+  , toReductionTree
+
+  , meassure
 
   -- * Expectation
 
@@ -136,6 +145,16 @@ defaultReductionOptions = ReductionOptions
 
 makeClassy ''ReductionOptions
 
+-- | Predicate options, defines which elements to check
+data PredicateOptions = PredicateOptions
+  { predOptPreserveExitCode :: !Bool
+  , predOptPreserveStdout   :: !Bool
+  , predOptPreserveStderr   :: !Bool
+  } deriving (Show, Eq)
+
+makeClassy ''PredicateOptions
+
+
 -- | A short hand for a monad reductor
 type MonadReductor env m =
   (HasReductionOptions env, L.HasLogger env, MonadReader env m, MonadUnliftIO m)
@@ -155,8 +174,6 @@ runReductionProblem ::
 runReductionProblem wf reducer p = do
   opts <- view reductionOptions
   start <- liftIO $ getCurrentTime
-  lc <- view L.loggerL
-
   env <- ask
 
   createDirectory wf
@@ -166,9 +183,8 @@ runReductionProblem wf reducer p = do
     succRef <- newIORef (initial p)
 
     ee <- goWith (initial p) $ \a -> flip runReaderT env $ do
-      (fp, diff) <- checkTimeouts start iterRef opts
+      (fp, _diff) <- checkTimeouts start iterRef opts
 
-      time <- liftIO $ getCurrentTime
       L.info $ "Trying (Iteration " <> L.displayString fp <> ")"
       L.debug $ displayAnyMetric (metric p) a
 
@@ -176,7 +192,7 @@ runReductionProblem wf reducer p = do
 
       L.info $ (L.displayString $ showJudgment judgment)
 
-      liftIO $ record (MetricRow a diff fp judgment result)
+      liftIO $ record (MetricRow a _diff fp judgment result)
 
       let success = judgment == Success
 
@@ -191,7 +207,7 @@ runReductionProblem wf reducer p = do
         maybe (Just ReductionFailed, m) (Nothing,) a
   where
     goWith a f = liftIO $ do
-      catches (Right <$> reducer (PredicateM f) a)
+      catches (Right <$> reducer f a)
         [ Handler $ \case
             UserInterrupt -> return $ Left ReductionInterupted
             x -> throwIO x
@@ -200,15 +216,15 @@ runReductionProblem wf reducer p = do
 
     checkTimeouts start iterRef ReductionOptions{..} = do
       now <- liftIO $ getCurrentTime
-      let diff = now `diffUTCTime` start
-      when (0 < _redTotalTimelimit && _redTotalTimelimit < realToFrac diff) $
+      let _diff = now `diffUTCTime` start
+      when (0 < _redTotalTimelimit && _redTotalTimelimit < realToFrac _diff) $
         throwIO $ ReductionTimedOut
 
       iteration <- atomicModifyIORef iterRef (\i -> (i + 1, i))
       when (0 < _redMaxIterations && _redMaxIterations < iteration) $
         throwIO $ ReductionIterationsExceeded
 
-      return (printf "%04d" iteration, diff)
+      return (printf "%04d" iteration, _diff)
 
 -- | A Reduction Exception
 data ReductionException
@@ -292,7 +308,7 @@ refineProblem f Problem {..} =
     (tf, t) = f initial
 
 setupProblemFromFile ::
-  MonadReductor env m
+  (MonadReductor env m, HasPredicateOptions env)
   => FilePath
   -> CmdTemplate
   -> FilePath
@@ -305,20 +321,20 @@ setupProblemFromFile workDir template inputf = do
 
 -- | Setup the problem from a command.
 setupProblem ::
-  MonadReductor env m
+  (MonadReductor env m, HasPredicateOptions env)
   => FilePath
   -> CmdTemplate
   -> CmdInput
   -> m (Maybe (Problem CmdInput))
-setupProblem workDir template a =
-  L.phase "Calculating Initial Problem" $
-  (resultOutput <$> runCommand workDir template a) >>= \case
-  Just output ->
-    return . Just
-    $ Problem a id emptyMetric (zipExpectation opts output) template
-  Nothing ->
-    return Nothing
-
+setupProblem workDir template a = L.phase "Calculating Initial Problem" $ do
+  timelimit <- view redPredicateTimelimit
+  opts <- view predicateOptions
+  (snd . resultOutput <$> runCommand workDir timelimit template a) >>= \case
+    Just output ->
+      return . Just
+      $ Problem a (Just . id) emptyMetric (zipExpectation opts output) template
+    Nothing ->
+      return Nothing
 
 -- * Problem Refinements
 
@@ -350,7 +366,6 @@ toStringified fx =
 meassure :: Metric r => (s -> r) -> Problem s -> Problem s
 meassure sr p =
   p { metric = addMetric sr . metric $ p }
-
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
 toClosures :: Ord n => [Edge e n] -> Problem [n] -> Problem [IS.IntSet]
@@ -385,15 +400,7 @@ toReductionTree red =
   (S.fromList . catMaybes . fmap NE.nonEmpty)
   . toReductionTree' red
 
-
 -- * Expectation
-
--- | Predicate options, defines which elements to check
-data PredicateOptions = PredicateOptions
-  { predOptPreserveExitCode :: !Bool
-  , predOptPreserveStdout   :: !Bool
-  , predOptPreserveStderr   :: !Bool
-  } deriving (Show, Eq)
 
 -- | An `Expectation` can or cannot be meet by a `CmdOutputSummary`
 data Expectation = Expectation
