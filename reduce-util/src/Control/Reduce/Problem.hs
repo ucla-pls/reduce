@@ -315,7 +315,7 @@ setupProblemFromFile ::
   -> m (Maybe (Problem CmdInput))
 setupProblemFromFile workDir template inputf = do
   dirtree <- L.phase "Reading inputs" $ do
-    liftIO $ readDirTree BL.readFile inputf
+    liftIO $ readRelativeDirTree BL.readFile inputf
 
   setupProblem workDir template (inputFromDirTree (takeBaseName inputf) dirtree)
 

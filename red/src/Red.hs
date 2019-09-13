@@ -62,15 +62,14 @@ data Config = Config
   , _cnfOutputFile       :: !(Maybe FilePath)
   , _cnfLoggerConfig     :: !LoggerConfig
   , _cnfDependencies     :: !(Maybe FilePath)
-  , _cnfTreeStrategy     :: !TreeStrategy
+  -- , _cnfTreeStrategy     :: !TreeStrategy
   , _cnfFormat           :: !(Maybe Format)
   , _cnfReducerName      :: !ReducerName
   , _cnfWorkFolder       :: !WorkFolder
   , _cnfPredicateOptions :: !PredicateOptions
   , _cnfReductionOptions :: !ReductionOptions
-  , _cnfCommand          :: !CmdTemplate
+  -- , _cnfCommand          :: !CmdTemplate
   } deriving (Show)
-
 
 data Format = forall s a. Format
   { formatName :: String

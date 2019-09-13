@@ -9,8 +9,8 @@
 
 {-|
 Module      : Control.Reduce.Command
-Copyright   : (c) Christian Gram Kalhauge, 2018
 Description : A module to define commands
+Copyright   : (c) Christian Gram Kalhauge, 2018
 License     : BSD3
 Maintainer  : kalhauge@cs.ucla.edu
 
@@ -203,7 +203,7 @@ data CmdInput = CmdInput
   -- ^ Values to be replaced in the argument (see `CmdTemplate`)
   , ciStdin            :: ! (Maybe BL.ByteString)
   -- ^ A bytestring to use as standard input to the command.
-  , ciDirectoryContent :: ! (Maybe (DirTree Link BL.ByteString))
+  , ciDirectoryContent :: ! (Maybe (RelativeDirForest Link BL.ByteString))
   -- ^ A `DirTree` of files to be in the working directory of the command.
   } deriving (Show, Eq)
 
@@ -211,14 +211,14 @@ data CmdInput = CmdInput
 emptyInput :: CmdInput
 emptyInput = CmdInput Map.empty Nothing Nothing
 
--- | Creates an input from a `DirTree` given a name of the file.
+-- | Creates an input from a 'DirTree' given a name of the file.
 -- This function also sets up the key '{}' to point to the dirtree
-inputFromDirTree :: String -> DirTree Link BL.ByteString -> CmdInput
+inputFromDirTree :: String -> RelativeDirTree Link BL.ByteString -> CmdInput
 inputFromDirTree fileName dirtree =
   emptyInput
   { ciValueMap = Map.singleton "" (CAJoin (CAConst "input") (CAConst fileName))
   , ciDirectoryContent =
-      Just $ directoryFromFiles [(fileName, dirtree)]
+      Just $ singletonForest fileName dirtree
   }
 
 -- | Creates a reporducable command in a workding directory of choice.
@@ -231,8 +231,8 @@ setupCommand ::
 setupCommand workDir cmdTemplate CmdInput{..} = do
   createDirectory workDir
   withCurrentDirectory workDir $ do
-    maybe (return ()) (BLC.writeFile "stdin") ciStdin
-    maybe (return ()) (writeDirTree BLC.writeFile "input") ciDirectoryContent
+    mapM_ (BLC.writeFile "stdin") ciStdin
+    mapM_ (writeRelativeDirTree BLC.writeFile "input" . directory) ciDirectoryContent
     writeExec "run.sh" (Builder.toLazyText . execWriter $ shellScript)
     makeAbsolute "run.sh"
   where

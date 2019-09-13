@@ -4,4 +4,4 @@ packages:
 - reduce-util
 - red
 extra-deps:
-- dirtree-0.0.1
+- dirtree-0.1.0
