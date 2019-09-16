@@ -49,6 +49,7 @@ module Control.Reduce.Problem
   , resetProblem
   , liftProblem
   , refineProblem
+  , refineProblemA
 
   -- ** Problem Refinements
   , toReductionList
@@ -392,6 +393,16 @@ refineProblem f p@Problem {..} =
     }
   where
     (tf, t) = f _problemInitial
+
+-- | It is alos possible to refine the problem and access a monad or applicative.
+-- This is usefull in some situations were external controll is needed for refinement.
+refineProblemA :: Applicative m => (s -> m (t -> Maybe s, t)) -> Problem a s -> m (Problem a t)
+refineProblemA f p@Problem {..} = do
+  f _problemInitial <&> \(tf, t) ->
+    p { _problemInitial = t
+      , _problemExtractBase = (tf >=> _problemExtractBase)
+      , _problemMetric = contramap (>>= tf) _problemMetric
+      }
 
 
 -- * Problem Refinements
