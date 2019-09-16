@@ -138,20 +138,21 @@ runCommand ::
 runCommand workDir cmdTimelimit cmdTemplate cmdInput = do
   (tp, pr) <- timedPhase "setup" $ do
     fn <- liftIO $ setupCommand workDir cmdTemplate cmdInput
-    return $ proc fn []
-  (tm, x) <- timedPhase "run" $ do
-    olog <- traceLogger "+"
-    elog <- traceLogger "-"
-    liftIO . withFile "stdout" WriteMode $ \hout ->
-      withFile "stderr" WriteMode $ \herr ->
-      tryTimeout cmdTimelimit $
-      consumeWithHash
-      (combineConsumers olog $ handlerLogger hout)
-      (combineConsumers elog $ handlerLogger herr)
-      pr
-  let m = formatOutput <$> x
-  logResults m
-  return (CmdResult tp tm (workDir </> "sandbox", m))
+    return $ proc fn [ ]
+  withCurrentDirectory workDir $ do
+    (tm, x) <- timedPhase "run" $ do
+      olog <- traceLogger "+"
+      elog <- traceLogger "-"
+      liftIO . withFile "stdout" WriteMode $ \hout ->
+        withFile "stderr" WriteMode $ \herr ->
+        tryTimeout cmdTimelimit $
+        consumeWithHash
+        (combineConsumers olog $ handlerLogger hout)
+        (combineConsumers elog $ handlerLogger herr)
+        pr
+    let m = formatOutput <$> x
+    logResults m
+    return (CmdResult tp tm (workDir </> "sandbox", m))
   where
     formatOutput (ec, (_, ho), (_, he)) =
       CmdOutputSummary ec ho he
@@ -216,7 +217,7 @@ emptyInput = CmdInput Map.empty Nothing Nothing
 inputFromDirTree :: String -> RelativeDirTree Link BL.ByteString -> CmdInput
 inputFromDirTree fileName dirtree =
   emptyInput
-  { ciValueMap = Map.singleton "" (CAJoin (CAConst "input") (CAConst fileName))
+  { ciValueMap = Map.singleton "" (CAConst $ "$WORKDIR/input" </> fileName)
   , ciDirectoryContent =
       Just $ singletonForest fileName dirtree
   }
