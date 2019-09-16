@@ -25,11 +25,16 @@ module Control.Reduce.Problem
 
   -- * Problem
     Problem (..)
+  , problemCommand
+  , problemDescription
+  , problemExpectation
+  , problemExtractBase
 
   -- ** Constructors
   , setupProblem
   , setupProblemFromFile
   , PredicateOptions (..)
+  , HasReductionOptions (..)
 
   -- ** Run the problem
   , MonadReductor
@@ -43,6 +48,7 @@ module Control.Reduce.Problem
   , updateProblem
   , resetProblem
   , liftProblem
+  , refineProblem
 
   -- ** Problem Refinements
   , toReductionList
@@ -50,9 +56,18 @@ module Control.Reduce.Problem
 
   , meassure
 
+  , toIndexed
+  , toFixedLenght
+  , toIndexed'
+  , toStringified
+  , toClosures
+
   -- * Expectation
 
   , Expectation (..)
+  , expectedStdout
+  , expectedStderr
+  , expectedExitCode
   , checkExpectation
   , zipExpectation
 
@@ -90,6 +105,7 @@ import           System.DirTree
 
 -- bytestring
 import qualified Data.ByteString.Lazy       as BL
+import qualified Data.ByteString            as BS
 
 -- containers
 import qualified Data.IntSet                as IS
@@ -108,6 +124,34 @@ import           Control.Reduce.Metric
 import           Control.Reduce.Reduction
 import qualified Control.Reduce.Util.Logger as L
 
+
+-- | A `ReductionProblem` is something that we can reduce, by running a program
+-- with the correct inputs. It accepts two types `a` and `s`. `a` is the base
+-- value of the problem. It is the one we can convert to and from. `s` is the
+-- reduction value. The reduction value is the type that we try to reduce.
+data Problem a s = Problem
+  { _problemInitial     :: !s
+  -- ^ An initial value to start reducing
+  , _problemExtractBase :: ! (s -> Maybe a)
+  -- ^ The definition of how to go from the Initial value to the base
+  -- value.
+  , _problemDescription :: ! (a -> CmdInput)
+  -- ^ An way of computing a CmdInput from the problem
+  , _problemMetric      :: ! (AnyMetric (Maybe s))
+  -- ^ An way of computing metrics of s
+  , _problemExpectation :: !Expectation
+  -- ^ The expected output of the CmdInput
+  , _problemCommand     :: !CmdTemplate
+  -- ^ The command template to run.
+  }
+
+-- | An `Expectation` can or cannot be meet by a `CmdOutputSummary`
+data Expectation = Expectation
+  { _expectedExitCode :: Maybe ExitCode
+  , _expectedStdout   :: Maybe Sha256
+  , _expectedStderr   :: Maybe Sha256
+  } deriving (Show, Eq)
+
 -- | The reduction options
 data ReductionOptions = ReductionOptions
   { _redTotalTimelimit    :: !Double
@@ -122,6 +166,9 @@ data ReductionOptions = ReductionOptions
   , _redPredicateTimelimit :: !Double
   -- ^ the timelimit of a single run of the predicate in seconds.
   } deriving (Show, Eq)
+
+makeLenses ''Problem
+makeLenses ''Expectation
 
 -- | The default reduction options
 --
@@ -154,23 +201,73 @@ data PredicateOptions = PredicateOptions
 
 makeClassy ''PredicateOptions
 
-
 -- | A short hand for a monad reductor
 type MonadReductor env m =
   (HasReductionOptions env, L.HasLogger env, MonadReader env m, MonadUnliftIO m)
 
+-- | Given a filepath to the
+setupProblemFromFile ::
+  (MonadReductor env m, HasPredicateOptions env)
+  => FilePath
+  -- ^ The working directory
+  -> CmdTemplate
+  -- ^ The command template
+  -> FilePath
+  -- ^ The filepath to load the input from
+  -> m (Maybe (Problem (RelativeDirTree Link BL.ByteString) (RelativeDirTree Link BL.ByteString)))
+setupProblemFromFile workDir template inputf = do
+  dirtree <- L.phase "Reading inputs" $ do
+    liftIO $ readRelativeDirTree (fmap BL.fromStrict . BS.readFile) inputf
+
+  setupProblem
+    workDir template
+    dirtree
+    (inputFromDirTree (takeBaseName inputf))
+
+-- | Setup the problem from a command. Might fail if the command is not
+-- satified.
+setupProblem ::
+  (MonadReductor env m, HasPredicateOptions env)
+  => FilePath
+  -- ^ The working directory
+  -> CmdTemplate
+  -- ^ the command template
+  -> a
+  -- ^ The input
+  -> (a -> CmdInput)
+  -- ^ a way of turning the input in to a command
+  -> m (Maybe (Problem a a))
+setupProblem workDir template a desc = L.phase "Calculating Initial Problem" $ do
+  timelimit <- view redPredicateTimelimit
+  opts <- view predicateOptions
+
+  result <- runCommand workDir timelimit template (desc a)
+
+  return $ case snd . resultOutput $ result of
+    Just output ->
+      Just $ Problem
+      { _problemInitial = a
+      , _problemExtractBase = Just
+      , _problemDescription = desc
+      , _problemExpectation = zipExpectation opts output
+      , _problemCommand = template
+      , _problemMetric = emptyMetric
+      }
+    Nothing -> Nothing
+
+
 -- | `runReduction` is the main function of this package. It is a wrapper
 -- around a strategy to make it work with a problem.
 runReductionProblem ::
-  forall a env m.
+  forall a s env m.
   MonadReductor env m
   => FilePath
   -- ^ The work directory
-  -> Reducer IO a
+  -> Reducer IO s
   -- ^ The reducer to use on the problem
-  -> Problem a
+  -> Problem a s
   -- ^ The `Problem` to reduce
-  -> m (Maybe ReductionException, a)
+  -> m (Maybe ReductionException, s)
 runReductionProblem wf reducer p = do
   opts <- view reductionOptions
   start <- liftIO $ getCurrentTime
@@ -178,25 +275,25 @@ runReductionProblem wf reducer p = do
 
   createDirectory wf
   withCurrentDirectory wf . liftIO $ do
-    record <- setupMetric (metric p) (opts ^. redMetricsFile)
+    record <- setupMetric (p ^. problemMetric) (opts ^. redMetricsFile)
     iterRef <- newIORef 1
-    succRef <- newIORef (initial p)
+    succRef <- newIORef (p ^. problemInitial)
 
-    ee <- goWith (initial p) $ \a -> flip runReaderT env $ do
+    ee <- goWith (p ^. problemInitial) $ \s -> flip runReaderT env $ do
       (fp, _diff) <- checkTimeouts start iterRef opts
 
       L.info $ "Trying (Iteration " <> L.displayString fp <> ")"
-      L.debug $ displayAnyMetric (metric p) a
+      L.debug $ displayAnyMetric (p ^. problemMetric) (Just s)
 
-      (judgment, result) <- checkSolution fp p a
+      (judgment, result) <- checkSolution fp p s
 
       L.info $ (L.displayString $ showJudgment judgment)
 
-      liftIO $ record (MetricRow a _diff fp judgment result)
+      liftIO $ record (MetricRow (Just s) _diff fp judgment result)
 
       let success = judgment == Success
 
-      when success $ writeIORef succRef a
+      when success $ writeIORef succRef s
       return success
 
     m <- readIORef succRef
@@ -226,6 +323,35 @@ runReductionProblem wf reducer p = do
 
       return (printf "%04d" iteration, _diff)
 
+
+-- | Given a folder to run in, check that a problem has been solved with `a`.
+-- this function should be run in some workfolder
+checkSolution ::
+  MonadReductor env m
+  => FilePath
+  -> Problem a s
+  -> s
+  -> m (Judgment, Maybe (CmdResult (Maybe CmdOutputSummary)))
+checkSolution fp Problem{..} s = do
+  timelimit <- view redPredicateTimelimit
+  keepFolders <- view redKeepFolders
+  case _problemExtractBase s of
+    Just a -> do
+      res <- fmap snd <$>
+        L.withLogger (runCommand fp timelimit _problemCommand (_problemDescription a))
+      when keepFolders (removePathForcibly fp)
+      let judgment = case resultOutput res of
+            Just m
+              | checkExpectation _problemExpectation m ->
+                Success
+              | otherwise ->
+                Failure
+            Nothing ->
+              Timeout
+      return (judgment, Just res)
+    Nothing -> do
+      return (Bad, Nothing)
+
 -- | A Reduction Exception
 data ReductionException
   = ReductionTimedOut
@@ -240,160 +366,90 @@ data ReductionException
 
 instance Exception ReductionException
 
-
--- | Given a folder to run in, check that a problem has been solved with `a`.
--- this function should be run in some workfolder
-checkSolution ::
-  MonadReductor env m
-  => FilePath
-  -> Problem a
-  -> a
-  -> m (Judgment, Maybe (CmdResult (Maybe CmdOutputSummary)))
-checkSolution fp Problem{..} a = do
-  timelimit <- view redPredicateTimelimit
-  keepFolders <- view redKeepFolders
-  case input a of
-    Just i -> do
-      res <- fmap snd <$> L.withLogger (runCommand fp timelimit command i)
-      when keepFolders (removePathForcibly fp)
-      let judgment = case resultOutput res of
-            Just m
-              | checkExpectation expectation m ->
-                Success
-              | otherwise ->
-                Failure
-            Nothing ->
-              Timeout
-      return (judgment, Just res)
-    Nothing -> do
-      return (Bad, Nothing)
-
 -- * The Problem Type
 
 
--- | A `ReductionProblem` is something that we can reduce, by running a program
--- on with the correct inputs.
-data Problem s = Problem
-  { initial     :: !s
-  -- ^ An initial value to start reducing
-  , input       :: s -> Maybe CmdInput
-  -- ^ An way of computing a CmdInput from the problem
-  , metric      :: AnyMetric s
-  -- ^ An way of computing metrics of s
-  , expectation :: !Expectation
-  -- ^ The expected output of the CmdInput
-  , command     :: !CmdTemplate
-  -- ^ The command template to run.
-  }
-
 -- | Update the problem. This is useful if some partial reduction was achieved.
-updateProblem :: (s -> s) -> Problem s -> Problem s
-updateProblem fs p@Problem{..} = p { initial = fs initial }
+updateProblem :: (s -> s) -> Problem a s -> Problem a s
+updateProblem fs = problemInitial %~ fs
 
 -- | Set the problem to a new begining value
-resetProblem :: s -> Problem s -> Problem s
+resetProblem :: s -> Problem a s -> Problem a s
 resetProblem s = updateProblem (const s)
 
 -- | Lift the problem to a new domain. Requires that the new domain is
 -- isomorphic to the original domain.
-liftProblem :: (s -> t) -> (t -> s) -> Problem s -> Problem t
+liftProblem :: (s -> t) -> (t -> s) -> Problem a s -> Problem a t
 liftProblem st ts =
-  refineProblem ((ts,) . st)
+  refineProblem ((Just . ts,) . st)
 
 -- | Given the original definition of the problem, refine the problem.
-refineProblem :: (s -> (t -> s, t)) -> Problem s -> Problem t
-refineProblem f Problem {..} =
-  Problem t (input . tf) (tf `contramap` metric) expectation command
+refineProblem :: (s -> (t -> Maybe s, t)) -> Problem a s -> Problem a t
+refineProblem f p@Problem {..} =
+  p { _problemInitial = t
+    , _problemExtractBase = (tf >=> _problemExtractBase)
+    , _problemMetric = contramap (>>= tf) _problemMetric
+    }
   where
-    (tf, t) = f initial
+    (tf, t) = f _problemInitial
 
-setupProblemFromFile ::
-  (MonadReductor env m, HasPredicateOptions env)
-  => FilePath
-  -> CmdTemplate
-  -> FilePath
-  -> m (Maybe (Problem CmdInput))
-setupProblemFromFile workDir template inputf = do
-  dirtree <- L.phase "Reading inputs" $ do
-    liftIO $ readRelativeDirTree BL.readFile inputf
-
-  setupProblem workDir template (inputFromDirTree (takeBaseName inputf) dirtree)
-
--- | Setup the problem from a command.
-setupProblem ::
-  (MonadReductor env m, HasPredicateOptions env)
-  => FilePath
-  -> CmdTemplate
-  -> CmdInput
-  -> m (Maybe (Problem CmdInput))
-setupProblem workDir template a = L.phase "Calculating Initial Problem" $ do
-  timelimit <- view redPredicateTimelimit
-  opts <- view predicateOptions
-  (snd . resultOutput <$> runCommand workDir timelimit template a) >>= \case
-    Just output ->
-      return . Just
-      $ Problem a (Just . id) emptyMetric (zipExpectation opts output) template
-    Nothing ->
-      return Nothing
 
 -- * Problem Refinements
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
-toIndexed :: Problem [a] -> Problem [Int]
+toIndexed :: Problem a [s] -> Problem a [Int]
 toIndexed = toIndexed' . toFixedLenght
 
 -- | Make the problem fixed length.
-toFixedLenght :: Problem [a] -> Problem (V.Vector (Maybe a))
+toFixedLenght :: Problem a [s] -> Problem a (V.Vector (Maybe s))
 toFixedLenght = liftProblem (V.map Just . V.fromList) (catMaybes . V.toList)
 
 -- | Turn a problem of reducing maybe values to one of reducting a list of integers.
-toIndexed' :: Problem (V.Vector (Maybe a)) -> Problem [Int]
-toIndexed' Problem {..} =
-  Problem indicies (input . displ) (displ `contramap` metric) expectation command
-  where
-   nothings = V.map (const Nothing) initial
-   indicies = V.toList . V.map fst . V.indexed $ initial
-   displ ids = nothings V.// [(i, join $ initial V.!? i) | i <- ids]
+toIndexed' :: Problem a (V.Vector (Maybe s)) -> Problem a [Int]
+toIndexed' = refineProblem fn where
+  fn s = (Just . displ, indicies)
+    where
+      nothings = V.map (const Nothing) s
+      indicies = V.toList . V.map fst . V.indexed $ s
+      displ ids = nothings V.// [(i, join $ s V.!? i) | i <- ids]
 
 -- | Create a stringed version that also measures the cl
-toStringified :: (a -> Char) -> Problem [a] -> Problem [Int]
+toStringified :: (s -> Char) -> Problem a [s] -> Problem a [Int]
 toStringified fx =
   toIndexed'
-  . meassure (Stringify . V.toList . V.map (maybe '·' fx))
+  . meassure (Stringify . maybe "" (V.toList . V.map (maybe '·' fx)))
   . toFixedLenght
 
 -- | Add a metric to the problem
-meassure :: Metric r => (s -> r) -> Problem s -> Problem s
-meassure sr p =
-  p { metric = addMetric sr . metric $ p }
+meassure :: Metric r => (Maybe s -> r) -> Problem a s -> Problem a s
+meassure sr = problemMetric %~ addMetric sr
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
-toClosures :: Ord n => [Edge e n] -> Problem [n] -> Problem [IS.IntSet]
-toClosures edges' = refineProblem refined
-  where
-    refined items = (fs, closures graph)
-      where
-        fs = map (nodeLabel . (nodes graph V.!)) . IS.toList . IS.unions
-        (graph, _) = buildGraphFromNodesAndEdges (map (\a -> (a,a)) items) edges'
+toClosures :: Ord n => [Edge e n] -> Problem a [n] -> Problem a [IS.IntSet]
+toClosures edges' = refineProblem refined where
+  refined items = (Just . fs, closures graph)
+    where
+      fs = map (nodeLabel . (nodes graph V.!)) . IS.toList . IS.unions
+      (graph, _) = buildGraphFromNodesAndEdges (map (\a -> (a,a)) items) edges'
 
 -- | Given a 'Reduction' from s given t, make the problem to reduce
 -- a list of t's with indicies.
-toReductionList :: Reduction s t -> Problem s -> Problem (V.Vector (Maybe t))
+toReductionList :: Reduction s t -> Problem a s -> Problem a (V.Vector (Maybe t))
 toReductionList red =
   refineProblem $ \s ->
-    ( flip (limiting red) s . (\v i -> maybe False (const True) $ v V.!? i)
+    ( Just . flip (limiting red) s . (\v i -> maybe False (const True) $ v V.!? i)
     , V.map Just . V.fromList $ toListOf (subelements red) $ s
     )
 
 -- | Get an inde
-toReductionTree' :: Reduction s s -> Problem s -> Problem (S.Set (NE.NonEmpty Int))
+toReductionTree' :: Reduction s s -> Problem a s -> Problem a (S.Set (NE.NonEmpty Int))
 toReductionTree' red =
   refineProblem $ \s ->
-    ( flip (limit $ treeReduction red) s . flip S.member
+    ( Just . flip (limit $ treeReduction red) s . flip S.member
     , S.fromList $ indicesOf (treeReduction red) s
     )
 
-toReductionTree :: Reduction s s -> Problem s -> Problem [[Int]]
+toReductionTree :: Reduction s s -> Problem a s -> Problem a [[Int]]
 toReductionTree red =
   liftProblem
   (fmap NE.toList . S.toAscList)
@@ -402,12 +458,6 @@ toReductionTree red =
 
 -- * Expectation
 
--- | An `Expectation` can or cannot be meet by a `CmdOutputSummary`
-data Expectation = Expectation
-  { expectedExitCode :: Maybe ExitCode
-  , expectedStdout   :: Maybe Sha256
-  , expectedStderr   :: Maybe Sha256
-  } deriving (Show, Eq)
 
 instance Semigroup Expectation where
   Expectation a b c <> Expectation a' b' c' =
@@ -427,7 +477,8 @@ zipExpectation PredicateOptions{..} CmdOutputSummary{..} =
 
 -- | Check if the output matches the expectation.
 checkExpectation :: Expectation -> CmdOutputSummary -> Bool
-checkExpectation Expectation{..} CmdOutputSummary{..} =
-  maybe True (outputCode ==) expectedExitCode
-  && maybe True (outputOut ==) expectedStdout
-  && maybe True (outputErr ==) expectedStderr
+checkExpectation Expectation{..} CmdOutputSummary{..} = and
+  [ maybe True (outputCode ==) _expectedExitCode
+  , maybe True (outputOut ==) _expectedStdout
+  , maybe True (outputErr ==) _expectedStderr
+  ]
