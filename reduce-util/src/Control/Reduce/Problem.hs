@@ -214,15 +214,15 @@ setupProblemFromFile ::
   -- ^ The command template
   -> FilePath
   -- ^ The filepath to load the input from
-  -> m (Maybe (Problem (RelativeDirTree Link BL.ByteString) (RelativeDirTree Link BL.ByteString)))
+  -> m (Maybe (Problem (DirTree BL.ByteString) (DirTree BL.ByteString)))
 setupProblemFromFile workDir template inputf = do
   dirtree <- L.phase "Reading inputs" $ do
-    liftIO $ readRelativeDirTree (fmap BL.fromStrict . BS.readFile) inputf
+    liftIO $ readDirTree (fmap BL.fromStrict . BS.readFile) inputf
 
   setupProblem
     workDir template
     dirtree
-    (inputFromDirTree (takeBaseName inputf))
+    (inputFromDirTree (takeBaseName inputf) . asRelativeDirTree)
 
 -- | Setup the problem from a command. Might fail if the command is not
 -- satified.
