@@ -34,7 +34,7 @@ module Control.Reduce.Problem
   , setupProblem
   , setupProblemFromFile
   , PredicateOptions (..)
-  , HasReductionOptions (..)
+  , HasPredicateOptions (..)
 
   -- ** Run the problem
   , MonadReductor
@@ -42,6 +42,7 @@ module Control.Reduce.Problem
   , checkSolution
 
   , ReductionOptions (..)
+  , HasReductionOptions (..)
   , defaultReductionOptions
 
   -- ** Combinators
