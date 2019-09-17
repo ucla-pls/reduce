@@ -285,7 +285,7 @@ runReductionProblem wf reducer p = do
       (fp, _diff) <- checkTimeouts start iterRef opts
 
       L.info $ "Trying (Iteration " <> L.displayString fp <> ")"
-      L.debug $ displayAnyMetric (p ^. problemMetric) (Just s)
+      L.debug $ " Metric: " <> displayAnyMetric (p ^. problemMetric) (Just s)
 
       (judgment, result) <- checkSolution fp p s
 
@@ -341,7 +341,7 @@ checkSolution fp Problem{..} s = do
     Just a -> do
       res <- fmap snd <$>
         L.withLogger (runCommand fp timelimit _problemCommand (_problemDescription a))
-      when keepFolders (removePathForcibly fp)
+      unless keepFolders (removePathForcibly fp)
       let judgment = case resultOutput res of
             Just m
               | checkExpectation _problemExpectation m ->
