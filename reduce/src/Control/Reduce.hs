@@ -1,5 +1,4 @@
 {-# LANGUAGE BangPatterns  #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE LambdaCase    #-}
 {-# LANGUAGE ViewPatterns  #-}
 {-|
@@ -120,7 +119,7 @@ ddmin' n test world =
 --
 -- Runtime: \( O(n) \)
 linearReduction :: Monad m => Reducer m [e]
-linearReduction (asMaybeGuard -> p) xs = do
+linearReduction (asMaybeGuard -> p) xs =
   runMaybeT $ p xs >> unsafeLinearReduction p xs
 
 unsafeLinearReduction :: MonadPlus m => ([e] -> m ()) -> [e] -> m [e]
@@ -210,16 +209,15 @@ setBinaryReduction (asMaybeGuard -> pred') =
 -- the predicate. It requires that if p is monotone.
 -- $p n = true then p n-1 = true$. fails if no such number exists.
 binarySearch :: MonadPlus m => (Int -> m ()) -> Int -> Int -> m Int
-binarySearch p !lw !hg = do
-  let pivot = lw + (hg - lw `quot` 2)
-  cases
-    [ p pivot
-      >> if lw == pivot
-          then return lw
-          else binarySearch p lw (pivot -1) <|> return pivot
-    , guard (pivot < hg)
-      >> binarySearch p (pivot + 1) hg
-    ]
+binarySearch p !lw !hg = cases
+  [ p pivot
+    >> if lw == pivot
+        then return lw
+        else binarySearch p lw (pivot -1) <|> return pivot
+  , guard (pivot < hg)
+    >> binarySearch p (pivot + 1) hg
+  ]
+  where pivot = lw + (hg - lw) `quot` 2
 
 -- | Splits a set into at most n almost same sized sets.
 --

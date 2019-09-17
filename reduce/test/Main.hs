@@ -6,6 +6,7 @@ import Test.Hspec.Expectations.Pretty
 import Test.Tasty.Hspec hiding (shouldBe, shouldSatisfy, shouldMatchList)
 
 import           Control.Monad.Trans.Maybe
+import           Control.Monad.Trans.Writer
 
 import Control.Monad.Identity
 import Control.Monad.Trans.State
@@ -109,16 +110,17 @@ setsTests red = do
 
 specBinarySearch :: Spec
 specBinarySearch = do
-  let binarySearch' = binarySearch
-
   it "can find 5 in the range [0, 10]" $ do
-    i <- binarySearch' (\i -> guard (i >= 5)) 0 10
+    i <- binarySearch (\i -> guard (i >= 5)) 0 10
     i `shouldBe` 5
+  it "is not a linear search" $ do
+    (i, x) <- runWriterT $ binarySearch (\i -> tell [i] >> liftIO (guard (i >= 5))) 0 10
+    x `shouldBe` [5]
   it "can't find 11 in the range [0, 10]" $ do
     i <- runMaybeT $ binarySearch (\i -> guard (i >= 11)) 0 10
     i `shouldBe` Nothing
   it "returns the smallest element if all is true" $ do
-    i <- binarySearch' (\_ -> guard True) 0 10
+    i <- binarySearch (\_ -> guard True) 0 10
     i `shouldBe` 0
 
 yes :: Monad m => (Bool -> m Bool)
