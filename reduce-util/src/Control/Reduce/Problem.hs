@@ -55,6 +55,8 @@ module Control.Reduce.Problem
   -- ** Problem Refinements
   , toReductionList
   , toReductionTree
+  , toReductionDeep
+  , toGraphReductionDeep
 
   , meassure
 
@@ -112,6 +114,7 @@ import qualified Data.ByteString            as BS
 -- containers
 import qualified Data.IntSet                as IS
 import qualified Data.Set                   as S
+import qualified Data.Map.Strict            as M
 
 -- mtl
 import Control.Monad.Reader
@@ -436,13 +439,6 @@ toStringified fx =
 meassure :: Metric r => (Maybe s -> r) -> Problem a s -> Problem a s
 meassure sr = problemMetric %~ addMetric sr
 
--- | Get an indexed list of elements, this enables us to differentiate between stuff.
-toClosures :: Ord n => [Edge e n] -> Problem a [n] -> Problem a [IS.IntSet]
-toClosures edges' = refineProblem refined where
-  refined items = (Just . fs, closures graph)
-    where
-      fs = map (nodeLabel . (nodes graph V.!)) . IS.toList . IS.unions
-      (graph, _) = buildGraphFromNodesAndEdges (map (\a -> (a,a)) items) edges'
 
 -- | Given a 'Reduction' from s given t, make the problem to reduce
 -- a list of t's with indicies.
@@ -468,6 +464,59 @@ toReductionTree red =
   (S.fromList . catMaybes . fmap NE.nonEmpty)
   . toReductionTree' red
 
+toReductionDeep :: PartialReduction s s -> Problem a s -> Problem a [[Int]]
+toReductionDeep red =
+  liftProblem (S.toAscList) (S.fromList) . toReductionDeep' red
+
+toReductionDeep' :: PartialReduction s s -> Problem a s -> Problem a (S.Set [Int])
+toReductionDeep' red =
+  refineProblem $ \s ->
+    ( flip (limit $ deepReduction red) s . flip S.member
+    , S.fromList $ indicesOf (deepReduction red) s
+    )
+
+-- | Like reduction deep, but also calculates the graph to reduce with.
+-- It automatically adds edges to parrent items
+toGraphReductionDeep ::
+  Ord k =>
+  (s -> (Maybe k, [k]))
+  -- ^ A key function
+  -> PartialReduction s s
+  -- ^ A partial reduction
+  -> Problem a s
+  -> Problem a [IS.IntSet]
+toGraphReductionDeep keyfn red = refineProblem refined where
+  refined s =
+    ( fromClosures
+    , closures graph
+    )
+    where
+      fromClosures cls = limit (deepReduction red) (`S.member` m) s where
+        m = S.fromList
+          . map (nodeLabel . (nodes graph V.!))
+          . IS.toList . IS.unions
+          $ cls
+
+      nodes_ = itoListOf (deepSubelements red . to keyfn) s
+      keymap = M.fromList
+        [ (k, n)
+        | (n, (Just k, _)) <- nodes_
+        ]
+      (graph, _) = buildGraph'
+        [ (n, addInit n $ mapMaybe (keymap M.!?) ks )
+        | (n, (_, ks)) <- nodes_
+        ] where addInit = (\case [] -> id; a -> (init a:))
+
+      -- fs = map (nodeLabel . (nodes graph V.!)) . IS.toList . IS.unions
+      -- (graph, _) = buildGraphFromNodesAndEdges (map (\a -> (a,a)) items) edges'
+
+-- | Get an indexed list of elements, this enables us to differentiate between stuff.
+toClosures :: Ord n => [Edge e n] -> Problem a [n] -> Problem a [IS.IntSet]
+toClosures edges' = refineProblem refined where
+  refined items = (Just . fs, closures graph)
+    where
+      fs = map (nodeLabel . (nodes graph V.!)) . IS.toList . IS.unions
+      (graph, _) = buildGraphFromNodesAndEdges (map (\a -> (a,a)) items) edges'
 -- * Expectation
 
 

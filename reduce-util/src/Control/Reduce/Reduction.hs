@@ -24,6 +24,7 @@ module Control.Reduce.Reduction
     , all'
     , orNothing
     , subelements
+    , reduceAs
 
     -- * Algorithms
     , Reduct
@@ -48,12 +49,15 @@ module Control.Reduce.Reduction
     -- * Implementations
     , maybeR
     , listR
+    , atleastoneR
     , vectorR
     , hashmapR
     , jsonR
     , treeR
     , dirTreeR
     , dirForestR
+    , deepDirTreeR
+    , deepDirForestR
   ) where
 
 -- base
@@ -278,6 +282,13 @@ treeSubelements red =
   getting (treeReduction red)
 {-# INLINE treeSubelements #-}
 
+reduceAs :: Prism' a b -> PartialReduction b a
+reduceAs p f a =
+  f (review p a) <&> \case
+    Just b -> b ^? p
+    Nothing -> Nothing
+{-# INLINE reduceAs #-}
+
 
 -- * Implementations
 
@@ -285,6 +296,13 @@ treeSubelements red =
 listR :: Reduction [a] a
 listR pab =
   fmap catMaybes . itraverse (indexed pab)
+
+-- | Like 'listR' but removes the list if empty
+atleastoneR :: PartialReduction [a] a
+atleastoneR f t =
+  listR f t <&> \case
+  [] -> Nothing
+  a  -> Just a
 
 -- | A 'Maybe' is trivially reducable.
 maybeR :: Reduction (Maybe s) s
@@ -328,3 +346,21 @@ dirTreeR fn n =
 dirForestR :: Reduction (DirForest a) (DirTree a)
 dirForestR fn (DirForest b) =
   DirForest <$> (iso toFileList fromFileList . listR . all' _2) fn b
+
+-- | Reduces the files in a dirtree. Removes directories if empty.
+deepDirTreeR :: PartialReduction (DirTree a) a
+deepDirTreeR f (DirTree tree) = case tree of
+  File a ->
+    fmap file <$> f a
+  Directory b ->
+    fmap directory <$> deepDirForestR f b
+
+-- | Reduces the files in a DirForest. Removes directories if empty.
+deepDirForestR :: PartialReduction (DirForest a) a
+deepDirForestR f (DirForest a) =
+  fmap DirForest <$>
+    ( all' (iso toFileList fromFileList)
+     . atleastoneR
+     . all' _2
+     . deepDirTreeR
+    ) f a
