@@ -40,6 +40,12 @@ spec = do
     -- it "can build an other graph" $ do
     --   let (gr, _) = buildGraph' [ ('a', "abc"), ('b', "bc"), ('c', "") ]
     --   gr `shouldBe` Control.Reduce.Graph.empty
+
+  describe "edges" $ do
+    it "should handle a small graph" $
+      (edges . fst . buildGraph' $ [ ('a', "abc") , ('b', "")])
+      `shouldBe` [ Edge () 0 0 , Edge () 0 1 ]
+
   describe "scc, scc', and partition" $ do
 
     it "can handle a connected graph" $ do
@@ -114,3 +120,15 @@ spec = do
           , S.fromList [7]
           , S.fromList [0]
           ]
+
+  describe "writeCSV" $ do
+    it "can write a larger CSV formatted graph" $ do
+      file <- BL.readFile "test/data/example-graph.csv"
+      let r = readCSV () [0..16 :: Int] file
+      case r of
+        Left t -> do
+          putStrLn t
+          fail "should be a right"
+        Right ( x :: Graph () Int ) -> do
+          let x' = writeEmptyCSV x
+          readCSV () [0..16 :: Int] x' `shouldBe` Right x

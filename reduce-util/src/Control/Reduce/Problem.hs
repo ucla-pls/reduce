@@ -75,6 +75,9 @@ module Control.Reduce.Problem
   , checkExpectation
   , zipExpectation
 
+  -- * Utils
+  , reductionGraph
+  , reductionKeyGraph
   ) where
 
 -- base
@@ -496,19 +499,44 @@ toGraphReductionDeep keyfn red = refineProblem refined where
           . map (nodeLabel . (nodes graph V.!))
           . IS.toList . IS.unions
           $ cls
+      (graph, _) = reductionKeyGraph keyfn red s
 
-      nodes_ = itoListOf (deepSubelements red . to keyfn) s
-      keymap = M.fromList
-        [ (k, n)
-        | (n, (Just k, _)) <- nodes_
-        ]
-      (graph, _) = buildGraph'
-        [ (n, addInit n $ mapMaybe (keymap M.!?) ks )
-        | (n, (_, ks)) <- nodes_
-        ] where addInit = (\case [] -> id; a -> (init a:))
 
-      -- fs = map (nodeLabel . (nodes graph V.!)) . IS.toList . IS.unions
-      -- (graph, _) = buildGraphFromNodesAndEdges (map (\a -> (a,a)) items) edges'
+reductionGraph ::
+  Ord k
+  =>
+  (s -> (Maybe k, [k]))
+  -- ^ A key function
+  -> PartialReduction s s
+  -- ^ A partial reduction
+  -> s
+  -> (Graph () s, [Int] -> Maybe Vertex)
+reductionGraph keyfn red s = buildGraph
+  [ (a, n, map (,()) . addInit n $ mapMaybe (keymap M.!?) ks )
+  | (n, (a, (_, ks))) <- nodes_
+  ]
+  where
+    addInit = (\case [] -> id; a -> (init a:))
+    nodes_ = itoListOf (deepSubelements red . to (\a -> (a, keyfn a))) s
+    keymap = M.fromList [ (k, n) | (n, (_, (Just k, _))) <- nodes_ ]
+
+reductionKeyGraph ::
+  Ord k
+  =>
+  (s -> (Maybe k, [k]))
+  -- ^ A key function
+  -> PartialReduction s s
+  -- ^ A partial reduction
+  -> s
+  -> (Graph () [Int], [Int] -> Maybe Vertex)
+reductionKeyGraph keyfn red s = buildGraph'
+  [ (n, addInit n $ mapMaybe (keymap M.!?) ks )
+  | (n, (_, ks)) <- nodes_
+  ]
+  where
+    addInit = (\case [] -> id; a -> (init a:))
+    nodes_ = itoListOf (deepSubelements red . to keyfn) s
+    keymap = M.fromList [ (k, n) | (n, (Just k, _)) <- nodes_ ]
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
 toClosures :: Ord n => [Edge e n] -> Problem a [n] -> Problem a [IS.IntSet]

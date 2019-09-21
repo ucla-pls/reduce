@@ -33,6 +33,7 @@ module Control.Reduce.Graph
   , Node (..)
   , buildNode
   , outEdges
+  , Vertex
 
   , Edge (..)
 
@@ -58,6 +59,9 @@ module Control.Reduce.Graph
   , readTGF
   , readCSV
   , readEdgesCSV
+
+  , writeCSV
+  , writeEmptyCSV
 
   ) where
 
@@ -106,11 +110,11 @@ import           Text.Megaparsec.Char
 type Vertex = Int
 
 -- | An `Edge`
-data Edge e n = Edge !n !n !e
+data Edge e n = Edge !e !n !n
   deriving (Show, Eq, Generic, Functor)
 
 instance Bifunctor Edge where
-  first f (Edge a b e) = (Edge a b (f e))
+  first f (Edge e a b) = (Edge (f e) a b)
   second = fmap
 
 -- | A `Node` is a label, and a list of edges.
@@ -139,6 +143,7 @@ newtype Graph e n = Graph
 nodeLabels :: Graph e n -> V.Vector n
 nodeLabels = V.map nodeLabel . nodes
 {-# INLINE nodeLabels #-}
+
 
 empty :: Graph e n
 empty = Graph (V.empty)
@@ -169,13 +174,13 @@ buildGraphFromNodesAndEdges keys edges' =
     lookupKey = binarySearch (V.map fst sortedNodes)
 
 lookupEdge :: (key -> Maybe Vertex) -> Edge e key -> Maybe (Edge e Vertex)
-lookupEdge fn (Edge k1 k2 e) =
-  Edge <$> fn k1 <*> fn k2 <*> pure e
+lookupEdge fn (Edge e k1 k2) =
+  Edge <$> pure e <*> fn k1 <*> fn k2
 
 fromEdges :: Int -> [Edge e Vertex] -> V.Vector [(Vertex, e)]
 fromEdges s edges' = V.create $ do
   v <- VM.replicate s []
-  forM_ edges' $ \(Edge i j e) -> do
+  forM_ edges' $ \(Edge e i j) -> do
     VM.unsafeWrite v i . ((j, e):) =<< VM.unsafeRead v i
   return v
 
@@ -197,7 +202,8 @@ binarySearch v n =
 -- | Get a list of the edges in the graph.
 edges :: Graph e n -> [Edge e Vertex]
 edges Graph {..} =
-  toListOf (ifolded.to outEdges.folded.withIndex.to (\(i, (j, e)) -> Edge i j e)) nodes
+  toListOf ((ifolded.to outEdges <. folded).withIndex.to (\(i, (j, e)) -> Edge e i j))
+  nodes
 {-# INLINE edges #-}
 
 -- | Transpose a graph
@@ -344,7 +350,7 @@ readTGF = parsePretty parser
       t <-  takeWhile1P (Just "edge to") (not . isSpace)
       skipSpace
       lab <- takeWhileP (Just "edge label") (/= '\n')
-      return (Edge f t lab)
+      return (Edge lab f t)
 
     skipSpace =
       void $ takeWhileP Nothing (== ' ')
@@ -352,15 +358,23 @@ readTGF = parsePretty parser
 instance (C.FromField e, C.FromField n) => C.FromRecord (Edge (Maybe e) n) where
   parseRecord v
     | length v == 2 =
-      Edge <$> v C..! 0 <*> v C..! 1 <*> pure Nothing
+      Edge <$> pure Nothing <*> v C..! 0 <*> v C..! 1
     | length v == 3 =
-      Edge <$> v C..! 0 <*> v C..! 1 <*> (Just <$> v C..! 2)
+      Edge <$> (Just <$> v C..! 2) <*> v C..! 0 <*> v C..! 1
     | otherwise =
       mzero
 
 instance (C.FromField e, C.FromField n) => C.FromNamedRecord (Edge (Maybe e) n) where
   parseNamedRecord m =
-    Edge <$> m C..: "from" <*> m C..: "to" <*> ((Just <$> m C..: "label") <|> pure Nothing)
+    Edge <$> ((Just <$> m C..: "label") <|> pure Nothing)
+      <*> m C..: "from" <*> m C..: "to"
+
+instance (C.ToField e, C.ToField n) => C.ToNamedRecord (Edge e n) where
+  toNamedRecord (Edge e f t) = C.namedRecord
+    [ "from" C..= f
+    , "to" C..= t
+    , "label" C..= e
+    ]
 
 -- | Read a csv file of edges, given a default e to load if nothings is found in "label".
 readEdgesCSV :: (C.FromField n, C.FromField e) => e -> BL.ByteString -> Either String [Edge e n]
@@ -373,3 +387,16 @@ readCSV def nodes bs = do
   x <- readEdgesCSV def bs
   return . fst $ buildGraphFromNodesAndEdges (map (\a -> (a,a)) nodes) x
 {-# INLINE readCSV #-}
+
+-- | Write a csv file of edges
+writeCSV :: (C.ToField a, C.ToField b) => Graph b a -> BL.ByteString
+writeCSV graph =
+  C.encodeByName (C.header ["from", "to", "label"])
+  . map (second (nodeLabels graph V.!))
+  $ edges graph
+
+writeEmptyCSV :: (C.ToField a) => Graph () a -> BL.ByteString
+writeEmptyCSV graph =
+  C.encodeByName (C.header ["from", "to"])
+  . map (bimap (const BL.empty) (nodeLabels graph V.!))
+  $ edges graph

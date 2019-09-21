@@ -57,94 +57,97 @@ import           GHC.IO.Encoding (setLocaleEncoding, utf8)
 -- red
 import           Control.Reduce.Language.C
 
-data Config = Config
-  { _cnfInputFile        :: !FilePath
-  , _cnfOutputFile       :: !(Maybe FilePath)
-  , _cnfLoggerConfig     :: !LoggerConfig
-  , _cnfDependencies     :: !(Maybe FilePath)
-  -- , _cnfTreeStrategy     :: !TreeStrategy
-  , _cnfFormat           :: !(Maybe Format)
-  , _cnfReducerName      :: !ReducerName
-  , _cnfWorkFolder       :: !WorkFolder
-  , _cnfPredicateOptions :: !PredicateOptions
-  , _cnfReductionOptions :: !ReductionOptions
-  -- , _cnfCommand          :: !CmdTemplate
-  } deriving (Show)
+entry :: IO ()
+entry = return ()
 
-data Format = forall s a. Format
-  { formatName :: String
-  , formatRecognizer :: FilePath -> IO Bool
-  , formatReader :: FilePath -> IO a
-  , formatWriter :: FilePath -> a -> IO ()
-  , formatProblem :: Problem s a
-  }
+-- data Config = Config
+--   { _cnfInputFile        :: !FilePath
+--   , _cnfOutputFile       :: !(Maybe FilePath)
+--   , _cnfLoggerConfig     :: !LoggerConfig
+--   , _cnfDependencies     :: !(Maybe FilePath)
+--   -- , _cnfTreeStrategy     :: !TreeStrategy
+--   , _cnfFormat           :: !(Maybe Format)
+--   , _cnfReducerName      :: !ReducerName
+--   , _cnfWorkFolder       :: !WorkFolder
+--   , _cnfPredicateOptions :: !PredicateOptions
+--   , _cnfReductionOptions :: !ReductionOptions
+--   -- , _cnfCommand          :: !CmdTemplate
+--   } deriving (Show)
 
-instance Show Format where
-  show = formatName
+-- data Format = forall s a. Format
+--   { formatName :: String
+--   , formatRecognizer :: FilePath -> IO Bool
+--   , formatReader :: FilePath -> IO a
+--   , formatWriter :: FilePath -> a -> IO ()
+--   , formatProblem :: Problem s a
+--   }
 
-linesFormat :: Format
-linesFormat = Format
-  "lines"
-  (const (return True))
-  (fmap BLC.lines . BLC.readFile)
-  (\fp x -> BLC.writeFile fp (BLC.unlines x))
+-- instance Show Format where
+--   show = formatName
+
+-- linesFormat :: Format
+-- linesFormat = Format
+--   "lines"
+--   (const (return True))
+--   (fmap BLC.lines . BLC.readFile)
+--   (\fp x -> BLC.writeFile fp (BLC.unlines x))
 
 
-predictFormat :: FilePath -> [Format] -> IO Format
-predictFormat fp = \case
-  format:rest -> do
-    b <- formatRecognizer format fp
-    if b
-      then return format
-      else predictFormat fp rest
-  [] -> error $ "Could not find a matching format for " ++ show fp
+-- predictFormat :: FilePath -> [Format] -> IO Format
+-- predictFormat fp = \case
+--   format:rest -> do
+--     b <- formatRecognizer format fp
+--     if b
+--       then return format
+--       else predictFormat fp rest
+--   [] -> error $ "Could not find a matching format for " ++ show fp
 
-makeLenses ''Config
+-- makeLenses ''Config
 
-parseTreeStrategy :: Parser TreeStrategy
-parseTreeStrategy =
-  toStrategy . map toLower
-  <$> strOption
-  ( short 's'
-    <> long "strategy"
-    <> value "graph"
-    <> hidden
-    <> showDefault <> help (
-      "the reduction strategy for tree structures "
-      ++ "(graph, hdd, flat)."
-      )
-    <> metavar "STRATEGY"
-  )
-  where
-    toStrategy str' =
-      let f = List.isPrefixOf str' in
-      if | f "graph" -> GraphStrategy
-         | f "hdd" -> HddStrategy
-         | f "flat" -> FlatStrategy
-         | True ->
-           error $ "Unknown format " ++ str'
+-- parseTreeStrategy :: Parser TreeStrategy
+-- parseTreeStrategy =
+--   toStrategy . map toLower
+--   <$> strOption
+--   ( short 's'
+--     <> long "strategy"
+--     <> value "graph"
+--     <> hidden
+--     <> showDefault <> help (
+--       "the reduction strategy for tree structures "
+--       ++ "(graph, hdd, flat)."
+--       )
+--     <> metavar "STRATEGY"
+--   )
+--   where
+--     toStrategy str' =
+--       let f = List.isPrefixOf str' in
+--       if | f "graph" -> GraphStrategy
+--          | f "hdd" -> HddStrategy
+--          | f "flat" -> FlatStrategy
+--          | True ->
+--            error $ "Unknown format " ++ str'
 
-parseFormat :: [Format] -> Parser (Maybe Format)
-parseFormat formats = do
-  name <- optional . strOption $
-    long "format"
-    <> value (formatName . last $ formats)
-    <> showDefaultWith id
-    <> hidden
-    <> help (
-      "force the format of the input, otherwise it will automatically choose " ++
-      "(" ++ List.intercalate ", " names ++ ")"
-      ++ "."
-    )
-    <> metavar "FORMAT"
-  pure (select name)
-  where
-    names = map formatName formats
+-- parseFormat :: [Format] -> Parser (Maybe Format)
+-- parseFormat formats = do
+--   name <- optional . strOption $
+--     long "format"
+--     <> value (formatName . last $ formats)
+--     <> showDefaultWith id
+--     <> hidden
+--     <> help (
+--       "force the format of the input, otherwise it will automatically choose " ++
+--       "(" ++ List.intercalate ", " names ++ ")"
+--       ++ "."
+--     )
+--     <> metavar "FORMAT"
+--   pure (select name)
+--   where
+--     names = map formatName formats
 
-    select = \case
-      Just n ->
-        List.find (List.isPrefixOf (map toLower n). formatName) formats
-      Nothing -> Nothing
+--     select = \case
+--       Just n ->
+--         List.find (List.isPrefixOf (map toLower n). formatName) formats
+--       Nothing -> Nothing
 
 
   -- toFormat . map toLower
@@ -166,90 +169,90 @@ parseFormat formats = do
   --     where f = List.isPrefixOf str'
 
 
-getConfigParser :: [Format] ->  Parser (IO Config)
-getConfigParser formats = do
-  _cnfOutputFile <-
-    parseOutputFile
+-- getConfigParser :: [Format] ->  Parser (IO Config)
+-- getConfigParser formats = do
+--   _cnfOutputFile <-
+--     parseOutputFile
 
-  _cnfLoggerConfig <-
-    parseLoggerConfig
+--   _cnfLoggerConfig <-
+--     parseLoggerConfig
 
-  _cnfDependencies <- optional
-    . strOption
-    $ long "deps"
-    <> metavar "CSV_FILE"
-    <> hidden
-    <> help "A csv file with edges between the dependencies. The headers should be 'from','to', and optionally 'label'."
+--   _cnfDependencies <- optional
+--     . strOption
+--     $ long "deps"
+--     <> metavar "CSV_FILE"
+--     <> hidden
+--     <> help "A csv file with edges between the dependencies. The headers should be 'from','to', and optionally 'label'."
 
-  _cnfFormat <-
-    parseFormat formats
+--   _cnfFormat <-
+--     parseFormat formats
 
-  _cnfTreeStrategy <-
-    parseTreeStrategy
+--   _cnfTreeStrategy <-
+--     parseTreeStrategy
 
-  _cnfReducerName <-
-    parseReducerName
+--   _cnfReducerName <-
+--     parseReducerName
 
-  _cnfWorkFolder <-
-    parseWorkFolder "_red"
+--   _cnfWorkFolder <-
+--     parseWorkFolder "_red"
 
-  _cnfPredicateOptions <-
-    parsePredicateOptions
+--   _cnfPredicateOptions <-
+--     parsePredicateOptions
 
-  _cnfReductionOptions <-
-    parseReductionOptions
+--   _cnfReductionOptions <-
+--     parseReductionOptions
 
-  _cnfInputFile <- strArgument $
-    metavar "INPUT" <> help "the input file or folder"
+--   _cnfInputFile <- strArgument $
+--     metavar "INPUT" <> help "the input file or folder"
 
-  ioCommand <-
-    parseCmdTemplate
+--   ioCommand <-
+--     parseCmdTemplate
 
-  pure $ do
-    _cnfCommand <- either fail return =<< ioCommand
-    return $ Config {..}
+--   pure $ do
+--     _cnfCommand <- either fail return =<< ioCommand
+--     return $ Config {..}
 
-instance HasLogger Config where
-  loggerL = cnfLoggerConfig
+-- instance HasLogger Config where
+--   loggerL = cnfLoggerConfig
 
-entry :: IO ()
-entry = do
-  setLocaleEncoding utf8
+-- entry :: IO ()
+-- entry = do
+--   setLocaleEncoding utf8
 
-  let formats =
-        [ linesFormat
-        ]
+--   let formats =
+--         [ linesFormat
+--         ]
 
-  config <- join . execParser $
-    A.info (getConfigParser formats <**> helper)
-    ( fullDesc
-    <> header "red"
-    <> progDesc "A command line tool for reducing almost anything."
-    )
+--   config <- join . execParser $
+--     A.info (getConfigParser formats <**> helper)
+--     ( fullDesc
+--     <> header "red"
+--     <> progDesc "A command line tool for reducing almost anything."
+--     )
 
-  runReaderT (run formats) config
+--   runReaderT (run formats) config
 
-run :: [Format] -> ReaderT Config IO ()
-run formats = do
-  Config {..} <- ask
+-- run :: [Format] -> ReaderT Config IO ()
+-- run formats = do
+--   Config {..} <- ask
 
-  withWorkFolder _cnfWorkFolder $ \workfolder -> do
-    L.info ("Work folder: " <> display workfolder)
+--   withWorkFolder _cnfWorkFolder $ \workfolder -> do
+--     L.info ("Work folder: " <> display workfolder)
 
-    format <- case _cnfFormat of
-      Just f -> return f
-      Nothing -> liftIO $ predictFormat _cnfInputFile formats
+--     format <- case _cnfFormat of
+--       Just f -> return f
+--       Nothing -> liftIO $ predictFormat _cnfInputFile formats
 
-    runFormat format
+--     runFormat format
 
-runFormat :: Format -> ReaderT Config IO ()
-runFormat format@Format {..} = do
-  Config {..} <- ask
-  a <- liftIO $ formatReader _cnfInputFile
+-- runFormat :: Format -> ReaderT Config IO ()
+-- runFormat format@Format {..} = do
+--   Config {..} <- ask
+--   a <- liftIO $ formatReader _cnfInputFile
 
-  output <- findOutputFile _cnfInputFile _cnfOutputFile
-  L.phase ("Writing output to file " <> display output) $ do
-    liftIO $ formatWriter output a
+--   output <- findOutputFile _cnfInputFile _cnfOutputFile
+--   L.phase ("Writing output to file " <> display output) $ do
+--     liftIO $ formatWriter output a
 
 --   withWorkFolder _cnfWorkFolder $ \workfolder ->
 --     L.info ("Work folder: " <> display workfolder) >> case _cnfFormat of

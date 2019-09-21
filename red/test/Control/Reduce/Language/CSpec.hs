@@ -75,7 +75,7 @@ spec = do
     hasItems [[0], [1], [2], [0, 2]]
     hasDefs [("g", [[0],[1]]), ("f", [[2]])]
     hasUses [("g", [0,2])]
-    hasDefUses [Edge [0,2] [1] "g"]
+    hasDefUses [Edge "g" [0,2] [1] ]
 
 
   describeC "structs"
@@ -93,9 +93,9 @@ spec = do
       ]
     hasUses [("List", [1]), ("List", [2]), ("one", [2]) ]
     hasDefUses
-      [ Edge [2] [1] "one"
-      , Edge [2] [1] "List"
-      , Edge [1] [0] "List"
+      [ Edge "one"  [2] [1]
+      , Edge "List" [2] [1]
+      , Edge "List" [1] [0]
       ]
 
   describeC "structs 2 "
@@ -113,7 +113,7 @@ spec = do
       , ("f", [[1]])
       ]
     hasUses [("Const", [1]), ("Const", [0, 1])]
-    hasDefUses [Edge [1] [0] "Const", Edge [0,1] [0] "Const"]
+    hasDefUses [Edge "Const" [1] [0] , Edge "Const" [0,1] [0] ]
 
   describeC "structs 3"
     [text| struct Const { int item;} c;
@@ -127,7 +127,7 @@ spec = do
       , ("x", [[1]])
       ]
     hasUses [("Const", [1])]
-    hasDefUses [Edge [1] [0] "Const" ]
+    hasDefUses [Edge "Const" [1] [0] ]
 
 
   describeC "enums"
@@ -147,9 +147,9 @@ spec = do
       ]
     hasUses [("a", [2]), ("Working", [3]), ("State", [3])]
     hasDefUses
-      [ Edge [2] [0] "a"
-      , Edge [3] [2] "State"
-      , Edge [3] [2] "Working"
+      [ Edge "a"       [2] [0]
+      , Edge "State"   [3] [2]
+      , Edge "Working" [3] [2]
       ]
 
   describeC "function"
@@ -169,8 +169,8 @@ spec = do
     hasDefs [("kmh", [[0]]), ("speed", [[1]]), ("f", [[2]])]
     hasUses [("kmh", [1]), ("kmh", [2]), ("x", [0]) ]
     hasDefUses
-      [ Edge [1] [0] "kmh"
-      , Edge [2] [0] "kmh"
+      [ Edge "kmh" [1] [0]
+      , Edge "kmh" [2] [0]
       ]
 
 defineC :: String -> Text.Text -> CTranslUnit

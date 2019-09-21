@@ -332,7 +332,7 @@ defuses c = do
   (i, x) <- uses c
   case Map.lookup i m of
     Just defs' ->
-      return $ Edge x (firstPrevious x defs') i
+      return $ Edge i (firstPrevious x defs') x
     Nothing  -> mzero
   where
     m :: Map.Map Ident [[Int]]
@@ -359,7 +359,7 @@ cEdges ctu = do
       (NE.toList -> fi, ident) <- labelUsages
       case Map.lookup ident labels of
         Just etos ->
-          return $ Edge fi (getLargestPrefix fi etos) ()
+          return $ Edge () fi (getLargestPrefix fi etos)
         Nothing  -> mzero
 
     makeNice :: [(NE.NonEmpty Int, Ident)] -> String
