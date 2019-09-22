@@ -510,13 +510,23 @@ reductionGraph ::
   -> s
   -> (Graph (Maybe k) ([Int], s), [Int] -> Maybe Vertex)
 reductionGraph keyfn red s = buildGraph
-  [ ((n, a), n, addInit n $ mapMaybe (\k -> (, Just k) <$> keymap M.!? k) ks )
+  [ ( (n, a)
+    , n
+    , addInit n
+      $ concatMap (\k ->
+                     fmap (, Just k)
+                     . S.toList
+                     . fromMaybe S.empty
+                     $ keymap M.!? k
+                  ) ks
+    )
   | (n, (a, (_, ks))) <- nodes_
   ]
   where
     addInit = (\case [] -> id; a -> ((tail a, Nothing):))
     nodes_ = itoListOf (deepSubelements red . to (\a -> (a, keyfn a))) s
-    keymap = M.fromList [ (k, n) | (n, (_, (Just k, _))) <- nodes_ ]
+    keymap = M.fromListWith S.union
+      [ (k, S.singleton n) | (n, (_, (Just k, _))) <- nodes_ ]
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
 toClosures :: Ord n => [Edge e n] -> Problem a [n] -> Problem a [IS.IntSet]
