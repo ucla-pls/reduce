@@ -122,7 +122,11 @@ data Node e n = Node
   { nodeLabel    :: !n
   , edgeVertices :: !(U.Vector Vertex)
   , edgeLabels   :: !(V.Vector e)
-  } deriving (Show, Eq)
+  } deriving (Show, Eq, Functor)
+
+instance Bifunctor Node where
+  first f n = n { edgeLabels = f <$> edgeLabels n }
+  second = fmap
 
 -- | Get the outedges of a node
 outEdges :: Node e n -> V.Vector (Vertex, e)
@@ -138,12 +142,15 @@ buildNode n edges' =
 -- | Graph is a vector of nodes.
 newtype Graph e n = Graph
   { nodes          :: V.Vector (Node e n)
-  } deriving (Show, Eq)
+  } deriving (Show, Eq, Functor)
+
+instance Bifunctor Graph where
+  first f n = Graph (first f <$> nodes n)
+  second = fmap
 
 nodeLabels :: Graph e n -> V.Vector n
 nodeLabels = V.map nodeLabel . nodes
 {-# INLINE nodeLabels #-}
-
 
 empty :: Graph e n
 empty = Graph (V.empty)
