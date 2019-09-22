@@ -514,7 +514,7 @@ reductionGraph keyfn red s = buildGraph
   | (n, (a, (_, ks))) <- nodes_
   ]
   where
-    addInit = (\case [] -> id; a -> ((init a, Nothing):))
+    addInit = (\case [] -> id; a -> ((tail a, Nothing):))
     nodes_ = itoListOf (deepSubelements red . to (\a -> (a, keyfn a))) s
     keymap = M.fromList [ (k, n) | (n, (_, (Just k, _))) <- nodes_ ]
 
