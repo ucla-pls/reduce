@@ -136,22 +136,22 @@ parseWorkFolder template = do
 parseExpectation :: Parser Expectation
 parseExpectation = do
   _expectedExitCode <-
-    optional . option auto $
+    optional . fmap exitCodeFromInt . option auto $
     long "exit"
     <> help "require a specific exit code."
     <> hidden
 
-  _expectedStdout <-
-    optional . option auto $
-    long "out"
-    <> help "require a specific stdout hash."
-    <> hidden
+  _expectedStdout <- pure Nothing
+    -- optional . option auto $
+    -- long "out"
+    -- <> help "require a specific stdout hash."
+    -- <> hidden
 
-  _expectedStderr <-
-    optional . option auto $
-    long "err"
-    <> help "require a specific stderr hash."
-    <> hidden
+  _expectedStderr <- pure Nothing
+    -- optional . option auto $
+    -- long "err"
+    -- <> help "require a specific stderr hash."
+    -- <> hidden
 
   pure $ Expectation {..}
 
