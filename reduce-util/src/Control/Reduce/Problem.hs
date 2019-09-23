@@ -201,9 +201,10 @@ makeClassy ''ReductionOptions
 
 -- | Predicate options, defines which elements to check
 data PredicateOptions = PredicateOptions
-  { predOptPreserveExitCode :: !Bool
-  , predOptPreserveStdout   :: !Bool
-  , predOptPreserveStderr   :: !Bool
+  { _predOptPreserveExitCode :: !Bool
+  , _predOptPreserveStdout   :: !Bool
+  , _predOptPreserveStderr   :: !Bool
+  , _predOptPriorExpectation :: !Expectation
   } deriving (Show, Eq)
 
 makeClassy ''PredicateOptions
@@ -250,17 +251,21 @@ setupProblem workDir template a desc = L.phase "Calculating Initial Problem" $ d
 
   result <- runCommand workDir timelimit template (desc a)
 
-  return $ case snd . resultOutput $ result of
-    Just output ->
-      Just $ Problem
-      { _problemInitial = a
-      , _problemExtractBase = Just
-      , _problemDescription = desc
-      , _problemExpectation = zipExpectation opts output
-      , _problemCommand = template
-      , _problemMetric = emptyMetric
-      }
-    Nothing -> Nothing
+  case snd . resultOutput $ result of
+    Just output -> do
+      unless (checkExpectation (_predOptPriorExpectation opts) output)
+        $ L.warn "Expectations not met. Continuing with requested expectations"
+      return . Just
+        $ Problem
+        { _problemInitial = a
+        , _problemExtractBase = Just
+        , _problemDescription = desc
+        , _problemExpectation = (zipExpectation opts output <> _predOptPriorExpectation opts)
+        , _problemCommand = template
+        , _problemMetric = emptyMetric
+        }
+    Nothing ->
+      return $ Nothing
 
 
 -- | `runReduction` is the main function of this package. It is a wrapper
@@ -550,9 +555,9 @@ instance Semigroup Expectation where
 zipExpectation :: PredicateOptions -> CmdOutputSummary -> Expectation
 zipExpectation PredicateOptions{..} CmdOutputSummary{..} =
   Expectation
-  (guard predOptPreserveExitCode $> outputCode)
-  (guard predOptPreserveStdout   $> outputOut)
-  (guard predOptPreserveStderr   $> outputErr)
+  (guard _predOptPreserveExitCode $> outputCode)
+  (guard _predOptPreserveStdout   $> outputOut)
+  (guard _predOptPreserveStderr   $> outputErr)
 
 -- | Check if the output matches the expectation.
 checkExpectation :: Expectation -> CmdOutputSummary -> Bool

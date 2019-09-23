@@ -69,22 +69,28 @@ parseCmdTemplate =
 
 
 parsePredicateOptions :: Parser PredicateOptions
-parsePredicateOptions = handler <$> option str
-  ( long "preserve"
-    <> short 'p'
-    <> help "a comma separated list of what to preserve. Choose from out, err, and exit. "
-    <> value "exit"
-    <> showDefault
-    <> hidden
-    )
-  where
-    handler input =
-      let ms = map Text.strip . Text.splitOn "," . Text.pack $ input
-      in PredicateOptions
-         { predOptPreserveExitCode = List.elem "exit" ms || List.elem "exitcode" ms
-         , predOptPreserveStdout = List.elem "out" ms || List.elem "stdout" ms
-         , predOptPreserveStderr = List.elem "err" ms || List.elem "stderr" ms
-         }
+parsePredicateOptions = do
+  input <-
+    option str
+    ( long "preserve"
+      <> short 'p'
+      <> help "a comma separated list of what to preserve. Choose from out, err, and exit. "
+      <> value "exit"
+      <> showDefault
+      <> hidden
+      )
+
+  _predOptPriorExpectation <-
+    parseExpectation
+
+  pure $
+    let ms = map Text.strip . Text.splitOn "," . Text.pack $ input
+    in PredicateOptions
+    { _predOptPreserveExitCode = List.elem "exit" ms || List.elem "exitcode" ms
+    , _predOptPreserveStdout = List.elem "out" ms || List.elem "stdout" ms
+    , _predOptPreserveStderr = List.elem "err" ms || List.elem "stderr" ms
+    , _predOptPriorExpectation = _predOptPriorExpectation
+    }
 
 data WorkFolder
   = TempWorkFolder !String
@@ -126,6 +132,28 @@ parseWorkFolder template = do
       DefinedWorkFolder useForce folder
     Nothing -> do
       TempWorkFolder $ template
+
+parseExpectation :: Parser Expectation
+parseExpectation = do
+  _expectedExitCode <-
+    optional . option auto $
+    long "exit"
+    <> help "require a specific exit code."
+    <> hidden
+
+  _expectedStdout <-
+    optional . option auto $
+    long "out"
+    <> help "require a specific stdout hash."
+    <> hidden
+
+  _expectedStderr <-
+    optional . option auto $
+    long "err"
+    <> help "require a specific stderr hash."
+    <> hidden
+
+  pure $ Expectation {..}
 
 parseReductionOptions :: Parser (ReductionOptions)
 parseReductionOptions = do
