@@ -138,7 +138,7 @@ runCommand ::
 runCommand workDir cmdTimelimit cmdTemplate cmdInput = do
   (tp, pr) <- timedPhase "setup" $ do
     fn <- liftIO $ setupCommand workDir cmdTemplate cmdInput
-    return $ proc fn [ ]
+    return $ proc (makeRelative workDir fn) [ ]
   withCurrentDirectory workDir $ do
     (tm, x) <- timedPhase "run" $ do
       olog <- traceLogger "+"
