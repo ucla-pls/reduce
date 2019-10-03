@@ -243,7 +243,7 @@ setupCommand workDir cmdTemplate CmdInput{..} = do
         setPermissions fp. setOwnerExecutable True
 
     shellScript = do
-      tell "#!/usr/bin/env sh\n"
+      -- tell "#!/usr/bin/env sh\n"
       tell "WORKDIR=${2:-$(pwd)}\n"
       tell "SANDBOX=${1:-\"$WORKDIR/sandbox\"}\n"
       tell "mkdir -p \"$SANDBOX\"\n"
