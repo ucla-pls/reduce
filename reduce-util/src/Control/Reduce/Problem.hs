@@ -57,6 +57,7 @@ module Control.Reduce.Problem
   , toReductionTree
   , toReductionDeep
   , toGraphReductionDeep
+  , toGraphReductionDeepM
 
   , meassure
 
@@ -76,7 +77,7 @@ module Control.Reduce.Problem
   , zipExpectation
 
   -- * Utils
-  , reductionGraph
+  , reductionGraphM
   ) where
 
 -- base
@@ -405,15 +406,31 @@ refineProblem f p@Problem {..} =
   where
     (tf, t) = f _problemInitial
 
--- | It is alos possible to refine the problem and access a monad or applicative.
+-- | It is also possible to refine the problem and access a monad or applicative.
 -- This is usefull in some situations were external controll is needed for refinement.
-refineProblemA :: Applicative m => (s -> m (t -> Maybe s, t)) -> Problem a s -> m (Problem a t)
+refineProblemA :: Functor m
+  => (s -> m (t -> Maybe s, t))
+  -> Problem a s
+  -> m (Problem a t)
 refineProblemA f p@Problem {..} = do
   f _problemInitial <&> \(tf, t) ->
     p { _problemInitial = t
       , _problemExtractBase = (tf >=> _problemExtractBase)
       , _problemMetric = contramap (>>= tf) _problemMetric
       }
+
+refineProblemA' :: Functor m
+  => (s -> m (x, (t -> Maybe s, t)))
+  -> Problem a s
+  -> m (x, Problem a t)
+refineProblemA' f p@Problem {..} = do
+  f _problemInitial <&> \(x, (tf, t)) ->
+    ( x
+    , p { _problemInitial = t
+      , _problemExtractBase = (tf >=> _problemExtractBase)
+      , _problemMetric = contramap (>>= tf) _problemMetric
+      }
+    )
 
 
 -- * Problem Refinements
@@ -485,53 +502,73 @@ toReductionDeep' red =
 -- | Like reduction deep, but also calculates the graph to reduce with.
 -- It automatically adds edges to parrent items
 toGraphReductionDeep ::
-  Ord k =>
+  (Ord k) =>
   (s -> (Maybe k, [k]))
   -- ^ A key function
   -> PartialReduction s s
   -- ^ A partial reduction
   -> Problem a s
   -> Problem a [IS.IntSet]
-toGraphReductionDeep keyfn red = refineProblem refined where
-  refined s =
-    ( fromClosures
-    , closures graph
-    )
-    where
+toGraphReductionDeep keyfn red =
+  runIdentity . fmap snd . toGraphReductionDeepM (return . keyfn) red
+
+-- | Like reduction deep, but also calculates the graph to reduce with.
+-- It automatically adds edges to parrent items
+toGraphReductionDeepM ::
+  (Monad m, Ord k) =>
+  (s -> m (Maybe k, [k]))
+  -- ^ A key function
+  -> PartialReduction s s
+  -- ^ A partial reduction
+  -> Problem a s
+  -> m ((Graph (Maybe k) ([Int], s), [IS.IntSet]), Problem a [IS.IntSet])
+toGraphReductionDeepM keyfn red = refineProblemA' refined where
+  refined s = do
+    (graph, _) <- reductionGraphM keyfn red s
+
+    let
+      igraph = fmap fst graph
       fromClosures cls = limit (deepReduction red) (`S.member` m) s where
-        m = S.fromList
-          . map (nodeLabel . (nodes graph V.!))
+        m = S.fromList . map (nodeLabel . (nodes igraph V.!))
           . IS.toList . IS.unions
           $ cls
-      graph = fmap fst $ fst (reductionGraph keyfn red s)
 
-reductionGraph ::
-  Ord k
-  =>
-  (s -> (Maybe k, [k]))
+      _closures = closures graph
+
+    pure
+      ( (graph, _closures)
+      , ( fromClosures, _closures)
+      )
+
+-- Calculate a reduction graph from a key function.
+reductionGraphM ::
+  (Monad m, Ord k)
+  => (s -> m (Maybe k, [k]))
   -- ^ A key function
   -> PartialReduction s s
   -- ^ A partial reduction
   -> s
-  -> (Graph (Maybe k) ([Int], s), [Int] -> Maybe Vertex)
-reductionGraph keyfn red s = buildGraph
-  [ ( (n, a)
-    , n
-    , addInit n
-      $ concatMap (\k ->
-                     fmap (, Just k)
-                     . S.toList
-                     . fromMaybe S.empty
-                     $ keymap M.!? k
-                  ) ks
-    )
-  | (n, (a, (_, ks))) <- nodes_
-  ]
+  -> m (Graph (Maybe k) ([Int], s), [Int] -> Maybe Vertex)
+reductionGraphM keyfn red s = do
+  nodes_ <- forM (itoListOf (deepSubelements red) s) $ \(i, a) -> do
+    (mk, ks) <- keyfn a
+    return (i, a, mk, ks)
+
+  let keymap = M.fromListWith S.union
+        [ (k, S.singleton n) | (n, _, Just k, _) <- nodes_ ]
+
+  nodes <- forM nodes_ $ \(n, a, _, ks) -> do
+    let _edges = addInit n . flip concatMap ks $ \k ->
+          fmap (, Just k)
+          . S.toList
+          . fromMaybe S.empty
+          $ keymap M.!? k
+   
+    return ((n, a), n, _edges)
+
+  return $ buildGraph nodes
   where
     addInit = (\case [] -> id; a -> ((tail a, Nothing):))
-    nodes_ = itoListOf (deepSubelements red . to (\a -> (a, keyfn a))) s
-    keymap = M.fromListWith S.union
-      [ (k, S.singleton n) | (n, (_, (Just k, _))) <- nodes_ ]
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
 toClosures :: Ord n => [Edge e n] -> Problem a [n] -> Problem a [IS.IntSet]

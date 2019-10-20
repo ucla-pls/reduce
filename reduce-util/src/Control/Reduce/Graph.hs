@@ -398,7 +398,7 @@ readCSV def nodes bs = do
 -- | Write a csv file of edges
 writeCSV :: (C.ToField a, C.ToField b) => Graph b a -> BL.ByteString
 writeCSV graph =
-  C.encodeByName (C.header ["from", "to", "label"])
+  C.encodeByName (C.header ["Source", "Target", "label"])
   . map (second (nodeLabels graph V.!))
   $ edges graph
 

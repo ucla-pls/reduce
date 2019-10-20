@@ -51,7 +51,7 @@ consume ::
   -> ProcessConfig a b c
   -> IO (ExitCode, stdout, stderr)
 consume outLogger errLogger cfg =
-  withProcess (setStderr createPipe . setStdout createPipe $ cfg) $ \p -> do
+  withProcessTerm (setStderr createPipe . setStdout createPipe $ cfg) $ \p -> do
   out <- async ( hFoldM 256 (getStdout p) outLogger )
   err <- async ( hFoldM 256 (getStderr p) errLogger )
   atomically $
