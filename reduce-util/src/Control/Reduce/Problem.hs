@@ -173,6 +173,8 @@ data ReductionOptions = ReductionOptions
   -- ^ An absolute path to the metrics files, or relative to the work-folder
   , _redPredicateTimelimit :: !Double
   -- ^ the timelimit of a single run of the predicate in seconds.
+  , _redTryInitial         :: !Bool
+  -- ^ try if the initial problem is good (recored as 0000)
   } deriving (Show, Eq)
 
 makeLenses ''Problem
@@ -196,6 +198,7 @@ defaultReductionOptions = ReductionOptions
   , _redKeepFolders = True
   , _redMetricsFile = "metrics.csv"
   , _redPredicateTimelimit = 60
+  , _redTryInitial = False
   }
 
 makeClassy ''ReductionOptions
@@ -283,14 +286,31 @@ runReductionProblem ::
   -> m (Maybe ReductionException, s)
 runReductionProblem wf reducer p = do
   opts <- view reductionOptions
-  start <- liftIO $ getCurrentTime
   env <- ask
+  doTryIntial <- view redTryInitial
 
   createDirectory wf
   withCurrentDirectory wf . liftIO $ do
     record <- setupMetric (p ^. problemMetric) (opts ^. redMetricsFile)
     iterRef <- newIORef 1
     succRef <- newIORef (p ^. problemInitial)
+
+
+    when doTryIntial . flip runReaderT env $ do
+      let
+        fp = "0000"
+        s = p ^. problemInitial
+
+      L.info $ "Trying (Initial " <> L.displayString fp <> ")"
+      L.debug $ " Metric: " <> displayAnyMetric (p ^. problemMetric) (Just s)
+
+      (judgment, result) <- checkSolution fp p s
+
+      L.info $ (L.displayString $ showJudgment judgment)
+
+      liftIO $ record (MetricRow (Just s) 0 fp judgment result)
+
+    start <- liftIO $ getCurrentTime
 
     ee <- goWith (p ^. problemInitial) $ \s -> flip runReaderT env $ do
       (fp, _diff) <- checkTimeouts start iterRef opts

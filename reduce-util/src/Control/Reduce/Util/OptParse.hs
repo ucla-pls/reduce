@@ -192,6 +192,12 @@ parseReductionOptions = do
     <> value (60)
     <> help "the timelimit of the predicate in seconds, negative means no limit"
 
+  _redTryInitial <- switch $
+    long "try-initial"
+    <> hidden
+    <> showDefault
+    <> help "try the intitial problem, recored as (0000)"
+
   pure $ ReductionOptions {..}
 
   -- where
