@@ -139,6 +139,21 @@ log curLvl bldr = do
       sPutStrLn sl $ simpleLogMessage sl (show curLvl)
         (Builder.fromLazyText (new indent) <> bldr)
 
+logtime ::
+  (HasLogger env, MonadReader env m, MonadIO m)
+  => LogLevel -> Builder.Builder -> m a -> m a
+logtime curLvl bldr ma = do
+  sl@LoggerConfig {..} <- view loggerL
+  if (curLvl >= logLevel && (currentDepth <= maxDepth || maxDepth < 0))
+    then do
+      sPutStr sl $ simpleLogMessage sl (show curLvl)
+        (Builder.fromLazyText (new indent) <> bldr)
+      (t, a) <- timeIO ma
+      sPutStrLn sl . return $ displayf " (%.3fs)" t
+      return a
+    else do
+      ma
+
 timedPhase' ::
   (HasLogger env, MonadReader env m, MonadIO m)
   => Builder.Builder -> m (Double, a) -> m (Double, a)
