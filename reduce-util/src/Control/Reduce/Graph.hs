@@ -373,14 +373,14 @@ instance (C.FromField e, C.FromField n) => C.FromRecord (Edge (Maybe e) n) where
 
 instance (C.FromField e, C.FromField n) => C.FromNamedRecord (Edge (Maybe e) n) where
   parseNamedRecord m =
-    Edge <$> ((Just <$> m C..: "label") <|> pure Nothing)
-      <*> m C..: "from" <*> m C..: "to"
+    Edge <$> ((Just <$> m C..: "Label") <|> pure Nothing)
+      <*> m C..: "Source" <*> m C..: "Target"
 
 instance (C.ToField e, C.ToField n) => C.ToNamedRecord (Edge e n) where
   toNamedRecord (Edge e f t) = C.namedRecord
-    [ "from" C..= f
-    , "to" C..= t
-    , "label" C..= e
+    [ "Source" C..= f
+    , "Target" C..= t
+    , "Label" C..= e
     ]
 
 -- | Read a csv file of edges, given a default e to load if nothings is found in "label".
@@ -398,12 +398,12 @@ readCSV def nodes bs = do
 -- | Write a csv file of edges
 writeCSV :: (C.ToField a, C.ToField b) => Graph b a -> BL.ByteString
 writeCSV graph =
-  C.encodeByName (C.header ["Source", "Target", "label"])
+  C.encodeByName (C.header ["Source", "Target", "Label"])
   . map (second (nodeLabels graph V.!))
   $ edges graph
 
 writeEmptyCSV :: (C.ToField a) => Graph () a -> BL.ByteString
 writeEmptyCSV graph =
-  C.encodeByName (C.header ["from", "to"])
+  C.encodeByName (C.header ["Source", "Target"])
   . map (bimap (const BL.empty) (nodeLabels graph V.!))
   $ edges graph
