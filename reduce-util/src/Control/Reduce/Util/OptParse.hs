@@ -179,11 +179,11 @@ parseReductionOptions = do
     <> help "keep the work folders after use?"
 
   _redMetricsFile <- strOption $
-    long "metrics-files"
+    long "metrics-file"
     <> hidden
     <> showDefault
     <> value "metrics.csv"
-    <> help "an absolute or relative to the work-folder path of the metric file"
+    <> help "an absolute or relative (to the WORKFOLDER/reduction) path of the metric file"
 
   _redPredicateTimelimit <- option auto $
     long "timelimit"
