@@ -370,9 +370,10 @@ checkSolution fp Problem{..} s = do
   keepFolders <- view redKeepFolders
   case _problemExtractBase s of
     Just a -> do
-      res <- fmap snd <$>
-        L.withLogger (runCommand fp timelimit _problemCommand (_problemDescription a))
-      unless keepFolders (removePathForcibly fp)
+      let runCmd = runCommand fp timelimit _problemCommand (_problemDescription a)
+      res <- finally
+        ( fmap snd <$> L.withLogger runCmd )
+        ( unless keepFolders (removePathForcibly fp) )
       let judgment = case resultOutput res of
             Just m
               | checkExpectation _problemExpectation m ->
