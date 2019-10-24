@@ -54,6 +54,9 @@ module Control.Reduce.Graph
   , closures
   , closuresN
 
+  , closure
+  , reverseClosure
+
   -- * Reading and writing graphs
 
   , readTGF
@@ -147,6 +150,7 @@ newtype Graph e n = Graph
 instance Bifunctor Graph where
   first f n = Graph (first f <$> nodes n)
   second = fmap
+
 
 nodeLabels :: Graph e n -> V.Vector n
 nodeLabels = V.map nodeLabel . nodes
@@ -243,7 +247,7 @@ dff :: Graph e n -> [T.Tree Vertex]
 dff g = dfs g [0..(V.length (nodes g) -1)]
 
 -- | Depth first search
-dfs :: Graph e n -> [Vertex] -> [T.Tree Vertex]
+dfs :: Graph e n -> [Vertex] -> T.Forest Vertex
 dfs Graph{..} =
   prune . map generate
   where
@@ -267,6 +271,14 @@ dfs Graph{..} =
           as <- chop vt ts
           bs <- chop vt us
           return $ T.Node v as : bs
+
+-- | Get a set of the verticies that is pointed to by a set of verticies.
+closure :: Graph e n -> [Vertex] -> IS.IntSet
+closure g vs = foldMap (IS.fromList . toList) $ dfs g vs
+
+-- | Get a set of the verticies that points to a set of verticies.
+reverseClosure :: Graph e n -> [Vertex] -> IS.IntSet
+reverseClosure g vs = foldMap (IS.fromList . toList) $ dfs (transposeG g) vs
 
 -- | The strongly connected components of a graph.
 scc'  :: Graph e n -> T.Forest Vertex
@@ -309,6 +321,7 @@ partition g =
       . map (\n -> IS.fromAscList (U.toList $ edgeVertices $ nodes g V.! n) IS.\\ is)
       $ IS.toList is
 
+
 -- | Partition a graph into closures
 closures :: Graph e n -> [ IS.IntSet ]
 closures g =
@@ -325,7 +338,7 @@ closuresN :: Ord n => Graph e n -> [ S.Set n ]
 closuresN g =
    map (unsafeLabeledSet g . IS.toList) $ closures g
 
-parsePretty :: Parsec Void T.Text a -> String -> T.Text -> Either String  a
+parsePretty :: Parsec Void T.Text a -> String -> T.Text -> Either String a
 parsePretty parser name bs =
 #if MIN_VERSION_megaparsec(7,0,0)
   first errorBundlePretty $ parse parser name bs

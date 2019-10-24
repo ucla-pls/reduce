@@ -531,61 +531,86 @@ toGraphReductionDeep ::
   -> Problem a s
   -> Problem a [IS.IntSet]
 toGraphReductionDeep keyfn red =
-  runIdentity . fmap snd . toGraphReductionDeepM (return . keyfn) red
+  snd . runIdentity
+  . toGraphReductionDeepM
+  (\s -> do
+      let (mk, ks) = keyfn s
+      return (mk, False, ks)
+  ) red
 
 -- | Like reduction deep, but also calculates the graph to reduce with.
 -- It automatically adds edges to parrent items
 toGraphReductionDeepM ::
   (Monad m, Ord k) =>
-  (s -> m (Maybe k, [k]))
-  -- ^ A key function
+  (s -> m (Maybe k, Bool, [k]))
+  -- ^ A key function, If the bool is true the item is required, and
+  -- a closure should be calculated from it.
   -> PartialReduction s s
   -- ^ A partial reduction
   -> Problem a s
-  -> m ((Graph (Maybe k) ([Int], s), [IS.IntSet]), Problem a [IS.IntSet])
+  -> m ( ( Graph (Maybe k) ([Int], s)
+         , IS.IntSet
+         , [IS.IntSet]
+         )
+       , Problem a [IS.IntSet]
+       )
 toGraphReductionDeepM keyfn red = refineProblemA' refined where
   refined s = do
     (graph, _) <- reductionGraphM keyfn red s
-
     let
-      igraph = fmap fst graph
+      igraph = fmap (fst . fst) graph
+
       fromClosures cls = limit (deepReduction red) (`S.member` m) s where
         m = S.fromList . map (nodeLabel . (nodes igraph V.!))
           . IS.toList . IS.unions
-          $ cls
+          $ core:cls
 
-      _closures = closures graph
+      required = ifoldMap
+        (\i (_, b) ->
+           if b then IS.singleton i else mempty
+        ) (nodeLabels graph)
+
+      _closures =
+        closures graph
+
+      _targets =
+        filter (IS.disjoint required) _closures
+       
+      core =
+        IS.unions $ filter (not . IS.disjoint required) _closures
 
     pure
-      ( (graph, _closures)
-      , ( fromClosures, _closures)
+      ( (fmap fst graph, core, _targets)
+      , ( fromClosures, _targets)
       )
 
 -- Calculate a reduction graph from a key function.
 reductionGraphM ::
   (Monad m, Ord k)
-  => (s -> m (Maybe k, [k]))
+  => (s -> m (Maybe k, Bool, [k]))
   -- ^ A key function
   -> PartialReduction s s
   -- ^ A partial reduction
   -> s
-  -> m (Graph (Maybe k) ([Int], s), [Int] -> Maybe Vertex)
+  -> m ( Graph (Maybe k) (([Int], s), Bool)
+       , [Int] -> Maybe Vertex
+       )
 reductionGraphM keyfn red s = do
   nodes_ <- forM (itoListOf (deepSubelements red) s) $ \(i, a) -> do
-    (mk, ks) <- keyfn a
-    return (i, a, mk, ks)
+    (mk, b, ks) <- keyfn a
+    return (i, a, b, mk, ks)
 
   let keymap = M.fromListWith S.union
-        [ (k, S.singleton n) | (n, _, Just k, _) <- nodes_ ]
+        [ (k, S.singleton n) | (n, _, _, Just k, _) <- nodes_ ]
 
-  nodes <- forM nodes_ $ \(n, a, _, ks) -> do
+  nodes <- forM nodes_ $ \(n, a, b, _, ks) -> do
     let _edges = addInit n . flip concatMap ks $ \k ->
-          fmap (, Just k)
+          fmap (,Just k)
           . S.toList
           . fromMaybe S.empty
           $ keymap M.!? k
    
-    return ((n, a), n, _edges)
+    return (((n, a), b), n, _edges)
 
   return $ buildGraph nodes
   where
