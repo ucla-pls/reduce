@@ -565,19 +565,22 @@ toGraphReductionDeepM keyfn red = refineProblemA' refined where
           . IS.toList . IS.unions
           $ core:cls
 
-      required = ifoldMap
-        (\i (_, b) ->
-           if b then IS.singleton i else mempty
-        ) (nodeLabels graph)
+      core =
+        closure graph required
+
+      required =
+          map fst
+          . filter (\(_, (_, b)) -> b)
+          . itoList
+          $ nodeLabels graph
 
       _closures =
         closures graph
 
       _targets =
-        filter (IS.disjoint required) _closures
-       
-      core =
-        IS.unions $ filter (not . IS.disjoint required) _closures
+        filter (not . IS.null)
+        . map (IS.\\ core)
+        $ _closures
 
     pure
       ( (fmap fst graph, core, _targets)
