@@ -524,7 +524,7 @@ toReductionDeep' red =
 -- It automatically adds edges to parrent items
 toGraphReductionDeep ::
   (Ord k) =>
-  (s -> (Maybe k, [k]))
+  (s -> (k, [k]))
   -- ^ A key function
   -> PartialReduction s s
   -- ^ A partial reduction
@@ -542,13 +542,13 @@ toGraphReductionDeep keyfn red =
 -- It automatically adds edges to parrent items
 toGraphReductionDeepM ::
   (Monad m, Ord k) =>
-  (s -> m (Maybe k, Bool, [k]))
+  (s -> m (k, Bool, [k]))
   -- ^ A key function, If the bool is true the item is required, and
   -- a closure should be calculated from it.
   -> PartialReduction s s
   -- ^ A partial reduction
   -> Problem a s
-  -> m ( ( Graph (Maybe k) ([Int], s)
+  -> m ( ( Graph () ([Int], k)
          , IS.IntSet
          , [IS.IntSet]
          )
@@ -587,34 +587,34 @@ toGraphReductionDeepM keyfn red = refineProblemA' refined where
 -- Calculate a reduction graph from a key function.
 reductionGraphM ::
   (Monad m, Ord k)
-  => (s -> m (Maybe k, Bool, [k]))
+  => (s -> m (k, Bool, [k]))
   -- ^ A key function
   -> PartialReduction s s
   -- ^ A partial reduction
   -> s
-  -> m ( Graph (Maybe k) (([Int], s), Bool)
+  -> m ( Graph () (([Int], k), Bool)
        , [Int] -> Maybe Vertex
        )
 reductionGraphM keyfn red s = do
   nodes_ <- forM (itoListOf (deepSubelements red) s) $ \(i, a) -> do
     (mk, b, ks) <- keyfn a
-    return (i, a, b, mk, ks)
+    return (i, b, mk, ks)
 
   let keymap = M.fromListWith S.union
-        [ (k, S.singleton n) | (n, _, _, Just k, _) <- nodes_ ]
+        [ (k, S.singleton n) | (n, _, k, _) <- nodes_ ]
 
-  nodes <- forM nodes_ $ \(n, a, b, _, ks) -> do
-    let _edges = addInit n . flip concatMap ks $ \k ->
-          fmap (,Just k)
+  nodes <- forM nodes_ $ \(n, b, k, ks) -> do
+    let _edges = addInit n . flip concatMap ks $ \k' ->
+          fmap (,())
           . S.toList
           . fromMaybe S.empty
-          $ keymap M.!? k
+          $ keymap M.!? k'
    
-    return (((n, a), b), n, _edges)
+    return (((n, k), b), n, _edges)
 
   return $ buildGraph nodes
   where
-    addInit = (\case [] -> id; a -> ((tail a, Nothing):))
+    addInit = (\case [] -> id; a -> ((tail a, ()):))
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
 toClosures :: Ord n => [Edge e n] -> Problem a [n] -> Problem a [IS.IntSet]
