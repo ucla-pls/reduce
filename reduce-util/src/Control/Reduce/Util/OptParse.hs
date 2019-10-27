@@ -186,10 +186,10 @@ parseReductionOptions = do
     <> help "an absolute or relative (to the WORKFOLDER/reduction) path of the metric file"
 
   _redPredicateTimelimit <- option auto $
-    long "timelimit"
+    long "predicate-timelimit"
     <> hidden
     <> showDefault
-    <> value (60)
+    <> value (-1)
     <> help "the timelimit of the predicate in seconds, negative means no limit"
 
   _redTryInitial <- switch $
