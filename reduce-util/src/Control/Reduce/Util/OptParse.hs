@@ -173,10 +173,10 @@ parseReductionOptions = do
     <> hidden
     <> help "the maximum number of time to run the predicate, negative means no limit."
 
-  _redKeepFolders <- fmap not . switch $
-    long "remove-folders"
+  _redKeepFolders <- switch $
+    long "keep-folders"
     <> hidden
-    <> help "keep the work folders after use?"
+    <> help "keep the reduction folders after use?"
 
   _redMetricsFile <- strOption $
     long "metrics-file"
