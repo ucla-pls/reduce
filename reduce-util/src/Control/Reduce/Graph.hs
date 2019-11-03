@@ -151,7 +151,6 @@ instance Bifunctor Graph where
   first f n = Graph (first f <$> nodes n)
   second = fmap
 
-
 nodeLabels :: Graph e n -> V.Vector n
 nodeLabels = V.map nodeLabel . nodes
 {-# INLINE nodeLabels #-}
@@ -171,16 +170,25 @@ buildGraph nodes =
     toNodes edges' = catMaybes [(,e') <$> lookupKey k' | (k', e') <- edges']
     lookupKey = binarySearch keyMap
 
-buildGraph' :: Ord n => [(n, [n])] -> (Graph () n, n -> Maybe Vertex)
+buildGraph' ::
+  Ord n
+  => [(n, [n])]
+  -> (Graph () n, n -> Maybe Vertex)
 buildGraph' nodes' =
   buildGraph [(n, n, map (,()) edges') | (n, edges') <- nodes' ]
 
-buildGraphFromNodesAndEdges :: (Ord key) => [(key, n)] -> [Edge e key] -> (Graph e n, key -> Maybe Vertex)
+buildGraphFromNodesAndEdges ::
+  Ord key
+  => [(key, n)]
+  -> [Edge e key]
+  -> (Graph e n, key -> Maybe Vertex)
 buildGraphFromNodesAndEdges keys edges' =
   (graph, lookupKey)
   where
     sortedNodes = V.fromList $ L.sortOn fst keys
-    edges'' = fromEdges (V.length sortedNodes) $ catMaybes (map (lookupEdge lookupKey) edges')
+    edges'' = fromEdges (V.length sortedNodes)
+      . catMaybes
+      $ map (lookupEdge lookupKey) edges'
     graph = Graph $ V.zipWith (buildNode . snd) sortedNodes edges''
     lookupKey = binarySearch (V.map fst sortedNodes)
 

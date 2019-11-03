@@ -85,6 +85,7 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Exception          (AsyncException (..))
 import           Data.Functor
+import           Data.Foldable (fold)
 import           Data.Time
 import           Text.Printf
 import qualified Data.List.NonEmpty         as NE
@@ -524,7 +525,7 @@ toReductionDeep' red =
 -- It automatically adds edges to parrent items
 toGraphReductionDeep ::
   (Ord k) =>
-  (s -> (k, [k]))
+  (s -> (k, [(k, k)]))
   -- ^ A key function
   -> PartialReduction s s
   -- ^ A partial reduction
@@ -542,7 +543,7 @@ toGraphReductionDeep keyfn red =
 -- It automatically adds edges to parrent items
 toGraphReductionDeepM ::
   (Monad m, Ord k) =>
-  (s -> m (k, Bool, [k]))
+  (s -> m (k, Bool, [(k, k)]))
   -- ^ A key function, If the bool is true the item is required, and
   -- a closure should be calculated from it.
   -> PartialReduction s s
@@ -590,7 +591,7 @@ toGraphReductionDeepM keyfn red = refineProblemA' refined where
 -- Calculate a reduction graph from a key function.
 reductionGraphM ::
   (Monad m, Ord k)
-  => (s -> m (k, Bool, [k]))
+  => (s -> m (k, Bool, [(k, k)]))
   -- ^ A key function
   -> PartialReduction s s
   -- ^ A partial reduction
@@ -603,21 +604,31 @@ reductionGraphM keyfn red s = do
     (mk, b, ks) <- keyfn a
     return (i, b, mk, ks)
 
-  let keymap = M.fromListWith S.union
-        [ (k, S.singleton n) | (n, _, k, _) <- nodes_ ]
+  return $
+    let
+      keymap =
+        M.fromListWith S.union
+        [ (k, S.singleton n)
+        | (n, _, k, _) <- nodes_
+        ]
 
-  nodes <- forM nodes_ $ \(n, b, k, ks) -> do
-    let _edges = addInit n . flip concatMap ks $ \k' ->
-          fmap (,())
-          . S.toList
-          . fromMaybe S.empty
-          $ keymap M.!? k'
-   
-    return (((n, k), b), n, _edges)
+      edges_ =
+        concat
+        [ addInit n
+          [ Edge () f_ t_
+          | (f, t) <- ks
+          , f_ <- S.toList . fold $ keymap M.!? f
+          , t_ <- S.toList . fold $ keymap M.!? t
+          ]
+        | (n, _, _, ks) <- nodes_
+        ]
+    in
+      buildGraphFromNodesAndEdges
+      [ (n, ((n, k), b)) | (n, b, k, _) <- nodes_ ]
+      edges_
 
-  return $ buildGraph nodes
   where
-    addInit = (\case [] -> id; a -> ((tail a, ()):))
+    addInit = (\case [] -> id; a -> (Edge () (tail a) a :))
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
 toClosures :: Ord n => [Edge e n] -> Problem a [n] -> Problem a [IS.IntSet]
