@@ -17,7 +17,6 @@ import Data.Foldable (toList)
 import qualified Data.List as List
 import Data.Bits
 import Data.Int
-import Control.Monad
 
 -- containers
 import qualified Data.IntSet as IS
@@ -116,8 +115,31 @@ instance Boolean (Term a) where
   {-# INLINE (\/) #-}
   {-# INLINE not #-}
 
+
 -- | We are currently operating at 31 bits.
 type VarId = Int32
+
+-- | Negation normal form
+data Nnf
+  = NAnd Nnf Nnf
+  | NOr Nnf Nnf
+  | NVar !Bool !Int
+  | NConst !Bool
+
+nnfCompiler :: Term Int -> Nnf
+nnfCompiler = go True where
+  go n = \case
+    TAnd t1 t2 ->
+      (if n then NAnd else NOr) (go n t1) (go n t2)
+    TOr  t1 t2 ->
+      (if n then NOr else NAnd) (go n t1) (go n t2)
+    TNot t1 ->
+      go (not n) t1
+    TVar a ->
+      NVar n a
+    TConst b ->
+      NConst b
+{-# INLINE nnfCompiler #-}
 
 -- | Split a variable into it's components
 splitVar :: VarId -> (Bool, Int32)
@@ -136,6 +158,16 @@ notvar i = complementBit i 31
 -- | A Clause is a unboxed sorted vector of 'Var's.
 data Clause = Clause IS.IntSet IS.IntSet
   deriving (Eq, Ord)
+
+
+orVid :: Bool -> Int -> Clause -> Clause
+orVid b i (Clause trs fls)
+  | b =
+    Clause (i `IS.insert` trs) fls
+  | otherwise =
+    Clause trs (i `IS.insert` fls)
+
+
 
 instance Show Clause where
   showsPrec n (Clause tr fl) =
@@ -177,29 +209,30 @@ flattenClause a@(Clause tr fl) =
 -- | A CNF is a list of clauses
 type Cnf = [Clause]
 
-instance Boolean Cnf where
-  a /\ b = a ++ b
+-- instance Boolean Cnf where
+--   a /\ b = a ++ b
 
-  (\/) = liftM2 joinClause
+--   (\/) = liftM2 joinClause
 
-  not = \case
-    [] -> false
-    c : rest ->
-     negateClause c \/ not rest
+--   not = \case
+--     [] -> false
+--     c : rest ->
+--      negateClause c \/ not rest
 
-  true  = []
-  false = [clause []]
+--   true  = []
+--   false = [clause []]
 
 cnfCompiler :: Term Int -> Cnf
-cnfCompiler = go where
-  go = \case
-    TAnd t1 t2   -> go t1 /\ go t2
-    TOr t1 t2    -> go t1 \/ go t2
-    TNot t1      -> not (go t1)
-    TVar v       -> [ clause [(True, v)] ]
-    TConst True  -> true
-    TConst False -> false
-
+cnfCompiler =
+  flip appEndo [] . go (Clause mempty mempty) (Endo . (:)). nnfCompiler where
+  -- go: c is the dominating clause. Every clause have to be or'ed with
+  -- this. This is a fold.
+  go c k = \case
+    NAnd t1 t2   -> go c k t1 <> go c k t2
+    NOr t1 t2    -> go c (\c' -> go c' k t2) t1
+    NVar b i     -> k (orVid b i c)
+    NConst True  -> mempty
+    NConst False -> k (c)
 
 
 -- go where
