@@ -628,7 +628,7 @@ reductionGraphM keyfn red s = do
       edges_
 
   where
-    addInit = (\case [] -> id; a -> (Edge () (tail a) a :))
+    addInit = (\case [] -> id; a -> (Edge () a (tail a) :))
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
 toClosures :: Ord n => [Edge e n] -> Problem a [n] -> Problem a [IS.IntSet]
