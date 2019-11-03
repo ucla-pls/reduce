@@ -11,11 +11,9 @@ spec = do
   describe "cnf compiler" $ do
     it "can compile a simple term" $ do
       cnfCompiler (
-        TVar (True, 1)
-        /\ TVar (True, 2)
-        /\ ( TVar (False, 3)
-             \/ TVar (True, 4)
-           )
+        TVar 1
+        /\ TVar 2
+        /\ ( neg (TVar 3) \/ TVar 4 )
         )
       `shouldBe`
         [ clause [(True, 1)], clause [(True, 2)], clause [(False, 3), (True, 4)]]

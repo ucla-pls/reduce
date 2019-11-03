@@ -1,4 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE LambdaCase #-}
@@ -102,6 +104,7 @@ data Term a
   | TNot (Term a)
   | TVar !a
   | TConst !Bool
+  deriving (Show, Functor, Foldable)
 
 instance Boolean (Term a) where
   (/\)  = TAnd
@@ -187,13 +190,13 @@ instance Boolean Cnf where
   true  = []
   false = [clause []]
 
-cnfCompiler :: Term (Bool, Int) -> Cnf
+cnfCompiler :: Term Int -> Cnf
 cnfCompiler = go where
   go = \case
     TAnd t1 t2   -> go t1 /\ go t2
     TOr t1 t2    -> go t1 \/ go t2
     TNot t1      -> not (go t1)
-    TVar v       -> [ clause [v] ]
+    TVar v       -> [ clause [(True, v)] ]
     TConst True  -> true
     TConst False -> false
 
