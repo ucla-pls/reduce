@@ -678,7 +678,9 @@ toLogicGraphReductionM overapprox keyfn missing red = refineProblemA' refined wh
       (graph, _) =
         buildGraphFromNodesAndEdges
         [ (n, ((n, k), n `S.member` required)) | (n, k, _) <- items ]
-        [ Edge () i j | DDeps i j <- deps ]
+        (  [ Edge () i j | DDeps i j <- deps ]
+          ++ [ Edge () n rest | (n@ (_:rest), _, _) <- items ]
+        )
 
       (grph, core, _targets, fromClosures) = restrictGraph red s graph
     pure ((grph, core, _targets, nnf), (fromClosures, _targets))
