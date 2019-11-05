@@ -58,32 +58,32 @@ spec = do
 
   describe "nnf" $ do
     it "should handle equality" $ do
-      (tt 1 ∧ tt 2 :: Nnf) `shouldBe`
+      (tt 1 ∧ tt 2 :: Nnf Int) `shouldBe`
        (tt 1 ∧ tt 2)
 
     it "should be able to not" $ do
-      (not (tt 1 ∧ tt 2) :: Nnf) `shouldBe`
+      (not (tt 1 ∧ tt 2) :: Nnf Int) `shouldBe`
        (ff 1 ∨ ff 2)
 
     it "should enable compilation" $ do
       (crossCompiler $ neg (tt 1 ∧ tt 2 :: Term Int)) `shouldBe`
        (NnfAsTerm $ ff 1 \/ ff 2)
 
-      (tt 1 /\ tt 4 ==> tt 2 :: Nnf) `shouldBe`
+      (tt 1 /\ tt 4 ==> tt 2 :: Nnf Int) `shouldBe`
        (ff 1 ∨ ff 4 ∨ tt 2)
       
 
   describe "depenency" $ do
     it "should find a simple dependency" $ do
-      underDependencies (tt 1 ∧ tt 2) `shouldBe`
+      underDependencies (tt 1 ∧ tt 2 :: Nnf Int) `shouldBe`
         [tt 1, tt 2]
 
     it "should find harder dependencies" $ do
-      underDependencies (tt 1 ==> tt 2) `shouldBe`
+      underDependencies (tt 1 ==> tt 2 :: Nnf Int) `shouldBe`
         [1 ~~> 2]
 
     it "should find even harder dependencies" $ do
-      underDependencies (tt 1 ==> tt 2 /\ tt 3 /\ tt 4 /\ tt 5) `shouldBe`
+      underDependencies (tt 1 ==> tt 2 /\ tt 3 /\ tt 4 /\ tt 5 :: Nnf Int) `shouldBe`
         [ 1 ~~> 2
         , 1 ~~> 3
         , 1 ~~> 4
@@ -91,14 +91,15 @@ spec = do
         ]
 
     it "should underapproximate the logic" $ do
-      underDependencies (tt 1 ==> tt 2 \/ tt 3) `shouldBe`
+      underDependencies (tt 1 ==> tt 2 \/ tt 3 :: Nnf Int) `shouldBe`
         []
 
-      underDependencies (tt 1 /\ tt 4 ==> tt 2) `shouldBe`
+      underDependencies (tt 1 /\ tt 4 ==> tt 2 :: Nnf Int) `shouldBe`
         []
 
     it "should handle large expressions" $ do
       let
+        expr :: Nnf Int
         expr =
             (ff 4 \/ tt 0 /\ tt 1 )
             /\ (ff 4 \/ tt 24)
@@ -133,14 +134,15 @@ spec = do
         ]
 
     it "should overapprixmate the logic" $ do
-      overDependencies (tt 1 ==> tt 2 \/ tt 3) `shouldBe`
+      overDependencies (tt 1 ==> tt 2 \/ tt 3 :: Nnf Int) `shouldBe`
         [ 1 ~~> 2 ]
 
-      overDependencies (tt 1 /\ tt 4 ==> tt 2) `shouldBe`
+      overDependencies (tt 1 /\ tt 4 ==> tt 2 :: Nnf Int) `shouldBe`
         [ 1 ~~> 2 ]
 
     it "should handle big logics" $ do
       let
+        expr :: Nnf Int
         expr =
             (ff 4 \/ tt 0 /\ tt 1 )
             /\ (ff 4 \/ tt 24)

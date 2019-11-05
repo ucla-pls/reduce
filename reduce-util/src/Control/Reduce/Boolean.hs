@@ -73,10 +73,13 @@ instance Boolean Bool where
   true = True
   false = False
 
-class BooleanAlgebra a where
-  type BooleanVar a
-  tt :: BooleanVar a -> a
-  ff :: BooleanVar a -> a
+class BooleanAlgebra f where
+  tt :: a -> f a
+  ff :: a -> f a
+
+  var :: Bool -> a -> f a
+  var True  = tt
+  var False = ff
 
 
 -- newtype And a = And { runAnd :: a }
@@ -219,8 +222,7 @@ instance Boolean (Term a) where
   {-# INLINE false #-}
   {-# INLINE true #-}
 
-instance BooleanAlgebra (Term a) where
-  type BooleanVar (Term a) = a
+instance BooleanAlgebra Term where
   tt a = liftF (TVar a)
   ff a = neg (liftF (TVar a))
 
@@ -247,40 +249,46 @@ fromTerm = ana unliftF
 crossCompiler :: (Fixed (TermF a) x, Fixed (TermF a) y) => x -> y
 crossCompiler = fromTerm . toTerm
 
+assignVars :: forall a b x. (Fixed (TermF a) x) => (a -> TermF b (Term b)) -> x -> Term b
+assignVars fn = cata \case
+  TAnd a b -> liftF (TAnd a b)
+  TOr  a b -> liftF (TOr a b)
+  TNot a   -> liftF (TNot a)
+  TVar a   -> liftF (fn a)
+  TConst b -> liftF (TConst b)
 
 -- | A literal is either true or false.
-data Literal = Literal {-# UNPACK #-} !Bool {-# UNPACK#-} !Int
+data Literal a = Literal {-# UNPACK #-} !Bool a
   deriving (Eq, Ord)
 
 instance BooleanAlgebra Literal where
-  type BooleanVar Literal = Int
   tt = Literal True
   ff = Literal False
 
-instance Show Literal where
+instance Show a => Show (Literal a) where
   showsPrec n (Literal b i) =
     showParen (n > 9) $
     showString (if b then "tt " else "ff ") . showsPrec 10 i
 
 -- | Negation normal form
-data NnfF f
+data NnfF a f
   = NAnd f f
   | NOr f f
-  | NLit {-# UNPACK #-} !Literal
+  | NLit !(Literal a)
   | NConst !Bool
   deriving (Eq, Ord, Functor, Foldable, Traversable)
 
-newtype Nnf = Nnf (Fix NnfF)
+newtype Nnf a = Nnf (Fix (NnfF a))
   deriving (Eq, Ord)
 
-instance Fixed NnfF Nnf
+instance Fixed (NnfF a) (Nnf a)
 
-newtype NnfAsTerm = NnfAsTerm { nnfAsTerm :: Nnf }
+newtype NnfAsTerm a = NnfAsTerm { nnfFromTerm :: Nnf a }
   deriving (Eq, Ord)
 
-instance Fixed (TermF Int) NnfAsTerm where
+instance Fixed (TermF a) (NnfAsTerm a) where
   -- cata :: (TermF Int a -> a) -> b -> a
-  cata fn = cata (fn . handle) . nnfAsTerm where
+  cata fn = cata (fn . handle) . nnfFromTerm where
     handle = \case
       NAnd a b -> TAnd a b
       NOr a b -> TOr a b
@@ -302,16 +310,16 @@ instance Fixed (TermF Int) NnfAsTerm where
       TConst b ->
         NConst (if n then b else not b)
 
-instance Show Nnf where
+instance Show a => Show (Nnf a) where
   showsPrec n f = cata showsPrecTermF (NnfAsTerm f) n
 
-instance Show NnfAsTerm where
+instance Show a => Show (NnfAsTerm a) where
   showsPrec n f = cata showsPrecTermF f n
 
-instance Boolean Nnf where
+instance Boolean (Nnf a) where
   a /\ b  = liftF $ NAnd a b
   a \/ b  = liftF $ NOr a b
-  not     = nnfAsTerm . fromTerm . neg . toTerm . NnfAsTerm
+  not     = nnfFromTerm . fromTerm . neg . toTerm . NnfAsTerm
   true    = liftF $ NConst True
   false   = liftF $ NConst False
   {-# INLINE (/\) #-}
@@ -319,12 +327,11 @@ instance Boolean Nnf where
   {-# INLINE not #-}
 
 instance BooleanAlgebra Nnf where
-  type BooleanVar Nnf = Int
   tt = liftF . NLit . tt
   ff = liftF . NLit . ff
 
 -- | Flattens an nnf
-flattenNnf :: Nnf -> Nnf
+flattenNnf :: Nnf a -> Nnf a
 flattenNnf = liftF . cata handle where
   handle = \case
     NAnd (NConst True) b  -> b
@@ -343,28 +350,27 @@ flattenNnf = liftF . cata handle where
     NLit l                -> NLit l
 
 -- | The dependency language
-data Dependency
+data Dependency a
   = DFalse
-  | DLit !Literal
-  | DDeps {-# UNPACK#-} !Int {-# UNPACK #-} !Int
+  | DLit !(Literal a)
+  | DDeps !a !a
   deriving (Eq, Ord)
 
 infixr 5 ~~>
-(~~>) :: Int -> Int -> Dependency
+(~~>) :: a -> a -> Dependency a
 (~~>) = DDeps
 
 instance BooleanAlgebra Dependency where
-  type BooleanVar Dependency = Int
   tt = DLit . tt
   ff = DLit . ff
 
-instance Show Dependency where
+instance Show a => Show (Dependency a) where
   showsPrec n = \case
     DFalse    -> showString "DFalse"
     DLit    l -> showsPrec n l
     DDeps i j -> showParen (n > 4) (showsPrec 5 i . showString " ~~> " . showsPrec 5 j)
 
-overNnfF :: NnfF (Dependency -> [Dependency]) -> Dependency -> [Dependency]
+overNnfF :: NnfF a (Dependency a -> [Dependency a]) -> Dependency a -> [Dependency a]
 overNnfF = \case
   NAnd a b -> \d -> a d ++ b d
   NOr a b -> \ d -> a d >>= \case
@@ -378,7 +384,7 @@ overNnfF = \case
     d -> [ d ] -- overapproximate
   NConst b -> \d -> [ d | not b ]
 
-underNnfF :: NnfF (Dependency -> [Dependency]) -> Dependency -> [Dependency]
+underNnfF :: Eq a => NnfF a (Dependency a -> [Dependency a]) -> Dependency a -> [Dependency a]
 underNnfF = \case
   NAnd a b -> \d -> a d ++ b d
   NOr a b -> \d -> [ y | x <- a d , y <- b x]
@@ -392,10 +398,12 @@ underNnfF = \case
     _ -> [ ] -- underapproximate
   NConst b -> \d -> [ d | not b ]
 
-underDependencies :: Nnf -> [Dependency]
+underDependencies :: Eq a => Nnf a -> [Dependency a]
 underDependencies a =
   cata underNnfF a DFalse
 
-overDependencies :: Nnf -> [Dependency]
+overDependencies :: Nnf a -> [Dependency a]
 overDependencies a =
   cata overNnfF a DFalse
+
+

@@ -1,4 +1,5 @@
 {-# LANGUAGE ConstraintKinds           #-}
+{-# LANGUAGE BlockArguments           #-}
 {-# LANGUAGE DataKinds                 #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts          #-}
@@ -59,6 +60,8 @@ module Control.Reduce.Problem
   , toGraphReductionDeep
   , toGraphReductionDeepM
 
+  , toLogicGraphReductionM
+
   , meassure
 
   , toIndexed
@@ -88,6 +91,7 @@ import           Data.Functor
 import           Data.Foldable (fold)
 import           Data.Time
 import           Text.Printf
+import Prelude hiding (and)
 import qualified Data.List.NonEmpty         as NE
 import           Data.Maybe
 import           Data.Semigroup
@@ -129,6 +133,7 @@ import           Control.Reduce
 -- reduce-util
 import           Control.Reduce.Command
 import           Control.Reduce.Graph
+import           Control.Reduce.Boolean hiding (not)
 import           Control.Reduce.Metric
 import           Control.Reduce.Reduction
 import qualified Control.Reduce.Util.Logger as L
@@ -558,35 +563,38 @@ toGraphReductionDeepM ::
 toGraphReductionDeepM keyfn red = refineProblemA' refined where
   refined s = do
     (graph, _) <- reductionGraphM keyfn red s
-    let
-      igraph = fmap (fst . fst) graph
+    let (grph, core, _targets, fromClosures) = restrictGraph red s graph
+    pure ((grph, core, _targets), (fromClosures, _targets))
 
-      fromClosures cls = limit (deepReduction red) (`S.member` m) s where
-        m = S.fromList . map (nodeLabel . (nodes igraph V.!))
-          . IS.toList . IS.unions
-          $ core:cls
+restrictGraph ::
+  PartialReduction s s
+  -> s
+  -> Graph () (([Int], k), Bool)
+  -> (Graph () ([Int], k), IS.IntSet , [IS.IntSet], [IS.IntSet] -> Maybe s )
+restrictGraph red s graph = (fmap fst graph, core, _targets, fromClosures) where
+  igraph = fmap (fst . fst) graph
 
-      core =
-        closure graph required
+  fromClosures cls = limit (deepReduction red) (`S.member` m) s where
+    m = S.fromList . map (nodeLabel . (nodes igraph V.!))
+      . IS.toList . IS.unions
+      $ core:cls
 
-      required =
-          map fst
-          . filter (\(_, (_, b)) -> b)
-          . itoList
-          $ nodeLabels graph
+  core =
+    closure graph required
 
-      _closures =
-        closures graph
+  required =
+      map fst
+      . filter (\(_, (_, b)) -> b)
+      . itoList
+      $ nodeLabels graph
 
-      _targets =
-        filter (not . IS.null)
-        . map (IS.\\ core)
-        $ _closures
+  _closures =
+    closures graph
 
-    pure
-      ( (fmap fst graph, core, _targets)
-      , ( fromClosures, _targets)
-      )
+  _targets =
+    filter (not . IS.null)
+    . map (IS.\\ core)
+    $ _closures
 
 -- Calculate a reduction graph from a key function.
 reductionGraphM ::
@@ -629,6 +637,52 @@ reductionGraphM keyfn red s = do
 
   where
     addInit = (\case [] -> id; a -> (Edge () a (tail a) :))
+
+-- | Like graph reduction but uses logic instead.
+toLogicGraphReductionM ::
+  (Monad m, Ord k)
+  => Bool
+  -- ^ Overapproximate?
+  -> (s -> m (k, Term k))
+  -- ^ A key function
+  -> (k -> Bool)
+  -- ^ Make key true or false if not found?
+  -> PartialReduction s s
+  -- ^ A partial reduction
+  -> Problem a s
+  -> m (( Graph () ([Int], k)
+        , IS.IntSet
+        , [IS.IntSet]
+        , Nnf [Int]
+        )
+       , Problem a [IS.IntSet]
+       )
+toLogicGraphReductionM overapprox keyfn missing red = refineProblemA' refined where
+  refined s = do
+    items <- forM (itoListOf (deepSubelements red) s) $ \(n, a) -> do
+      (mk, term) <- keyfn a
+      return (n, mk, term)
+
+    let
+      keyLookup = M.fromList [ (mk, n :: [Int]) | (n, mk, _) <- items ]
+      term  = and [ t | (_, _, t) <- items ]
+      nnf :: Nnf [Int]
+      nnf = flattenNnf . nnfFromTerm . fromTerm $ flip assignVars term \k ->
+        maybe (TConst $ missing k) TVar $ (M.lookup k keyLookup :: Maybe [Int])
+
+      deps = (if overapprox then overDependencies else underDependencies) nnf
+
+      required = S.fromList [ f | DLit (Literal True f) <- deps]
+        -- TODO Currently all false literals are ignored.
+
+      (graph, _) =
+        buildGraphFromNodesAndEdges
+        [ (n, ((n, k), n `S.member` required)) | (n, k, _) <- items ]
+        [ Edge () i j | DDeps i j <- deps ]
+
+      (grph, core, _targets, fromClosures) = restrictGraph red s graph
+    pure ((grph, core, _targets, nnf), (fromClosures, _targets))
+
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
 toClosures :: Ord n => [Edge e n] -> Problem a [n] -> Problem a [IS.IntSet]
