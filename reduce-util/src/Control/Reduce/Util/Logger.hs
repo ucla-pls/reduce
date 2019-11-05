@@ -17,9 +17,10 @@ module Control.Reduce.Util.Logger where
 import           Control.Lens
 
 -- text
-import qualified Data.Text.Lazy         as Text
+import qualified Data.Text              as Text
+import qualified Data.Text.Lazy         as LazyText
 import qualified Data.Text.Lazy.Builder as Builder
-import qualified Data.Text.Lazy.IO      as Text
+import qualified Data.Text.Lazy.IO      as LazyText
 
 -- unliftio
 import           UnliftIO               (MonadUnliftIO (..))
@@ -47,9 +48,9 @@ data LogLevel
   deriving (Show, Eq, Ord, Enum, Bounded)
 
 data IndentionFormat = IndentionFormat
-  { straight :: !Text.Text
-  , new      :: !Text.Text
-  , end      :: !Text.Text
+  { straight :: !LazyText.Text
+  , new      :: !LazyText.Text
+  , end      :: !LazyText.Text
   } deriving (Show, Eq)
 
 data LoggerConfig = LoggerConfig
@@ -97,12 +98,12 @@ withLoggerConfig = LoggerT . ReaderT
 sPutStr :: MonadIO m => LoggerConfig -> m Builder.Builder -> m ()
 sPutStr LoggerConfig {..} m =
   unless silent $
-  liftIO . Text.hPutStr logHandle . Builder.toLazyText =<< m
+  liftIO . LazyText.hPutStr logHandle . Builder.toLazyText =<< m
 
 sPutStrLn :: MonadIO m => LoggerConfig -> m Builder.Builder -> m ()
 sPutStrLn LoggerConfig {..} m =
   unless silent $
-  liftIO . Text.hPutStrLn logHandle . Builder.toLazyText =<< m
+  liftIO . LazyText.hPutStrLn logHandle . Builder.toLazyText =<< m
 
 simpleLogMessage ::
   MonadIO m
@@ -128,7 +129,7 @@ simpleLogMessage LoggerConfig {..} lvl bldr = do
     ) <-> indentation currentDepth (straight indent) <> bldr
   where
     indentation i cur =
-      Builder.fromLazyText (Text.replicate (fromIntegral i) cur)
+      Builder.fromLazyText (LazyText.replicate (fromIntegral i) cur)
 
 log ::
   (HasLogger env, MonadReader env m, MonadIO m)
@@ -239,7 +240,10 @@ displayString :: String -> Builder.Builder
 displayString = Builder.fromString
 
 displayText :: Text.Text -> Builder.Builder
-displayText = Builder.fromLazyText
+displayText = Builder.fromText
+
+displayLazyText :: LazyText.Text -> Builder.Builder
+displayLazyText = Builder.fromLazyText
 
 timeIO :: MonadIO m => m a -> m (Double, a)
 timeIO m = do

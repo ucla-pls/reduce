@@ -1,4 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DefaultSignatures #-}
@@ -25,11 +27,16 @@ import Prelude hiding (not, and, or)
 import qualified Prelude
 import Data.Monoid
 import Data.Coerce
+import GHC.Generics (Generic)
 -- import Data.Foldable (toList)
 
 -- import qualified Data.List as List
 -- import Data.Bits
 -- import Data.Int
+
+-- deepseq
+import Control.DeepSeq
+
 
 -- import Data.Bifoldable
 -- import Data.Bitraversable
@@ -129,10 +136,12 @@ given :: Boolean b => Bool -> b -> b
 given b m = if b then m else true
 
 data Fix f = Fix { unFix :: f (Fix f) }
+  deriving (Generic)
 
 deriving instance Eq (f (Fix f)) => Eq (Fix f)
 deriving instance Ord (f (Fix f)) => Ord (Fix f)
 deriving instance Show (f (Fix f)) => Show (Fix f)
+deriving instance NFData (f (Fix f)) => NFData (Fix f)
 
 class Functor f => Fixed f b | b -> f where
   cata :: (f a -> a) -> b -> a
@@ -168,6 +177,8 @@ data TermF a f
   deriving
     ( Eq, Ord
     , Functor, Foldable, Traversable
+    , Generic
+    , NFData
     )
 
 instance Bifunctor TermF where
@@ -182,7 +193,8 @@ instance Bifunctor TermF where
 -- instance Bitraversable TermF where
  
 newtype Term a = Term (Fix (TermF a))
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Generic)
+  deriving newtype NFData
 
 instance Functor Term where
   fmap f = cata $ liftF . \case
@@ -259,7 +271,7 @@ assignVars fn = cata \case
 
 -- | A literal is either true or false.
 data Literal a = Literal {-# UNPACK #-} !Bool a
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Generic, NFData)
 
 instance BooleanAlgebra Literal where
   tt = Literal True
@@ -276,10 +288,11 @@ data NnfF a f
   | NOr f f
   | NLit !(Literal a)
   | NConst !Bool
-  deriving (Eq, Ord, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Functor, Foldable, Traversable, Generic, NFData)
 
 newtype Nnf a = Nnf (Fix (NnfF a))
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Generic)
+  deriving newtype NFData
 
 instance Fixed (NnfF a) (Nnf a)
 
