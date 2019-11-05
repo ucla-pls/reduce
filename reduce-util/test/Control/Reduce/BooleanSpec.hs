@@ -52,6 +52,10 @@ spec = do
       show (tt 1 ∧ tt 2 ∨ ff 3 :: Term Int) `shouldBe`
        "tt 1 ∧ tt 2 ∨ not (tt 3)"
 
+      show (tt 1 /\ tt 4 ==> tt 2 :: Term Int) `shouldBe`
+       "not (tt 1 ∧ tt 4) ∨ tt 2"
+
+
   describe "nnf" $ do
     it "should handle equality" $ do
       (tt 1 ∧ tt 2 :: Nnf) `shouldBe`
@@ -65,6 +69,113 @@ spec = do
       (crossCompiler $ neg (tt 1 ∧ tt 2 :: Term Int)) `shouldBe`
        (ff 1 \/ ff 2 :: Nnf)
 
+      (tt 1 /\ tt 4 ==> tt 2 :: Nnf) `shouldBe`
+       (ff 1 ∨ ff 4 ∨ tt 2)
+      
+
+  describe "depenency" $ do
+    it "should find a simple dependency" $ do
+      underDependencies (tt 1 ∧ tt 2) `shouldBe`
+        [tt 1, tt 2]
+
+    it "should find harder dependencies" $ do
+      underDependencies (tt 1 ==> tt 2) `shouldBe`
+        [1 ~~> 2]
+
+    it "should find even harder dependencies" $ do
+      underDependencies (tt 1 ==> tt 2 /\ tt 3 /\ tt 4 /\ tt 5) `shouldBe`
+        [ 1 ~~> 2
+        , 1 ~~> 3
+        , 1 ~~> 4
+        , 1 ~~> 5
+        ]
+
+    it "should underapproximate the logic" $ do
+      underDependencies (tt 1 ==> tt 2 \/ tt 3) `shouldBe`
+        []
+
+      underDependencies (tt 1 /\ tt 4 ==> tt 2) `shouldBe`
+        []
+
+    it "should handle large expressions" $ do
+      let
+        expr =
+            (ff 4 \/ tt 0 /\ tt 1 )
+            /\ (ff 4 \/ tt 24)
+            /\ (ff 4 \/
+                (tt 27
+                 \/ tt 26 /\ tt 10
+                 \/ tt 25 /\ (tt 10 /\ tt 9)
+                 \/ tt 24 /\ (tt 10 /\ tt 9 /\ tt 8)
+                 \/ tt 24 /\ (tt 10 /\ tt 9 /\ tt 14 /\ tt 11)
+                 \/ tt 24 /\ (tt 10 /\ tt 9 /\ tt 14 /\ tt 20 /\ tt 7)
+                 \/ tt 24 /\ (tt 10 /\ tt 15 /\ tt 12)
+                 \/ tt 24 /\ (tt 10 /\ tt 15 /\ tt 21 /\ tt 11)
+                 \/ tt 24 /\ (tt 10 /\ tt 15 /\ tt 21 /\ tt 20 /\ tt 7)
+                 \/ tt 24 /\ (tt 18 /\ tt 12)
+                 \/ tt 24 /\ (tt 18 /\ tt 21 /\ tt 11)
+                 \/ tt 24 /\ (tt 18 /\ tt 21 /\ tt 20 /\ tt 7)
+                 \/ tt 24 /\ (tt 19 /\ tt 13)
+                 \/ tt 24 /\ (tt 16 /\ tt 5)
+                 \/ tt 24 /\ (tt 17 /\ tt 6)
+                ))
+            /\ (ff 4 \/ tt 22)
+            /\ (ff 4 \/ tt 28)
+            /\ (ff 4 \/ tt 23)
+
+      underDependencies expr `shouldBe`
+        [ 4 ~~> 0
+        , 4 ~~> 1
+        , 4 ~~> 24
+        , 4 ~~> 22
+        , 4 ~~> 28
+        , 4 ~~> 23
+        ]
+
+    it "should overapprixmate the logic" $ do
+      overDependencies (tt 1 ==> tt 2 \/ tt 3) `shouldBe`
+        [ 1 ~~> 2 ]
+
+      overDependencies (tt 1 /\ tt 4 ==> tt 2) `shouldBe`
+        [ 1 ~~> 2 ]
+
+    it "should handle big logics" $ do
+      let
+        expr =
+            (ff 4 \/ tt 0 /\ tt 1 )
+            /\ (ff 4 \/ tt 24)
+            /\ (tt 4
+                 ==> tt 27
+                 \/ tt 26 /\ tt 10
+                 \/ tt 25 /\ (tt 10 /\ tt 9)
+                 \/ tt 24 /\ (tt 10 /\ tt 9 /\ tt 8)
+                 \/ tt 24 /\ (tt 10 /\ tt 9 /\ tt 14 /\ tt 11)
+                 \/ tt 24 /\ (tt 10 /\ tt 9 /\ tt 14 /\ tt 20 /\ tt 7)
+                 \/ tt 24 /\ (tt 10 /\ tt 15 /\ tt 12)
+                 \/ tt 24 /\ (tt 10 /\ tt 15 /\ tt 21 /\ tt 11)
+                 \/ tt 24 /\ (tt 10 /\ tt 15 /\ tt 21 /\ tt 20 /\ tt 7)
+                 \/ tt 24 /\ (tt 18 /\ tt 12)
+                 \/ tt 24 /\ (tt 18 /\ tt 21 /\ tt 11)
+                 \/ tt 24 /\ (tt 18 /\ tt 21 /\ tt 20 /\ tt 7)
+                 \/ tt 24 /\ (tt 19 /\ tt 13)
+                 \/ tt 24 /\ (tt 16 /\ tt 5)
+                 \/ tt 24 /\ (tt 17 /\ tt 6)
+                )
+            /\ (ff 4 \/ tt 22)
+            /\ (ff 4 \/ tt 28)
+            /\ (ff 4 \/ tt 23)
+
+      overDependencies expr `shouldBe`
+        [ 4 ~~> 0
+        , 4 ~~> 1
+        , 4 ~~> 24
+        , 4 ~~> 27
+        , 4 ~~> 22
+        , 4 ~~> 28
+        , 4 ~~> 23
+        ]
+
+  --     length (cnfCompiler' expr) `shouldBe` 37
 
   -- describe "cnf compiler" $ do
   --   it "can compile a simple term" $ do

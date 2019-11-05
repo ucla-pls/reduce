@@ -25,6 +25,7 @@ import qualified Prelude
 import Data.Monoid
 import Data.Coerce
 -- import Data.Foldable (toList)
+
 -- import qualified Data.List as List
 -- import Data.Bits
 -- import Data.Int
@@ -38,14 +39,15 @@ import Data.Coerce
 -- vector
 --import qualified Data.Vector.Unboxed as UV
 
+
 -- lens
 import Control.Lens hiding (andOf, orOf)
 
 -- | A boolean logic
 class Boolean a where
-  infixl 4 \/
-  infixl 5 /\
-  infixr 3 ==>
+  infixr 2 \/
+  infixr 3 /\
+  infixr 1 ==>
   (/\), (\/), (==>) :: a -> a -> a
   true :: a
   false :: a
@@ -56,8 +58,8 @@ class Boolean a where
 (∧) = (/\)
 (∨) :: Boolean a => a -> a -> a
 (∨) = (\/)
-infixl 5 ∧
-infixl 4 ∨
+infixl 3 ∧
+infixl 2 ∨
 
 -- | A synonym for 'not'
 neg :: Boolean a => a -> a
@@ -200,8 +202,8 @@ instance BooleanAlgebra (Term a) where
 
 showsPrecTermF :: Show a => TermF a (Int -> ShowS) -> Int -> ShowS
 showsPrecTermF = \case
-  TAnd a b -> \n -> showParen (n > 5) (a 5 . showString " ∧ " . b 6)
-  TOr a b  -> \n -> showParen (n > 4) (a 4 . showString " ∨ " . b 5)
+  TAnd a b -> \n -> showParen (n > 3) (a 3 . showString " ∧ " . b 2)
+  TOr a b  -> \n -> showParen (n > 2) (a 2 . showString " ∨ " . b 1)
   TNot a -> \n -> showParen (n > 9) (showString "not " . a 10)
   TVar i -> \n -> showParen (n > 9) (showString "tt " . showsPrec 10 i)
   TConst True -> const $ showString "true"
@@ -224,13 +226,17 @@ crossCompiler = fromTerm . toTerm
 
 -- | A literal is either true or false.
 data Literal = Literal {-# UNPACK #-} !Bool {-# UNPACK#-} !Int
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
 
 instance BooleanAlgebra Literal where
   type BooleanVar Literal = Int
   tt = Literal True
   ff = Literal False
 
+instance Show Literal where
+  showsPrec n (Literal b i) =
+    showParen (n > 9) $
+    showString (if b then "tt " else "ff ") . showsPrec 10 i
 
 -- | Negation normal form
 data Nnf
@@ -306,6 +312,121 @@ flattenNnf = \case
   x -> x
 
 
+-- | The dependency language
+data Dependency
+  = DFalse
+  | DLit !Literal
+  | DDeps {-# UNPACK#-} !Int {-# UNPACK #-} !Int
+  deriving (Eq, Ord)
+
+infixr 5 ~~>
+(~~>) :: Int -> Int -> Dependency
+(~~>) = DDeps
+
+instance BooleanAlgebra Dependency where
+  type BooleanVar Dependency = Int
+  tt = DLit . tt
+  ff = DLit . ff
+
+instance Show Dependency where
+  showsPrec n = \case
+    DFalse    -> showString "DFalse"
+    DLit    l -> showsPrec n l
+    DDeps i j -> showParen (n > 4) (showsPrec 5 i . showString " ~~> " . showsPrec 5 j)
+
+underTermF :: TermF Int (Bool -> Dependency -> [Dependency]) -> Bool -> Dependency -> [Dependency]
+underTermF = \case
+  TAnd a b -> \n d ->
+    if not n then orit a b n d else andit a b n d
+
+  TOr a b -> \n d ->
+    if n then orit a b n d else andit a b n d
+
+  TNot a -> \n d ->
+    a (not n) d
+
+  TVar a -> \n d ->
+    case d of
+      DFalse -> [ DLit (Literal n a) ]
+      DLit (Literal t l)
+        | n /\ not t -> [ DDeps l a ]
+        | not n /\ t -> [ DDeps a l ]
+        | otherwise  -> [ ]
+          -- underapproximate
+      DDeps f t
+        | n     /\ a /= t -> [ ]
+        | not n /\ a /= f -> [ ]
+        | otherwise -> [ d ]
+
+  TConst b -> \n d ->
+    if b \/ n then [ ] else [ d ]
+
+  where
+    orit a b n d  =
+      [ y | x <- a n d , y <- b n x]
+    andit a b n d =
+      a n d ++ b n d
+
+underDependencies :: Term Int -> [Dependency]
+underDependencies a = cata underTermF a True DFalse
+
+overTermF :: TermF Int (Bool -> Dependency -> [Dependency]) -> Bool -> Dependency -> [Dependency]
+overTermF = \case
+  TAnd a b -> \n d ->
+    if not n then orit a b n d else andit a b n d
+
+  TOr a b -> \n d ->
+    if n then orit a b n d else andit a b n d
+
+  TNot a -> \n d ->
+    a (not n) d
+
+  TVar a -> \n d ->
+    case d of
+      DFalse -> [ DLit (Literal n a) ]
+      DLit (Literal t l)
+        | n /\ not t -> [ DDeps l a ]
+        | not n /\ t -> [ DDeps a l ]
+        | otherwise  -> [ d ]
+          -- overapproximate
+      _ -> [ d ]
+
+  TConst b -> \n d ->
+    if b \/ n then [ ] else [ d ]
+
+  where
+    orit a b n d  =
+      concat
+      [ case x of
+          DDeps _ _ -> [x]
+          _ -> b n x
+      | x <- a n d
+      ]
+    andit a b n d =
+      a n d ++ b n d
+
+overDependencies :: Term Int -> [Dependency]
+overDependencies a = cata overTermF a True DFalse
+
+
+
+
+  -- NAnd a b ->
+  --   go contex a ++ go contex b
+  -- NOr a b ->
+
+  -- NLit l ->
+  --   case context of
+  --     Nothing ->
+  --       [ DLit l ]
+  --     Just (Literal l)
+  --       ->
+
+  -- NConst True ->
+  --   []
+
+  -- NConst False ->
+  --   error ""
 
 
 
