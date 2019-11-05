@@ -67,7 +67,7 @@ spec = do
 
     it "should enable compilation" $ do
       (crossCompiler $ neg (tt 1 ∧ tt 2 :: Term Int)) `shouldBe`
-       (ff 1 \/ ff 2 :: Nnf)
+       (NnfAsTerm $ ff 1 \/ ff 2)
 
       (tt 1 /\ tt 4 ==> tt 2 :: Nnf) `shouldBe`
        (ff 1 ∨ ff 4 ∨ tt 2)

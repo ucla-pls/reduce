@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -131,7 +132,6 @@ deriving instance Ord (f (Fix f)) => Ord (Fix f)
 deriving instance Show (f (Fix f)) => Show (Fix f)
 
 class Functor f => Fixed f b | b -> f where
-
   cata :: (f a -> a) -> b -> a
   default cata :: Coercible (Fix f) b => (f a -> a) -> b -> a
   cata f = f . fmap (cata f) . unFix . coerce
@@ -148,6 +148,10 @@ unliftF = fmap coerce . unFix . coerce
 
 hylo :: forall f y x. (Fixed f x, Fixed f y) => (f y -> y) -> (x -> f x) -> x -> y
 hylo phi psi x = cata phi (ana psi x :: y)
+
+-- -- | A function that unpacks and packs itself into its self.
+-- isohylo :: forall f x. Fixed f x => (f x -> f x) -> x -> x
+-- isohylo phi x = cata phi -- (ana psi x :: y)
 
 instance Functor f => Fixed f (Fix f) where
 
@@ -177,9 +181,29 @@ instance Bifunctor TermF where
 newtype Term a = Term (Fix (TermF a))
   deriving (Eq, Ord)
 
--- deriving Functor Term where
---   fmap f =
+instance Functor Term where
+  fmap f = cata $ liftF . \case
+    TAnd a b -> TAnd a b
+    TOr a b -> TOr a b
+    TNot a -> TNot a
+    TVar l -> TVar (f l)
+    TConst b -> TConst b
 
+instance Foldable Term where
+  foldMap f = cata \case
+    TAnd a b -> a <> b
+    TOr a b -> a <> b
+    TNot a -> a
+    TVar l -> f l
+    TConst _ -> mempty
+
+instance Traversable Term where
+  traverse f = cata $ fmap liftF . \case
+    TAnd a b -> TAnd <$> a <*> b
+    TOr a b -> TOr <$> a <*> b
+    TNot a -> TNot <$> a
+    TVar l -> TVar <$> f l
+    TConst b -> pure $ TConst b
 
 instance Fixed (TermF a) (Term a)
 
@@ -239,78 +263,84 @@ instance Show Literal where
     showString (if b then "tt " else "ff ") . showsPrec 10 i
 
 -- | Negation normal form
-data Nnf
-  = NAnd Nnf Nnf
-  | NOr Nnf Nnf
+data NnfF f
+  = NAnd f f
+  | NOr f f
   | NLit {-# UNPACK #-} !Literal
   | NConst !Bool
-  deriving (Eq)
+  deriving (Eq, Ord, Functor, Foldable, Traversable)
 
-instance Fixed (TermF Int) Nnf where
+newtype Nnf = Nnf (Fix NnfF)
+  deriving (Eq, Ord)
+
+instance Fixed NnfF Nnf
+
+newtype NnfAsTerm = NnfAsTerm { nnfAsTerm :: Nnf }
+  deriving (Eq, Ord)
+
+instance Fixed (TermF Int) NnfAsTerm where
   -- cata :: (TermF Int a -> a) -> b -> a
-  cata fn = \case
-    NAnd a b ->
-      fn $ TAnd (cata fn a) (cata fn b)
-    NOr a b ->
-      fn $ TOr  (cata fn a) (cata fn b)
-    NLit (Literal True i) ->
-      fn $ TVar i
-    NLit (Literal False i) ->
-      fn $ TNot (fn $ TVar i)
-    NConst b ->
-      fn $ TConst b
+  cata fn = cata (fn . handle) . nnfAsTerm where
+    handle = \case
+      NAnd a b -> TAnd a b
+      NOr a b -> TOr a b
+      NLit (Literal True i) -> TVar i
+      NLit (Literal False i) -> TNot (fn $ TVar i)
+      NConst b -> TConst b
 
   -- ana  :: (a -> TermF Int a) -> a -> b
-  ana fn = go True . fn where
+  ana fn = NnfAsTerm . ana (uncurry go) . (True,) . fn where
     go n = \case
       TAnd t1 t2 ->
-        (if n then NAnd else NOr) (go n $ fn t1) (go n $ fn t2)
+        (if n then NAnd else NOr) (n, fn t1) (n, fn t2)
       TOr  t1 t2 ->
-        (if n then NOr else NAnd) (go n $ fn t1) (go n $ fn t2)
+        (if n then NOr else NAnd) (n, fn t1) (n, fn t2)
       TNot t1 ->
-        go (not n) $ fn t1
+        go (not n) (fn t1)
       TVar a ->
         NLit (Literal n a)
       TConst b ->
         NConst (if n then b else not b)
 
 instance Show Nnf where
+  showsPrec n f = cata showsPrecTermF (NnfAsTerm f) n
+
+instance Show NnfAsTerm where
   showsPrec n f = cata showsPrecTermF f n
 
 instance Boolean Nnf where
-  (/\)  = NAnd
-  (\/)  = NOr
-  not   = fromTerm . neg . toTerm
-  true  = NConst True
-  false = NConst False
+  a /\ b  = liftF $ NAnd a b
+  a \/ b  = liftF $ NOr a b
+  not     = nnfAsTerm . fromTerm . neg . toTerm . NnfAsTerm
+  true    = liftF $ NConst True
+  false   = liftF $ NConst False
   {-# INLINE (/\) #-}
   {-# INLINE (\/) #-}
   {-# INLINE not #-}
 
 instance BooleanAlgebra Nnf where
   type BooleanVar Nnf = Int
-  tt = NLit . tt
-  ff = NLit . ff
+  tt = liftF . NLit . tt
+  ff = liftF . NLit . ff
 
 -- | Flattens an nnf
 flattenNnf :: Nnf -> Nnf
-flattenNnf = \case
-  NAnd a b ->
-    case (flattenNnf a, flattenNnf b) of
-      (NConst True, t)  -> t
-      (t, NConst True)  -> t
-      (NConst False, _) -> NConst False
-      (_, NConst False) -> NConst False
-      (a', b') -> NAnd a' b'
-  NOr a b ->
-    case (flattenNnf a, flattenNnf b) of
-      (NConst True, _)  -> NConst True
-      (_, NConst True)  -> NConst True
-      (NConst False, t) -> t
-      (t, NConst False) -> t
-      (a', b') -> NOr a' b'
-  x -> x
+flattenNnf = liftF . cata handle where
+  handle = \case
+    NAnd (NConst True) b  -> b
+    NAnd b (NConst True)  -> b
+    NAnd (NConst False) _ -> NConst False
+    NAnd _ (NConst False) -> NConst False
+    NAnd a b              -> NAnd (liftF a) (liftF b)
 
+    NOr (NConst True) _   -> NConst True
+    NOr _ (NConst True)   -> NConst True
+    NOr (NConst False) t  -> t
+    NOr t (NConst False)  -> t
+    NOr a b               -> NOr (liftF a) (liftF b)
+
+    NConst t              -> NConst t
+    NLit l                -> NLit l
 
 -- | The dependency language
 data Dependency
@@ -334,335 +364,38 @@ instance Show Dependency where
     DLit    l -> showsPrec n l
     DDeps i j -> showParen (n > 4) (showsPrec 5 i . showString " ~~> " . showsPrec 5 j)
 
-underTermF :: TermF Int (Bool -> Dependency -> [Dependency]) -> Bool -> Dependency -> [Dependency]
-underTermF = \case
-  TAnd a b -> \n d ->
-    if not n then orit a b n d else andit a b n d
-
-  TOr a b -> \n d ->
-    if n then orit a b n d else andit a b n d
-
-  TNot a -> \n d ->
-    a (not n) d
-
-  TVar a -> \n d ->
-    case d of
-      DFalse -> [ DLit (Literal n a) ]
-      DLit (Literal t l)
-        | n /\ not t -> [ DDeps l a ]
-        | not n /\ t -> [ DDeps a l ]
-        | otherwise  -> [ ]
-          -- underapproximate
-      DDeps f t
-        | n     /\ a /= t -> [ ]
-        | not n /\ a /= f -> [ ]
-        | otherwise -> [ d ]
-
-  TConst b -> \n d ->
-    if b \/ n then [ ] else [ d ]
-
-  where
-    orit a b n d  =
-      [ y | x <- a n d , y <- b n x]
-    andit a b n d =
-      a n d ++ b n d
-
-underDependencies :: Term Int -> [Dependency]
-underDependencies a = cata underTermF a True DFalse
-
-overTermF :: TermF Int (Bool -> Dependency -> [Dependency]) -> Bool -> Dependency -> [Dependency]
-overTermF = \case
-  TAnd a b -> \n d ->
-    if not n then orit a b n d else andit a b n d
-
-  TOr a b -> \n d ->
-    if n then orit a b n d else andit a b n d
-
-  TNot a -> \n d ->
-    a (not n) d
-
-  TVar a -> \n d ->
-    case d of
-      DFalse -> [ DLit (Literal n a) ]
-      DLit (Literal t l)
-        | n /\ not t -> [ DDeps l a ]
-        | not n /\ t -> [ DDeps a l ]
-        | otherwise  -> [ d ]
-          -- overapproximate
-      _ -> [ d ]
-
-  TConst b -> \n d ->
-    if b \/ n then [ ] else [ d ]
-
-  where
-    orit a b n d  =
-      concat
-      [ case x of
-          DDeps _ _ -> [x]
-          _ -> b n x
-      | x <- a n d
-      ]
-    andit a b n d =
-      a n d ++ b n d
-
-overDependencies :: Term Int -> [Dependency]
-overDependencies a = cata overTermF a True DFalse
-
-
-
-
-  -- NAnd a b ->
-  --   go contex a ++ go contex b
-  -- NOr a b ->
-
-  -- NLit l ->
-  --   case context of
-  --     Nothing ->
-  --       [ DLit l ]
-  --     Just (Literal l)
-  --       ->
-
-  -- NConst True ->
-  --   []
-
-  -- NConst False ->
-  --   error ""
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
--- -- | We are currently operating at 31 bits.
--- type VarId = Int32
-
--- -- | Negation normal form
--- data Nnf
---   = NAnd Nnf Nnf
---   | NOr Nnf Nnf
---   | NVar !Bool !Int
---   | NConst !Bool
---   deriving (Eq)
-
--- instance BooleanAlgebra Nnf where
---   type BooleanVar Nnf = Int
---   tt = NVar True
---   ff = NVar False
-
--- instance Boolean Nnf where
---   (/\)  = NAnd
---   (\/)  = NOr
---   not _ = error "not supported"
---   true  = NConst True
---   false = NConst False
---   {-# INLINE (/\) #-}
---   {-# INLINE (\/) #-}
---   {-# INLINE not #-}
-
--- instance Show Nnf where
---   showsPrec n = \case
---     NAnd a b -> showParen (n > 5) (
---       showsPrec 5 a
---       . showString " /\\ "
---       . showsPrec 6 b
---       )
---     NOr a b -> showParen (n > 4) (
---       showsPrec 4 a
---       . showString " \\/ "
---       . showsPrec 5 b
---       )
---     NVar b i ->
---       showParen (n > 9) (showString (if b then "tt " else "ff ") . showsPrec 9 i)
---     NConst b ->
---       showParen (n > 9) (if b then showString "true" else showString "false")
-
--- nnfCompiler :: Term Int -> Nnf
--- nnfCompiler = go True where
---   go n = \case
---     TAnd t1 t2 ->
---       (if n then NAnd else NOr) (go n t1) (go n t2)
---     TOr  t1 t2 ->
---       (if n then NOr else NAnd) (go n t1) (go n t2)
---     TNot t1 ->
---       go (not n) t1
---     TVar a ->
---       NVar n a
---     TConst b ->
---       NConst b
--- {-# INLINE nnfCompiler #-}
-
--- nnfFlatCompiler :: Term Int -> Nnf
--- nnfFlatCompiler = flattenNnf . nnfCompiler
-
--- flattenNnf :: Nnf -> Nnf
--- flattenNnf = \case
---   NAnd a b ->
---     case (flattenNnf a, flattenNnf b) of
---       (NConst True, t)  -> t
---       (t, NConst True)  -> t
---       (NConst False, _) -> NConst False
---       (_, NConst False) -> NConst False
---       (a', b') -> NAnd a' b'
---   NOr a b ->
---     case (flattenNnf a, flattenNnf b) of
---       (NConst True, _)  -> NConst True
---       (_, NConst True)  -> NConst True
---       (NConst False, t) -> t
---       (t, NConst False) -> t
---       (a', b') -> NOr a' b'
---   x -> x
-
--- -- | Split a variable into it's components
--- splitVar :: VarId -> (Bool, Int32)
--- splitVar i = (not $ testBit i 31, clearBit i 31)
--- {-# INLINE splitVar #-}
-
--- -- | Split a variable into it's components
--- joinVar :: (Bool, Int32) -> VarId
--- joinVar (b, i) = if b then clearBit i 31 else setBit i 31
--- {-# INLINE joinVar #-}
-
--- notvar :: VarId -> VarId
--- notvar i = complementBit i 31
--- {-# INLINE notvar #-}
-
--- -- | A Clause is a unboxed sorted vector of 'Var's.
--- data Clause = Clause IS.IntSet IS.IntSet
---   deriving (Eq, Ord)
-
--- instance BooleanAlgebra (Literal a) where
---   type BooleanVar (Literal a) = a
---   tt a = Literal True a
---   ff a = Literal False a
-
--- data Literal a =
---   Literal {-# unpack #-} !Bool {-# unpack #-} !a
---   deriving (Ord, Eq)
-
--- instance Show a => Show (Literal a) where
---   showsPrec n (Literal b a) = showParen (n > 9)
---     (showString (if b then "tt " else "ff ") . showsPrec 9 a)
-
--- newtype IntLiteral = IntLiteral (Literal Int)
---   deriving (Eq, Ord, Num)
-
--- instance Show IntLiteral where
---   showsPrec n (IntLiteral (Literal b a)) =
---     showsPrec n ((if b then 1 else -1) * a)
-
--- instance BooleanAlgebra Clause where
---   type BooleanVar Clause = Int
---   tt a = Clause (IS.singleton a) mempty
---   ff a = Clause mempty (IS.singleton a)
-
--- instance Num a => Num (Literal a) where
---   fromInteger i =
---     Literal (signum i > 0) (abs $ fromInteger i)
---   negate (Literal b i) = (Literal (not b) i)
---   (+) = error "+ is undefined on literals"
---   (*) = error "* is undefined on literals"
---   abs (Literal _ i) = Literal True i
---   signum a = a
-
--- orVid :: Bool -> Int -> Clause -> Maybe Clause
--- orVid b i (Clause trs fls)
---   | b && (not $ i `IS.member` fls ) =
---     Just $ Clause (i `IS.insert` trs) fls
---   | not b && (not $ i `IS.member` trs) =
---     Just $ Clause trs (i `IS.insert` fls)
---   | otherwise =
---     Nothing
-
--- instance Show Clause where
---   showsPrec n (Clause tr fl) =
---     showParen (n > 9) $
---     showString "clause "
---     . showList (
---     map (IntLiteral . Literal True) (IS.toList tr)
---     ++ map (IntLiteral . Literal False) (IS.toList fl)
---     )
-
--- clause :: (Foldable f) => f (Bool, Int) -> Clause
--- clause (toList -> f) =
---   Clause
---   (IS.fromList . map snd $ trues)
---   (IS.fromList . map snd $ falses)
---   where
---     (trues, falses) = List.partition fst f
--- {-# INLINE clause #-}
-
--- negateClause :: Clause -> [Clause]
--- negateClause (Clause tr fl) =
---   [ Clause mempty (IS.singleton i) | i <- IS.toList tr]
---   ++ [ Clause (IS.singleton i) mempty | i <- IS.toList fl]
--- {-# INLINE negateClause #-}
-
--- joinClause :: Clause -> Clause -> Clause
--- joinClause (Clause trs1 fls1) (Clause trs2 fls2) =
---   Clause
---   (IS.union trs1 trs2)
---   (IS.union fls1 fls2)
--- {-# INLINE joinClause #-}
-
--- flattenClause :: Clause -> Maybe Clause
--- flattenClause a@(Clause tr fl) =
---   if tr `IS.disjoint` fl
---   then Just a
---   else Nothing
-
--- -- | A CNF is a list of clauses
--- type Cnf = [Clause]
-
--- -- instance Boolean Cnf where
--- --   a /\ b = a ++ b
-
--- --   (\/) = liftM2 joinClause
-
--- --   not = \case
--- --     [] -> false
--- --     c : rest ->
--- --      negateClause c \/ not rest
-
--- --   true  = []
--- --   false = [clause []]
-
--- cnfCompiler :: Term Int -> Cnf
--- cnfCompiler = cnfCompiler' . nnfFlatCompiler
-
--- cnfCompiler' :: Nnf -> Cnf
--- cnfCompiler' =
---   flip appEndo [] . go (Clause mempty mempty) (Endo . (:)) where
---   -- go: c is the dominating clause. Every clause have to be or'ed with
---   -- this. This is a fold.
---   go c k = \case
---     NAnd t1 t2   -> go c k t1 <> go c k t2
---     NOr t1 t2    -> go c (\c' -> go c' k t2) t1
---     NVar b i     ->
---       case orVid b i c of
---         Just a -> k a
---         Nothing -> mempty
---     NConst True  -> mempty
---     NConst False -> k c
-
-
--- -- go where
--- --   go = \case
--- --     TAnd t1 t2 -> go t1 ++ go t2
--- --     TOr
--- --   undefined -- \case
--- --   -- TAnd clauses ->
---   --   concatMap cnfCompiler clauses
---   -- TOr terms ->
---   --   concat $ mapM cnfCompiler (toList terms)
---   -- TNot b -> map (map (over _1 not)) $ cnfCompiler b
+overNnfF :: NnfF (Dependency -> [Dependency]) -> Dependency -> [Dependency]
+overNnfF = \case
+  NAnd a b -> \d -> a d ++ b d
+  NOr a b -> \ d -> a d >>= \case
+    x@(DDeps _ _) -> [x]
+    x -> b x
+  NLit l@(Literal n a) -> \case
+    DFalse -> [ DLit l ]
+    DLit (Literal t b)
+      | n /\ not t -> [ DDeps b a ]
+      | not n /\ t -> [ DDeps a b ]
+    d -> [ d ] -- overapproximate
+  NConst b -> \d -> [ d | not b ]
+
+underNnfF :: NnfF (Dependency -> [Dependency]) -> Dependency -> [Dependency]
+underNnfF = \case
+  NAnd a b -> \d -> a d ++ b d
+  NOr a b -> \d -> [ y | x <- a d , y <- b x]
+  NLit l@(Literal n a) -> \case
+    DFalse -> [ DLit l ]
+    DLit (Literal t b)
+      | n /\ not t -> [ DDeps b a ]
+      | not n /\ t -> [ DDeps a b ]
+    d@(DDeps f t)
+      | a == if n then t else f -> [ d ]
+    _ -> [ ] -- underapproximate
+  NConst b -> \d -> [ d | not b ]
+
+underDependencies :: Nnf -> [Dependency]
+underDependencies a =
+  cata underNnfF a DFalse
+
+overDependencies :: Nnf -> [Dependency]
+overDependencies a =
+  cata overNnfF a DFalse
