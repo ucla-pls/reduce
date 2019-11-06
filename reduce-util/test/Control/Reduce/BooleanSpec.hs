@@ -52,6 +52,12 @@ spec = do
       show (tt 1 ∧ tt 2 ∨ ff 3 :: Term Int) `shouldBe`
        "tt 1 ∧ tt 2 ∨ not (tt 3)"
 
+      show (tt 1 ∧ (tt 2 ∨ ff 3) :: Term Int) `shouldBe`
+       "tt 1 ∧ (tt 2 ∨ not (tt 3))"
+
+      show (tt 1 ∧ tt 2 ∧ ff 3 :: Term Int) `shouldBe`
+       "tt 1 ∧ tt 2 ∧ not (tt 3)"
+
       show (tt 1 /\ tt 4 ==> tt 2 :: Term Int) `shouldBe`
        "not (tt 1 ∧ tt 4) ∨ tt 2"
 

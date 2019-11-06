@@ -240,8 +240,8 @@ instance BooleanAlgebra Term where
 
 showsPrecTermF :: Show a => TermF a (Int -> ShowS) -> Int -> ShowS
 showsPrecTermF = \case
-  TAnd a b -> \n -> showParen (n > 3) (a 3 . showString " ∧ " . b 2)
-  TOr a b  -> \n -> showParen (n > 2) (a 2 . showString " ∨ " . b 1)
+  TAnd a b -> \n -> showParen (n > 3) (a 3 . showString " ∧ " . b 4)
+  TOr a b  -> \n -> showParen (n > 2) (a 2 . showString " ∨ " . b 3)
   TNot a -> \n -> showParen (n > 9) (showString "not " . a 10)
   TVar i -> \n -> showParen (n > 9) (showString "tt " . showsPrec 10 i)
   TConst True -> const $ showString "true"
@@ -270,7 +270,7 @@ assignVars fn = cata \case
   TConst b -> liftF (TConst b)
 
 -- | A literal is either true or false.
-data Literal a = Literal {-# UNPACK #-} !Bool a
+data Literal a = Literal !Bool a
   deriving (Eq, Ord, Generic, NFData)
 
 instance BooleanAlgebra Literal where
