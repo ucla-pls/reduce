@@ -4,9 +4,9 @@
 module Control.Reduce.BooleanSpec where
 
 import Control.Reduce.Boolean
-import Prelude hiding (not)
+import Prelude hiding (not, and)
 
-import qualified Data.Text.Lazy.IO as LazyText
+-- import qualified Data.Text.Lazy.IO as LazyText
 
 import SpecHelper
 
@@ -189,12 +189,13 @@ spec = do
 
   describe "ReducedNnf" $ do
     it "can print this nice graph" $ do
-      let x = dotReducedNnf (reduceNnf id (tt 1 ==> tt 2 /\ tt 2 ==> tt 3 /\ tt 1 ==> tt 3 :: Nnf Int))
-      LazyText.putStrLn x
-      x `shouldBe` ""
-
-
-
+      let x =
+            conditionNnf (ff 2) . conditionNnf (tt 1) . reduceNnf id $
+              and [ tt 1 ==> tt 2
+                 , tt 2 ==> tt 3
+                 , tt 1 ==> tt 3 :: Nnf Int
+                 ]
+      x `shouldBe` reduceNnf id (false :: Nnf Int)
 
 
   --     length (cnfCompiler' expr) `shouldBe` 37
