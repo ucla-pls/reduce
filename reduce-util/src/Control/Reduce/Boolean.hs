@@ -1,4 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE EmptyCase #-}
@@ -23,29 +26,34 @@
 
 module Control.Reduce.Boolean where
 
+-- base
+import Control.Monad
+import Control.Monad.ST
+import Data.Coerce
+import Data.Monoid
+import Data.STRef
+import Data.List
+import GHC.Generics (Generic)
 import Prelude hiding (not, and, or)
 import qualified Prelude
-import Data.Monoid
-import Data.Coerce
-import GHC.Generics (Generic)
--- import Data.Foldable (toList)
-
--- import qualified Data.List as List
--- import Data.Bits
--- import Data.Int
 
 -- deepseq
 import Control.DeepSeq
 
-
--- import Data.Bifoldable
--- import Data.Bitraversable
-
--- containers
--- import qualified Data.IntSet as IS
-
 -- vector
---import qualified Data.Vector.Unboxed as UV
+import qualified Data.Vector as V
+import qualified Data.Vector.Mutable as VM
+
+-- hashtables
+import qualified Data.HashTable.ST.Cuckoo as CHT
+import qualified Data.HashTable.Class as HT
+
+-- hashable
+import Data.Hashable
+
+-- text
+import qualified Data.Text.Lazy as LazyText
+import Data.Text.Lazy.Builder
 
 
 -- lens
@@ -147,10 +155,22 @@ class Functor f => Fixed f b | b -> f where
   cata :: (f a -> a) -> b -> a
   default cata :: Coercible (Fix f) b => (f a -> a) -> b -> a
   cata f = f . fmap (cata f) . unFix . coerce
+  {-# INLINE cata #-}
 
   ana  :: (a -> f a) -> a -> b
   default ana :: Coercible b (Fix f) => (a -> f a) -> a -> b
   ana f = coerce . Fix . fmap (ana f) . f
+  {-# INLINE ana #-}
+
+cataM :: forall m f b a. (Monad m, Traversable f, Fixed f b) => (f a -> m a) -> b -> m a
+cataM fn = cata (sequence >=> fn)
+{-# INLINE cataM #-}
+
+-- anaM :: forall m f b a. (Monad m, Traversable f, Fixed f b) => (a -> m (f a)) -> a -> m b
+-- anaM fn = ana m . _ where
+--   m :: (m a -> f (m a))
+--   m = undefined
+-- {-# INLINE anaM #-}
 
 liftF :: (Coercible b (Fix f), Coercible (Fix f) b, Functor f) => f b -> b
 liftF = coerce . Fix . fmap coerce
@@ -410,6 +430,7 @@ underNnfF = \case
       | a == if n then t else f -> [ d ]
     _ -> [ ] -- underapproximate
   NConst b -> \d -> [ d | not b ]
+  -- TODO: This is not correct.
 
 underDependencies :: Eq a => Nnf a -> [Dependency a]
 underDependencies a =
@@ -419,4 +440,81 @@ overDependencies :: Nnf a -> [Dependency a]
 overDependencies a =
   cata overNnfF a DFalse
 
+instance (Hashable a, Hashable b) => Hashable (NnfF a b) where
+  hashWithSalt s = \case
+    NAnd a b ->
+      s `hashWithSalt` (0 :: Int) `hashWithSalt` a `hashWithSalt` b
+    NOr a b ->
+      s `hashWithSalt` (1 :: Int) `hashWithSalt` a `hashWithSalt` b
+    NLit (Literal t l) ->
+      s `hashWithSalt` (2 :: Int) `hashWithSalt` t `hashWithSalt` l
+    NConst b ->
+      s `hashWithSalt` (3 :: Int) `hashWithSalt` b
+  {-# INLINE hashWithSalt #-}
 
+data ReducedNnf = ReducedNnf
+  { redNnfHead  :: Int
+  , redNnfItems :: V.Vector (NnfF Int Int)
+  }
+
+reduceNnf :: Fixed (NnfF Int) b => (forall a. NnfF Int a -> NnfF Int a) -> b -> ReducedNnf
+reduceNnf fn b = runST $ do
+  hashmap <- HT.new
+  countVar <- newSTRef 0
+
+  let
+    add = \case
+      Just k ->
+        return (Just k, k)
+      Nothing -> do
+        count <- readSTRef countVar
+        writeSTRef countVar (count+1)
+        return (Just count, count)
+
+  -- Do a bottom-up traversal of the nnf and insert nodes in hashmap.
+  redNnfHead <- cataM (\x -> CHT.mutateST hashmap (fn x) add) b
+
+  -- Add nodes to vector
+  itemsM <- VM.new =<< readSTRef countVar
+  HT.mapM_ (\(t, i) -> VM.unsafeWrite itemsM i t) hashmap
+  redNnfItems <- V.freeze itemsM
+
+  return $ ReducedNnf {..}
+
+conditionLiteral :: Eq a => Literal a -> Literal a -> Either (Literal a) Bool
+conditionLiteral (Literal b l) lit@(Literal b' l')
+  | l == l' = Right (b == b')
+  | otherwise = Left lit
+
+-- | Given an Nnf condition it on a literal.
+conditionNnf :: Fixed (NnfF Int) b => Literal Int -> b -> ReducedNnf
+conditionNnf lit = reduceNnf \case
+  NLit l -> either NLit NConst $ conditionLiteral lit l
+  x -> x
+
+-- | Print a reduce
+dotReducedNnf :: ReducedNnf -> LazyText.Text
+dotReducedNnf ReducedNnf {..} =
+  toLazyText $ "digraph {\n " <> ifoldMap handleNnf redNnfItems  <> "}"
+  where
+    key i = "v" <> fromString (show i)
+
+    handleNnf i = \case
+      NAnd a b ->
+        key i <> " [label=\"∧\"]"
+        <> ";\n " <> key i <> " -> " <> key a
+        <> ";\n " <> key i <> " -> " <> key b
+        <> ";\n "
+      NOr a b ->
+        key i <> " [label=\"∨\"]"
+        <> ";\n " <> key i <> " -> " <> key a
+        <> ";\n " <> key i <> " -> " <> key b
+        <> ";\n "
+      NLit (Literal True l) ->
+        key i <> " [label=\"+" <> fromString (show l) <> "\"]" <> ";\n "
+
+      NLit (Literal False l) ->
+        key i <> " [label=\"-" <> fromString (show l) <> "\"]" <> ";\n "
+
+      NConst b ->
+        key i <> " [label=\"-" <> if b then "T" else "F" <> "\"]" <> ";\n "

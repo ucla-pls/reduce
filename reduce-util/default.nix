@@ -1,9 +1,9 @@
 { mkDerivation, aeson, async, base, bytestring, cassava, containers
 , contravariant, cryptohash-sha256, data-fix, deepseq, directory
-, dirtree, filepath, free, hashable, hpack, hspec, lens, megaparsec
-, mtl, optparse-applicative, process, profunctors, reduce, stdenv
-, stm, temporary, text, time, transformers, typed-process, unliftio
-, unordered-containers, vector
+, dirtree, filepath, free, hashable, hashtables, hpack, hspec, lens
+, megaparsec, mtl, optparse-applicative, process, profunctors
+, reduce, stdenv, stm, temporary, text, time, transformers
+, typed-process, unliftio, unordered-containers, vector
 }:
 mkDerivation {
   pname = "reduce-util";
@@ -12,16 +12,16 @@ mkDerivation {
   libraryHaskellDepends = [
     aeson async base bytestring cassava containers contravariant
     cryptohash-sha256 data-fix deepseq directory dirtree filepath free
-    hashable lens megaparsec mtl optparse-applicative process
-    profunctors reduce stm temporary text time transformers
+    hashable hashtables lens megaparsec mtl optparse-applicative
+    process profunctors reduce stm temporary text time transformers
     typed-process unliftio unordered-containers vector
   ];
   libraryToolDepends = [ hpack ];
   testHaskellDepends = [
     aeson async base bytestring cassava containers contravariant
     cryptohash-sha256 data-fix deepseq directory dirtree filepath free
-    hashable hspec lens megaparsec mtl optparse-applicative process
-    profunctors reduce stm temporary text time transformers
+    hashable hashtables hspec lens megaparsec mtl optparse-applicative
+    process profunctors reduce stm temporary text time transformers
     typed-process unliftio unordered-containers vector
   ];
   preConfigure = "hpack";

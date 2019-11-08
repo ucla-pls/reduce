@@ -1,9 +1,12 @@
 -- |
+{-# LANGUAGE OverloadedStrings #-}
 
 module Control.Reduce.BooleanSpec where
 
 import Control.Reduce.Boolean
 import Prelude hiding (not)
+
+import qualified Data.Text.Lazy.IO as LazyText
 
 import SpecHelper
 
@@ -182,6 +185,17 @@ spec = do
         , 4 ~~> 28
         , 4 ~~> 23
         ]
+
+
+  describe "ReducedNnf" $ do
+    it "can print this nice graph" $ do
+      let x = dotReducedNnf (reduceNnf id (tt 1 ==> tt 2 /\ tt 2 ==> tt 3 /\ tt 1 ==> tt 3 :: Nnf Int))
+      LazyText.putStrLn x
+      x `shouldBe` ""
+
+
+
+
 
   --     length (cnfCompiler' expr) `shouldBe` 37
 
