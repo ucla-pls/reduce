@@ -28,9 +28,13 @@ module Control.Reduce.Boolean where
 
 -- base
 import Control.Monad
+import Control.Applicative
 import Control.Monad.ST
 import Data.Coerce
 import Data.Monoid
+import Data.Function
+import Data.Maybe
+import Data.List.NonEmpty (nonEmpty)
 import Data.STRef
 import Data.List
 import GHC.Generics (Generic)
@@ -43,6 +47,9 @@ import Control.DeepSeq
 -- vector
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as VM
+
+-- containers
+import qualified Data.IntSet as IS
 
 -- hashtables
 import qualified Data.HashTable.ST.Cuckoo as CHT
@@ -430,7 +437,7 @@ underNnfF = \case
       | a == if n then t else f -> [ d ]
     _ -> [ ] -- underapproximate
   NConst b -> \d -> [ d | not b ]
-  -- TODO: This is not correct.
+  -- TODO: This is not correct. (why?)
 
 underDependencies :: Eq a => Nnf a -> [Dependency a]
 underDependencies a =
@@ -457,29 +464,15 @@ data ReducedNnf = ReducedNnf
   , redNnfItems :: V.Vector (NnfF Int Int)
   } deriving (Show, Eq)
 
-reduceNnf :: Fixed (NnfF Int) b => (forall a. NnfF Int a -> NnfF Int a) -> b -> ReducedNnf
-reduceNnf fn b =
-  runST $ do
-  hashmap <- HT.new
-  countVar <- newSTRef 0
-  let
-    add = \case
-      Just k ->
-        return (Just k, k)
-      Nothing -> do
-        count <- readSTRef countVar
-        writeSTRef countVar (count+1)
-        return (Just count, count)
-
-  -- Do a bottom-up traversal of the nnf and insert nodes in hashmap.
-  redNnfHead <- cataM (\x -> CHT.mutateST hashmap (fn x) add) b
-
-  -- Add nodes to vector
-  itemsM <- VM.new =<< readSTRef countVar
-  HT.mapM_ (\(t, i) -> VM.unsafeWrite itemsM i t) hashmap
-  redNnfItems <- V.freeze itemsM
-
-  return $ ReducedNnf {..}
+reduceNnf ::
+  Fixed (NnfF Int) b
+  => (forall a. NnfF Int a -> NnfF Int a)
+  -> b
+  -> ReducedNnf
+reduceNnf fn b = memorizeNnf g where
+  g :: Monad m => (NnfF Int Int -> m Int) -> m Int
+  g add = cataM (\x -> add (fn x)) b
+{-# INLINEABLE reduceNnf #-}
 
 instance Fixed (NnfF Int) ReducedNnf where
   -- cata :: (f a -> a) -> b -> a
@@ -488,89 +481,173 @@ instance Fixed (NnfF Int) ReducedNnf where
     in v V.! redNnfHead
 
   -- ana :: (a -> f a) -> a -> b
-  ana fn a = runST $ do
-    hashmap <- HT.new
-    countVar <- newSTRef 0
-    let
-      go x = do
-        y <- traverse go (fn x)
-        CHT.mutateST hashmap y \case
-          Just k ->
-            return (Just k, k)
-          Nothing -> do
-            count <- readSTRef countVar
-            writeSTRef countVar (count+1)
-            return (Just count, count)
+  ana fn a = memorizeNnf g where
+    g :: Monad m => (NnfF Int Int -> m Int) -> m Int
+    g add = go a where go x = add =<< traverse go (fn x)
 
-    redNnfHead <- go a
-       
-    -- Add nodes to vector
-    itemsM <- VM.new =<< readSTRef countVar
-    HT.mapM_ (\(t, i) -> VM.unsafeWrite itemsM i t) hashmap
-    redNnfItems <- V.freeze itemsM
+memorizer ::
+  (Eq a, Hashable a)
+  => (forall s. (a -> ST s Int) -> ST s b)
+  -> (b, V.Vector a)
+memorizer fn = runST $ do
+  hashmap  <- HT.new
+  countVar <- newSTRef 0
+  itemsVar <- newSTRef =<< VM.new 128
+    -- =<< readSTRef countVar
 
-    return $ ReducedNnf {..}
+  b <- fn \new -> CHT.mutateST hashmap new \case
+    Just k ->
+      return (Just k, k)
+    Nothing -> do
+      count <- readSTRef countVar
+      writeSTRef countVar (count+1)
+      itemsM <- readSTRef itemsVar
+      itemsM' <- if VM.length itemsM <= count
+        then do
+          itemsM' <- VM.grow itemsM count
+          writeSTRef itemsVar itemsM'
+          return itemsM'
+        else return itemsM
+      VM.unsafeWrite itemsM' count new
+      return (Just count, count)
+
+  itemsM <- readSTRef itemsVar
+  items <- V.freeze itemsM
+
+  return (b, items)
+{-# INLINEABLE memorizer #-}
+
+memorizeNnf ::
+  (forall s. (NnfF Int Int -> ST s Int) -> ST s Int)
+  -> ReducedNnf
+memorizeNnf fn = ReducedNnf {..} where
+  (redNnfHead, V.take (redNnfHead+1) -> redNnfItems) =
+    memorizer (\add -> do
+    _ <- add (NConst False)
+    _ <- add (NConst True)
+    fn add)
+{-# INLINEABLE memorizeNnf #-}
+
+type NnfTransformer a =
+  NnfF Int a -> Either a (NnfF Int a)
+
+transformNnf :: NnfTransformer Int -> ReducedNnf -> ReducedNnf
+transformNnf trans ReducedNnf {..} = memorizeNnf g where
+  g :: (NnfF Int Int -> ST s Int) -> ST s Int
+  g add = do
+    indirect <- VM.new (V.length redNnfItems)
+    _ <- add (NConst False)
+    _ <- add (NConst True)
+    iforM_ redNnfItems $ \i x -> do
+      j <- trans <$> traverse (VM.read indirect) x >>= \case
+        Right new -> add new
+        Left old -> pure old
+      VM.write indirect i j
+    VM.read indirect redNnfHead
+{-# INLINEABLE transformNnf #-}
+
+compressNnfF :: (NnfF a Int -> b) -> NnfF a Int -> Either Int b
+compressNnfF fn = \case
+  NAnd 0 _ -> Left 0
+  NAnd 1 b -> Left b
+  NAnd _ 0 -> Left 0
+  NAnd a 1 -> Left a
+  NAnd a b
+    | a == b -> Left a
+
+  NOr 0 b -> Left b
+  NOr 1 _ -> Left 1
+  NOr a 0 -> Left a
+  NOr _ 1 -> Left 1
+  NOr a b
+    | a == b -> Left a
+  x' -> Right (fn x')
 
 compressNnf :: (forall a. NnfF Int a -> NnfF Int a) -> ReducedNnf -> ReducedNnf
-compressNnf fn ReducedNnf {..} = runST $ do
-  hashmap  <- HT.new
-  countVar <- newSTRef 2
-  CHT.insert hashmap (NConst False) 0
-  CHT.insert hashmap (NConst True) 1
+compressNnf = transformNnf . compressNnfF
 
-  indirect <- VM.new (V.length redNnfItems)
+splitNnf :: Int -> ReducedNnf -> ReducedNnf
+splitNnf v ReducedNnf {..} = memorizeNnf g where
+  g :: (NnfF Int Int -> ST s Int) -> ST s Int
+  g add = do
+    indirect <- VM.new (V.length redNnfItems)
+    _ <- add (NConst False)
+    _ <- add (NConst True)
+    iforM_ redNnfItems $ \i x -> do
+      e <- traverse (VM.read indirect) x
+      j  <- compress (conditionNnfF (tt v)) (fmap fst e)
+      j' <- compress (conditionNnfF (ff v)) (fmap snd e)
+      VM.write indirect i (j, j')
 
-  let
-    add y = CHT.mutateST hashmap y \case
-      Just k ->
-        return (Just k, k)
-      Nothing -> do
-        count <- readSTRef countVar
-        writeSTRef countVar (count+1)
-        return (Just count, count)
+    t <- add (NLit (tt v))
+    f <- add (NLit (ff v))
+    (ht, hf) <- VM.read indirect redNnfHead
+    x <- compress id (NAnd t ht)
+    y <- compress id (NAnd f hf)
+    compress id (NOr x y)
 
-  iforM_ redNnfItems $ \i x -> do
-    -- First read the indirections
-    j <- traverse (VM.read indirect) x >>= \case
-      NAnd 0 _ -> pure 0
-      NAnd 1 b -> pure b
-      NAnd _ 0 -> pure 0
-      NAnd a 1 -> pure a
-      NAnd a b
-        | a == b -> pure a
-
-      NOr 0 b -> pure b
-      NOr 1 _ -> pure 1
-      NOr a 0 -> pure a
-      NOr _ 1 -> pure 1
-      NOr a b
-        | a == b -> pure a
-
-      x' -> add (fn x')
-
-    VM.write indirect i j
-
-  redNnfHead' <- VM.read indirect redNnfHead
-
-  itemsM <- VM.new =<< readSTRef countVar
-  HT.mapM_ (\(t, i) -> VM.unsafeWrite itemsM i t) hashmap
-  redNnfItems' <- V.take (redNnfHead'+1) <$> V.freeze itemsM
-
-  return $ ReducedNnf
-    { redNnfHead = redNnfHead'
-    , redNnfItems = redNnfItems'
-    }
+    where
+      compress fn nn =
+        case compressNnfF fn nn of
+          Right new -> add new
+          Left old -> pure old
 
 conditionLiteral :: Eq a => Literal a -> Literal a -> Either (Literal a) Bool
 conditionLiteral (Literal b l) lit@(Literal b' l')
   | l == l' = Right (b == b')
   | otherwise = Left lit
 
+
+-- | Given an Nnf condition it on a literal.
+conditionNnfF :: Literal Int -> NnfF Int f -> NnfF Int f
+conditionNnfF lit = \case
+  NLit l -> either NLit NConst $ conditionLiteral lit l
+  x -> x
+
 -- | Given an Nnf condition it on a literal.
 conditionNnf :: Literal Int -> ReducedNnf -> ReducedNnf
 conditionNnf lit = compressNnf \case
   NLit l -> either NLit NConst $ conditionLiteral lit l
   x -> x
+
+conflictingVar :: ReducedNnf -> (Maybe Int, IS.IntSet)
+conflictingVar = cata \case
+  NAnd (n, s) (n', s') ->
+    ( minimum <$> nonEmpty
+      (catMaybes [ n, n', fmap fst (IS.minView $ IS.intersection s s') ])
+    , IS.union s s'
+    )
+  NOr (n, s) (n', s') ->
+    ( minimum <$> nonEmpty (catMaybes [ n,  n'])
+    , IS.union s s')
+  NLit (Literal _ l) -> (Nothing, IS.singleton l)
+  NConst _ ->  (Nothing, IS.empty)
+
+-- | To compile a Nnf to Dnnf we just have to make sure that
+-- no variables are reused in ands.
+compileDnnf :: ReducedNnf -> ReducedNnf
+compileDnnf nnf =
+  case fst $ conflictingVar nnf of
+    Just v -> compileDnnf (splitNnf v nnf)
+    Nothing -> nnf
+
+-- | Solves minSat
+minSat :: ReducedNnf -> IS.IntSet
+minSat = cata \case
+  NAnd a b -> IS.union a b
+  NOr a b -> minimumBy (compare `on` IS.size) [a, b]
+  NLit (Literal True a) ->
+    IS.singleton a
+  _ -> IS.empty
+
+-- unify :: ReductionNnf -> (V.Vector IS.IntSet, ReducedNnf)
+-- unify rn =
+
+--   where
+--     deps = underNnf rn
+--     graph = undefined
+--     sccs = scc graph
+
 
 -- | Print a reducedNnf as a dot graph
 dotReducedNnf :: ReducedNnf -> LazyText.Text
