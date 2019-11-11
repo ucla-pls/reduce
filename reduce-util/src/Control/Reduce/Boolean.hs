@@ -370,6 +370,16 @@ instance BooleanAlgebra Nnf where
   tt = liftF . NLit . tt
   ff = liftF . NLit . ff
 
+showsPrecNnfF :: Show a => NnfF a (Int -> ShowS) -> Int -> ShowS
+showsPrecNnfF = \case
+  NAnd a b -> \n -> showParen (n > 3) (a 3 . showString " ∧ " . b 4)
+  NOr a b  -> \n -> showParen (n > 2) (a 2 . showString " ∨ " . b 3)
+  NLit (Literal b i) -> \n ->
+    showParen (n > 9) (showString (if b then "tt " else "ff ") . showsPrec 10 i)
+  NConst True -> const $ showString "true"
+  NConst False -> const $ showString "false"
+
+
 -- | Flattens an nnf
 flattenNnf :: Nnf a -> Nnf a
 flattenNnf = liftF . cata handle where
@@ -459,31 +469,28 @@ instance (Hashable a, Hashable b) => Hashable (NnfF a b) where
       s `hashWithSalt` (3 :: Int) `hashWithSalt` b
   {-# INLINE hashWithSalt #-}
 
+data Rnnf
+  = RAnd {-# UNPACK #-} !Int {-# UNPACK #-} !Int
+  | ROr  {-# UNPACK #-} !Int {-# UNPACK #-} !Int
+  | RLit {-# UNPACK #-} !Int
+  -- ^ The value of the literal is encoded in the sign of the
+  -- reference to the literal
+  deriving (Show, Eq, Ord)
+
 data ReducedNnf = ReducedNnf
-  { redNnfHead  :: Int
-  , redNnfItems :: V.Vector (NnfF Int Int)
+  { redNnfHead  :: Either Bool Int
+  , redNnfItems :: V.Vector Rnnf
   } deriving (Show, Eq)
 
-reduceNnf ::
-  Fixed (NnfF Int) b
-  => (forall a. NnfF Int a -> NnfF Int a)
-  -> b
-  -> ReducedNnf
-reduceNnf fn b = memorizeNnf g where
-  g :: Monad m => (NnfF Int Int -> m Int) -> m Int
-  g add = cataM (\x -> add (fn x)) b
-{-# INLINEABLE reduceNnf #-}
-
-instance Fixed (NnfF Int) ReducedNnf where
-  -- cata :: (f a -> a) -> b -> a
-  cata fn ReducedNnf {..} =
-    let v = V.map (fn . fmap (V.unsafeIndex v)) redNnfItems
-    in v V.! redNnfHead
-
-  -- ana :: (a -> f a) -> a -> b
-  ana fn a = memorizeNnf g where
-    g :: Monad m => (NnfF Int Int -> m Int) -> m Int
-    g add = go a where go x = add =<< traverse go (fn x)
+instance Hashable Rnnf where
+  hashWithSalt s = \case
+    RAnd a b ->
+      s `hashWithSalt` (0 :: Int) `hashWithSalt` a `hashWithSalt` b
+    ROr a b ->
+      s `hashWithSalt` (1 :: Int) `hashWithSalt` a `hashWithSalt` b
+    RLit l ->
+      s `hashWithSalt` (2 :: Int) `hashWithSalt` l
+  {-# INLINE hashWithSalt #-}
 
 memorizer ::
   (Eq a, Hashable a)
@@ -517,86 +524,165 @@ memorizer fn = runST $ do
   return (b, items)
 {-# INLINEABLE memorizer #-}
 
-memorizeNnf ::
-  (forall s. (NnfF Int Int -> ST s Int) -> ST s Int)
+memorizeRnnf ::
+  (forall s. (Rnnf -> ST s Int) -> ST s (Either Bool Int))
   -> ReducedNnf
-memorizeNnf fn = ReducedNnf {..} where
-  (redNnfHead, V.take (redNnfHead+1) -> redNnfItems) =
-    memorizer (\add -> do
-    _ <- add (NConst False)
-    _ <- add (NConst True)
-    fn add)
-{-# INLINEABLE memorizeNnf #-}
+memorizeRnnf fn = ReducedNnf {..} where
+  ( redNnfHead :: Either Bool Int
+    , V.take
+      (either
+        (const 0)
+        (\a -> 1 + if a < 0 then a - minBound else a)
+        redNnfHead
+      )
+    -> redNnfItems
+    ) = memorizer fn
+{-# INLINEABLE memorizeRnnf #-}
+
+
+
+compressNnfF ::
+  Applicative m
+  => (Rnnf -> m Int)
+  -> NnfF Int (Either Bool Int)
+  -> m (Either Bool Int)
+compressNnfF fn = \case
+  NAnd (Left False) _ ->
+    pure $ Left False
+  NAnd (Left True)  b ->
+    pure $ b
+  NAnd _ (Left False) ->
+    pure $ Left False
+  NAnd a (Left True) ->
+    pure $ a
+  NAnd (Right a) (Right b)
+    | a == b ->
+      pure $ Right a
+    | abs (a - b) == abs minBound ->
+      pure $ Left False
+    | otherwise ->
+      Right <$> fn (RAnd a b)
+
+  NOr (Left False) b ->
+    pure $ b
+  NOr (Left True)  _ ->
+    pure $ Left True
+  NOr a (Left False) ->
+    pure $ a
+  NOr _ (Left True)  ->
+    pure $ Left True
+  NOr (Right a) (Right b)
+    | a == b ->
+      pure $ Right a
+    | abs (a - b) == abs minBound ->
+      pure $ Left True
+    | otherwise ->
+      Right <$> fn (ROr a b)
+
+  NLit (Literal b i)  ->
+    Right . (\x -> if b then x else minBound + x)
+    <$> fn (RLit i)
+
+  NConst b ->
+    pure $ Left b
+
+reduceNnf ::
+  Fixed (NnfF Int) b
+  -- => (forall a. NnfF Int a -> NnfF Int a)
+  => b
+  -> ReducedNnf
+reduceNnf b = memorizeRnnf g where
+  g :: Monad m => (Rnnf -> m Int) -> m (Either Bool Int)
+  g add = cataM (compressNnfF add) b
+{-# INLINEABLE reduceNnf #-}
+
+reindex :: Int -> (Bool, Int)
+reindex n = (n >= 0, if n < 0 then n - minBound else n)
+
+unindex :: Bool -> Int -> Int
+unindex b n = if b then n + minBound else n
+
+redIndexed :: Int -> V.Vector Rnnf -> Rnnf
+redIndexed n v = V.unsafeIndex v (snd $ reindex n)
+
+instance Fixed (NnfF Int) ReducedNnf where
+  -- cata :: (f a -> a) -> b -> a
+  cata fn ReducedNnf {..} =
+    case redNnfHead of
+      Left b -> fn (NConst b)
+      Right x -> lkp x
+    where
+      v   = V.map red redNnfItems
+      lkp (reindex -> (b, r)) =
+        V.unsafeIndex v r b
+      red = \case
+        RAnd a b -> \_ -> fn (lkp <$> NAnd a b)
+        ROr  a b -> \_ -> fn (lkp <$> NOr a b)
+        RLit   t -> \b -> fn (NLit (Literal b t))
+  {-# INLINEABLE cata #-}
+
+  -- ana :: (a -> f a) -> a -> b
+  ana fn a = memorizeRnnf g where
+    g :: Monad m => (Rnnf -> m Int) -> m (Either Bool Int)
+    g add = go a where
+      go x = compressNnfF add =<< traverse go (fn x)
+  {-# INLINEABLE ana #-}
+
+showRnnf :: ReducedNnf -> String
+showRnnf r = cata showsPrecNnfF r 0 ""
+
+splitRnnf :: Int -> ReducedNnf -> ReducedNnf
+splitRnnf v red = memorizeRnnf g where
+  g :: (Rnnf -> ST s Int) -> ST s (Either Bool Int)
+  g add = do
+    (t, f) <- flip cataM red \case
+
+      NAnd (ta, fa) (tb, fb) -> do
+        x <- compressNnfF add (NAnd ta tb)
+        y <- compressNnfF add (NAnd fa fb)
+        return (x, y)
+
+      NOr (ta, fa) (tb, fb) -> do
+        x <- compressNnfF add (NOr ta tb)
+        y <- compressNnfF add (NOr fa fb)
+        return (x, y)
+
+      NLit l@(Literal b t)
+        | t == v ->
+            return
+              ( Left (b == False)
+              , Left (b == True)
+              )
+        | otherwise -> do
+            m <- compressNnfF add (NLit l)
+            return (m, m)
+
+      NConst b ->
+        return (Left b, Left b)
+       
+    i <- add (RLit v)
+    x <- compressNnfF add (NAnd (Right $ unindex True  i) t)
+    y <- compressNnfF add (NAnd (Right $ unindex False i) f)
+
+    compressNnfF add (NOr x y)
+
 
 type NnfTransformer a =
   NnfF Int a -> Either a (NnfF Int a)
 
-transformNnf :: NnfTransformer Int -> ReducedNnf -> ReducedNnf
-transformNnf trans ReducedNnf {..} = memorizeNnf g where
-  g :: (NnfF Int Int -> ST s Int) -> ST s Int
-  g add = do
-    indirect <- VM.new (V.length redNnfItems)
-    _ <- add (NConst False)
-    _ <- add (NConst True)
-    iforM_ redNnfItems $ \i x -> do
-      j <- trans <$> traverse (VM.read indirect) x >>= \case
-        Right new -> add new
-        Left old -> pure old
-      VM.write indirect i j
-    VM.read indirect redNnfHead
-{-# INLINEABLE transformNnf #-}
+conditionNnf :: Literal Int -> ReducedNnf -> ReducedNnf
+conditionNnf l red = memorizeRnnf g where
+  g :: (Rnnf -> ST s Int) -> ST s (Either Bool Int)
+  g add = cataM (compressNnfF add . conditionNnfF l) red
+{-# INLINEABLE conditionNnf #-}
 
-compressNnfF :: (NnfF a Int -> b) -> NnfF a Int -> Either Int b
-compressNnfF fn = \case
-  NAnd 0 _ -> Left 0
-  NAnd 1 b -> Left b
-  NAnd _ 0 -> Left 0
-  NAnd a 1 -> Left a
-  NAnd a b
-    | a == b -> Left a
-
-  NOr 0 b -> Left b
-  NOr 1 _ -> Left 1
-  NOr a 0 -> Left a
-  NOr _ 1 -> Left 1
-  NOr a b
-    | a == b -> Left a
-  x' -> Right (fn x')
-
-compressNnf :: (forall a. NnfF Int a -> NnfF Int a) -> ReducedNnf -> ReducedNnf
-compressNnf = transformNnf . compressNnfF
-
-splitNnf :: Int -> ReducedNnf -> ReducedNnf
-splitNnf v ReducedNnf {..} = memorizeNnf g where
-  g :: (NnfF Int Int -> ST s Int) -> ST s Int
-  g add = do
-    indirect <- VM.new (V.length redNnfItems)
-    _ <- add (NConst False)
-    _ <- add (NConst True)
-    iforM_ redNnfItems $ \i x -> do
-      e <- traverse (VM.read indirect) x
-      j  <- compress (conditionNnfF (tt v)) (fmap fst e)
-      j' <- compress (conditionNnfF (ff v)) (fmap snd e)
-      VM.write indirect i (j, j')
-
-    t <- add (NLit (tt v))
-    f <- add (NLit (ff v))
-    (ht, hf) <- VM.read indirect redNnfHead
-    x <- compress id (NAnd t ht)
-    y <- compress id (NAnd f hf)
-    compress id (NOr x y)
-
-    where
-      compress fn nn =
-        case compressNnfF fn nn of
-          Right new -> add new
-          Left old -> pure old
+-- compressNnf :: (forall a. NnfF Int a -> NnfF Int a) -> ReducedNnf -> ReducedNnf
+-- compressNnf = transformNnf . compressNnfF
 
 conditionLiteral :: Eq a => Literal a -> Literal a -> Either (Literal a) Bool
 conditionLiteral (Literal b l) lit@(Literal b' l')
   | l == l' = Right (b == b')
   | otherwise = Left lit
-
 
 -- | Given an Nnf condition it on a literal.
 conditionNnfF :: Literal Int -> NnfF Int f -> NnfF Int f
@@ -604,74 +690,99 @@ conditionNnfF lit = \case
   NLit l -> either NLit NConst $ conditionLiteral lit l
   x -> x
 
--- | Given an Nnf condition it on a literal.
-conditionNnf :: Literal Int -> ReducedNnf -> ReducedNnf
-conditionNnf lit = compressNnf \case
-  NLit l -> either NLit NConst $ conditionLiteral lit l
-  x -> x
+-- -- | Given an Nnf condition it on a literal.
+-- conditionNnf :: Literal Int -> ReducedNnf -> ReducedNnf
+-- conditionNnf lit = compressNnf \case
+--   NLit l -> either NLit NConst $ conditionLiteral lit l
+--   x -> x
 
 conflictingVar :: ReducedNnf -> (Maybe Int, IS.IntSet)
 conflictingVar = cata \case
   NAnd (n, s) (n', s') ->
-    ( minimum <$> nonEmpty
-      (catMaybes [ n, n', fmap fst (IS.minView $ IS.intersection s s') ])
+    ( fmap minimum
+      . nonEmpty
+      . catMaybes
+      $ [ n,  n'
+        , fst <$> IS.minView (IS.intersection s s')
+        ]
     , IS.union s s'
     )
   NOr (n, s) (n', s') ->
     ( minimum <$> nonEmpty (catMaybes [ n,  n'])
-    , IS.union s s')
-  NLit (Literal _ l) -> (Nothing, IS.singleton l)
-  NConst _ ->  (Nothing, IS.empty)
+    , IS.union s s'
+    )
+  NLit (Literal _ l) ->
+    ( Nothing
+    , IS.singleton l
+    )
+  NConst _ ->
+    ( Nothing
+    , IS.empty
+    )
 
 -- | To compile a Nnf to Dnnf we just have to make sure that
 -- no variables are reused in ands.
 compileDnnf :: ReducedNnf -> ReducedNnf
 compileDnnf nnf =
   case fst $ conflictingVar nnf of
-    Just v -> compileDnnf (splitNnf v nnf)
+    Just v -> compileDnnf (splitRnnf v nnf)
     Nothing -> nnf
 
 -- | Solves minSat
 minSat :: ReducedNnf -> IS.IntSet
 minSat = cata \case
   NAnd a b -> IS.union a b
-  NOr a b -> minimumBy (compare `on` IS.size) [a, b]
-  NLit (Literal True a) ->
-    IS.singleton a
+  NOr  a b -> minimumBy (compare `on` IS.size) [a, b]
+  NLit (Literal True a) -> IS.singleton a
   _ -> IS.empty
 
--- unify :: ReductionNnf -> (V.Vector IS.IntSet, ReducedNnf)
--- unify rn =
+-- -- unify :: ReductionNnf -> (V.Vector IS.IntSet, ReducedNnf)
+-- -- unify rn =
 
---   where
---     deps = underNnf rn
---     graph = undefined
---     sccs = scc graph
+-- --   where
+-- --     deps = underNnf rn
+-- --     graph = undefined
+-- --     sccs = scc graph
 
 
 -- | Print a reducedNnf as a dot graph
 dotReducedNnf :: ReducedNnf -> LazyText.Text
-dotReducedNnf ReducedNnf {..} =
-  toLazyText $ "digraph {\n " <> ifoldMap handleNnf redNnfItems  <> "}"
+dotReducedNnf red@ReducedNnf {..} =
+  toLazyText $ "digraph {\n "
+    <> ifoldMap handleNnf redNnfItems
+    <> "}"
   where
-    key i = "v" <> fromString (show i)
+    vars =
+      flip cata red $ \case
+        NAnd a b -> IS.union a b
+        NOr a b -> IS.union a b
+        NLit (Literal b i) -> IS.singleton (unindex b i)
+        NConst _ -> IS.empty
+
+    key (reindex -> (b, i)) =
+      (if b then "t" else "f") <> fromString (show i)
 
     handleNnf i = \case
-      NAnd a b ->
+
+      RAnd a b ->
         key i <> " [label=\"∧\"]"
         <> ";\n " <> key i <> " -> " <> key a
         <> ";\n " <> key i <> " -> " <> key b
         <> ";\n "
-      NOr a b ->
+
+      ROr a b ->
         key i <> " [label=\"∨\"]"
         <> ";\n " <> key i <> " -> " <> key a
         <> ";\n " <> key i <> " -> " <> key b
         <> ";\n "
-      NLit (Literal True l) ->
-        key i <> " [label=\"+" <> fromString (show l) <> "\"]" <> ";\n "
 
-      NLit (Literal False l) ->
-        key i <> " [label=\"-" <> fromString (show l) <> "\"]" <> ";\n "
-
-      NConst b ->
-        key i <> " [label=\"" <> (if b then "T" else "F") <> "\"]" <> ";\n "
+      RLit l -> flip foldMap [True, False] \b ->
+        if unindex b l `IS.member` vars
+        then
+          (if b then "t" else "f") <> fromString (show i)
+          <> " [label=\""
+          <> (if b then "+" else "-")
+          <> fromString (show l)
+          <> "\"];\n "
+        else
+          mempty

@@ -11,6 +11,9 @@ import System.Directory
 -- containers
 import qualified Data.IntSet as IS
 
+-- vector
+import qualified Data.Vector as V
+
 -- text
 import qualified Data.Text.Lazy.IO as LazyText
 
@@ -166,25 +169,79 @@ spec = do
         ]
 
 
-  beforeAll (createDirectoryIfMissing True "test/outputs") $ describe "ReducedNnf" $ do
-    it "can condition this expression" $ do
-      let x =
-            conditionNnf (ff 2) . conditionNnf (tt 1) . reduceNnf id $
-              and [ tt 1 ==> tt 2
-                 , tt 2 ==> tt 3
-                 , tt 1 ==> tt 3 :: Nnf Int
-                 ]
-      x `shouldBe` reduceNnf id (false :: Nnf Int)
+  describe "reducedNnf" $ do
+
+    it "can reduce: true" $ do
+      reduceNnf (true :: Nnf Int) `shouldBe`
+        ReducedNnf { redNnfHead = Left True, redNnfItems = V.empty }
+
+    it "can reduce: false" $ do
+      reduceNnf (false :: Nnf Int) `shouldBe`
+        ReducedNnf { redNnfHead = Left False, redNnfItems = V.empty }
+
+    it "can reduce: tt 1" $ do
+      reduceNnf (tt 1 :: Nnf Int) `shouldBe`
+        ReducedNnf
+        { redNnfHead = Right 0
+        , redNnfItems = V.fromList [ RLit 1 ]
+        }
+
+    it "can reduce: ff 1" $ do
+      reduceNnf (ff 1 :: Nnf Int) `shouldBe`
+        ReducedNnf
+        { redNnfHead = Right minBound
+        , redNnfItems = V.fromList [ RLit 1 ]
+        }
+
+    it "can reduce: ff 1 /\\ tt 1" $ do
+      reduceNnf (ff 1 /\ tt 1 :: Nnf Int) `shouldBe`
+        ReducedNnf
+        { redNnfHead = Left False
+        , redNnfItems = V.fromList []
+        }
+
+    it "can reduce: ff 1 \\/ tt 1" $ do
+      reduceNnf (ff 1 \/ tt 1 :: Nnf Int) `shouldBe`
+        ReducedNnf
+        { redNnfHead = Left True
+        , redNnfItems = V.fromList []
+        }
+
+
+  beforeAll (createDirectoryIfMissing True "test/outputs") $
+    describe "run calculations" $ do
+    -- it "can condition this expression" $ do
+    --   let x =
+    --         conditionNnf (ff 2) . conditionNnf (tt 1) . reduceNnf id $
+    --           and [ tt 1 ==> tt 2
+    --              , tt 2 ==> tt 3
+    --              , tt 1 ==> tt 3 :: Nnf Int
+    --              ]
+    --   x `shouldBe` reduceNnf id (false :: Nnf Int)
 
     it "can calculate the minsat of the example1" $ do
-      let x = reduceNnf id $ example1
+      let x = reduceNnf example1
       LazyText.writeFile "test/outputs/example1-before.dot" (dotReducedNnf x)
       let y = compileDnnf x
       LazyText.writeFile "test/outputs/example1-after.dot" (dotReducedNnf y)
       minSat y `shouldBe` IS.fromList []
 
+    it "can calculate the minsat another example" $ do
+      let x = reduceNnf
+            (and [ tt 1 \/ tt 4
+                 , tt 2
+                 , tt 3 /\ tt 5 \/ tt 4
+                 ] :: Nnf Int
+            )
+
+      LazyText.writeFile "test/outputs/example.dot" (dotReducedNnf x)
+      let y = compileDnnf x
+      LazyText.writeFile "test/outputs/example-compiled.dot" (dotReducedNnf y)
+
+      minSat y `shouldBe` IS.fromList [2, 4]
+
     it "can calculate the minsat of the example1 conditioned on 4" $ do
-      let x = conditionNnf (tt 4) . reduceNnf id $ example1
+      let x = conditionNnf (tt 4) . reduceNnf $ example1
       LazyText.writeFile "test/outputs/example1-con-4-before.dot" (dotReducedNnf x)
       let y = compileDnnf x
       LazyText.writeFile "test/outputs/example1-con-4-after.dot" (dotReducedNnf y)
@@ -198,11 +255,4 @@ spec = do
        . conditionNnf (tt 27)
        . conditionNnf (tt 28)
         $ x
-        ) `shouldBe` reduceNnf id (true :: Nnf Int)
-
-    it "can calculate the minsat another example" $ do
-      let x = reduceNnf id $ (and [ tt 1 \/ tt 4, tt 2, tt 3 /\ tt 5 \/ tt 4 ] :: Nnf Int)
-      LazyText.putStrLn (dotReducedNnf x)
-      let y = compileDnnf x
-      LazyText.putStrLn (dotReducedNnf y)
-      minSat y `shouldBe` IS.fromList [2, 4]
+        ) `shouldBe` reduceNnf (true :: Nnf Int)
