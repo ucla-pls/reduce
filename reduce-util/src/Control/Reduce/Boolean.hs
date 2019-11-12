@@ -164,6 +164,17 @@ deriving instance Ord (f (Fix f)) => Ord (Fix f)
 deriving instance Show (f (Fix f)) => Show (Fix f)
 deriving instance NFData (f (Fix f)) => NFData (Fix f)
 
+instance FromJSON (f (Fix f)) => FromJSON (Fix f) where
+  parseJSON = fmap Fix . parseJSON
+
+instance ToJSON (f (Fix f)) => ToJSON (Fix f) where
+  toJSON (Fix a) = toJSON a
+  toEncoding (Fix a) = toEncoding a
+
+instance Binary (f (Fix f)) => Binary (Fix f) where
+  get = Fix <$> get
+  put (Fix a) = put a
+
 class Functor f => Fixed f b | b -> f where
   cata :: (f a -> a) -> b -> a
   default cata :: Coercible (Fix f) b => (f a -> a) -> b -> a
@@ -210,8 +221,8 @@ data TermF a f
   deriving
     ( Eq, Ord
     , Functor, Foldable, Traversable
-    , Generic
-    , NFData
+    , Generic, NFData
+    , ToJSON, FromJSON , Binary
     )
 
 instance Bifunctor TermF where
@@ -227,6 +238,7 @@ instance Bifunctor TermF where
  
 newtype Term a = Term (Fix (TermF a))
   deriving (Eq, Ord, Generic)
+  deriving newtype (ToJSON, FromJSON, Binary)
   deriving newtype NFData
 
 instance Functor Term where
@@ -304,7 +316,10 @@ assignVars fn = cata \case
 
 -- | A literal is either true or false.
 data Literal a = Literal !Bool a
-  deriving (Eq, Ord, Generic, NFData)
+  deriving ( Eq, Ord, Generic, NFData
+           , ToJSON, FromJSON
+           , Binary, Functor, Foldable, Traversable
+           )
 
 instance BooleanAlgebra Literal where
   tt = Literal True
@@ -321,13 +336,28 @@ data NnfF a f
   | NOr f f
   | NLit !(Literal a)
   | NConst !Bool
-  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic, NFData)
+  deriving (Show, Eq, Ord
+           , Functor, Foldable
+           , Traversable, Generic, NFData
+           , ToJSON
+           , FromJSON
+           , Binary
+           )
 
 newtype Nnf a = Nnf (Fix (NnfF a))
   deriving (Eq, Ord, Generic)
   deriving newtype NFData
+  deriving newtype ToJSON
+  deriving newtype FromJSON
 
 instance Fixed (NnfF a) (Nnf a)
+
+instance Functor Nnf where
+  fmap f = cata $ liftF . \case
+    NAnd a b -> NAnd a b
+    NOr a b -> NOr a b
+    NLit l -> NLit (fmap f l)
+    NConst b -> NConst b
 
 newtype NnfAsTerm a = NnfAsTerm { nnfFromTerm :: Nnf a }
   deriving (Eq, Ord)

@@ -653,7 +653,7 @@ toLogicGraphReductionM ::
   -> m (( Graph () ([Int], k)
         , IS.IntSet
         , [IS.IntSet]
-        , Nnf [Int]
+        , Nnf Int
         )
        , Problem a [IS.IntSet]
        )
@@ -675,7 +675,7 @@ toLogicGraphReductionM overapprox keyfn missing red = refineProblemA' refined wh
       required = S.fromList [ f | DLit (Literal True f) <- deps]
         -- TODO Currently all false literals are ignored.
 
-      (graph, _) =
+      (graph, lookupGrph) =
         buildGraphFromNodesAndEdges
         [ (n, ((n, k), n `S.member` required)) | (n, k, _) <- items ]
         (  [ Edge () i j | DDeps i j <- deps ]
@@ -683,7 +683,7 @@ toLogicGraphReductionM overapprox keyfn missing red = refineProblemA' refined wh
         )
 
       (grph, core, _targets, fromClosures) = restrictGraph red s graph
-    pure ((grph, core, _targets, nnf), (fromClosures, _targets))
+    pure ((grph, core, _targets, (fromJust . lookupGrph <$> nnf)), (fromClosures, _targets))
 
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.
