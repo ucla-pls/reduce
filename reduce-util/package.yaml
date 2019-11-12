@@ -52,6 +52,7 @@ dependencies:
 - unordered-containers
 - hashable
 - hashtables
+- binary
     
 ghc-options:
   - -Wall

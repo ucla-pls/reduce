@@ -44,6 +44,12 @@ import qualified Prelude
 -- deepseq
 import Control.DeepSeq
 
+-- aseon
+import Data.Aeson
+
+-- binary
+import Data.Binary
+
 -- vector
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as VM
@@ -475,12 +481,25 @@ data Rnnf
   | RLit {-# UNPACK #-} !Int
   -- ^ The value of the literal is encoded in the sign of the
   -- reference to the literal
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON, Binary)
 
 data ReducedNnf = ReducedNnf
   { redNnfHead  :: Either Bool Int
   , redNnfItems :: V.Vector Rnnf
-  } deriving (Show, Eq)
+  } deriving (Show, Eq, Generic, FromJSON, ToJSON)
+
+instance Binary ReducedNnf where
+  get = do
+    redNnfHead <- get
+    redNnfItems <- case redNnfHead of
+      Right n -> V.replicateM (n + 1) get
+      Left _ -> return V.empty
+    return ReducedNnf {..}
+  put ReducedNnf {..} = do
+    put redNnfHead
+    case redNnfHead of
+      Left _ -> return ()
+      Right n -> V.mapM_ put (V.take (n+1) redNnfItems)
 
 instance Hashable Rnnf where
   hashWithSalt s = \case
@@ -539,8 +558,7 @@ memorizeRnnf fn = ReducedNnf {..} where
     ) = memorizer fn
 {-# INLINEABLE memorizeRnnf #-}
 
-
-
+-- | Compress an nnf to rnnf.
 compressNnfF ::
   Applicative m
   => (Rnnf -> m Int)
