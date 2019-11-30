@@ -32,14 +32,18 @@ import Control.Applicative
 import Control.Monad.ST
 import Data.Coerce
 import Data.Monoid
+import Data.Bool (bool)
 import Data.Function
+import Data.Foldable
 import Data.Maybe
 import Data.List.NonEmpty (nonEmpty)
 import Data.STRef
-import Data.List
+import qualified Data.List as L
 import GHC.Generics (Generic)
 import Prelude hiding (not, and, or)
 import qualified Prelude
+
+import Debug.Trace
 
 -- deepseq
 import Control.DeepSeq
@@ -55,7 +59,9 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as VM
 
 -- containers
+import qualified Data.Set as S
 import qualified Data.IntSet as IS
+import qualified Data.IntMap.Strict as IM
 
 -- hashtables
 import qualified Data.HashTable.ST.Cuckoo as CHT
@@ -68,9 +74,11 @@ import Data.Hashable
 import qualified Data.Text.Lazy as LazyText
 import Data.Text.Lazy.Builder
 
-
 -- lens
 import Control.Lens hiding (andOf, orOf)
+
+-- reduce-util
+import Control.Reduce.Graph
 
 -- | A boolean logic
 class Boolean a where
@@ -359,6 +367,13 @@ instance Functor Nnf where
     NLit l -> NLit (fmap f l)
     NConst b -> NConst b
 
+instance Foldable Nnf where
+  foldMap f = cata $ \case
+    NAnd a b -> a <> b
+    NOr a b -> a <> b
+    NLit l -> foldMap f l
+    NConst _ -> mempty
+
 newtype NnfAsTerm a = NnfAsTerm { nnfFromTerm :: Nnf a }
   deriving (Eq, Ord)
 
@@ -485,11 +500,11 @@ underNnfF = \case
   NConst b -> \d -> [ d | not b ]
   -- TODO: This is not correct. (why?)
 
-underDependencies :: Eq a => Nnf a -> [Dependency a]
+underDependencies :: (Fixed (NnfF a) b, Eq a) => b -> [Dependency a]
 underDependencies a =
   cata underNnfF a DFalse
 
-overDependencies :: Nnf a -> [Dependency a]
+overDependencies :: (Fixed (NnfF a) b, Eq a) => b -> [Dependency a]
 overDependencies a =
   cata overNnfF a DFalse
 
@@ -634,6 +649,20 @@ compressNnfF fn = \case
   NConst b ->
     pure $ Left b
 
+nnfToTerm :: Fixed (NnfF x) b => b -> Term x
+nnfToTerm = cata \case
+  NAnd a b -> a /\ b
+  NOr a b -> a \/ b
+  NLit (Literal b l) -> var b l
+  NConst b -> liftF (TConst b)
+
+  -- NLit (Literal b i)  ->
+  --   Right . (\x -> if b then x else minBound + x)
+  --   <$> fn (RLit i)
+
+  -- NConst b ->
+  --   pure $ Left b
+
 reduceNnf ::
   Fixed (NnfF Int) b
   -- => (forall a. NnfF Int a -> NnfF Int a)
@@ -644,8 +673,108 @@ reduceNnf b = memorizeRnnf g where
   g add = cataM (compressNnfF add) b
 {-# INLINEABLE reduceNnf #-}
 
+displayCNF :: Foldable t => t (IS.IntSet) -> ShowS
+displayCNF =
+  appEndo
+  . foldMap Endo
+  . L.intersperse (showString " ")
+  . map displayClause
+  . toList
+
+displayClause :: IS.IntSet -> ShowS
+displayClause = showParen True
+  . appEndo
+  . foldMap Endo
+  . L.intersperse (showString " ")
+  . map displayLiteral
+  . IS.toList
+
+  where
+    displayLiteral i = case reindex i of
+      (True, l)  -> showsPrec 0 l
+      (False, l) -> showString "!" . showsPrec 0 l
+
+clauseLearning :: S.Set (IS.IntSet) -> S.Set (IS.IntSet)
+clauseLearning s = go s $ invert s where
+  go items = \case
+    [ ] -> items
+    fct -> go x $ invert learned
+      where
+        learned = x S.\\ items
+        x = flip S.map items $
+          foldl' (\it f ->
+                    if f `IS.isProperSubsetOf` it
+                    then it IS.\\ f
+                    else it
+                 )
+          `flip` fct
+  invert = map (IS.map negindex) . toList
+
+
+compressNnf ::
+  Fixed (NnfF Int) b
+  -- => (forall a. NnfF Int a -> NnfF Int a)
+  => b
+  -> ReducedNnf
+compressNnf nnf = memorizeRnnf g where
+  g :: forall m. Monad m => (Rnnf -> m Int) -> m (Either Bool Int)
+  g add = do
+    res <- cataM compressNnfF' nnf
+    case S.minView res of
+      Nothing -> pure $ Left True
+      Just (fst', _)
+        | IS.size fst' == 0 -> pure $ Left False
+        | otherwise -> Right <$> realize res
+    where
+      realize :: S.Set IS.IntSet -> m Int
+      realize =
+        foldr1 (\x y -> add =<< RAnd <$> y <*> x)
+        . map realizeOrs
+        . toList . clauseLearning
+
+      realizeOrs :: IS.IntSet -> m Int
+      realizeOrs =
+        foldr1 (\x y -> add =<< ROr <$> y <*> x)
+        . map pure
+        . IS.toList
+
+      -- | Compress an nnf to rnnf.
+      compressNnfF' ::
+        NnfF Int (S.Set IS.IntSet)
+        -> m (S.Set IS.IntSet)
+      compressNnfF' = \case
+        NAnd a b ->
+          pure $ S.union a b
+
+        NOr a b ->
+          case [ IS.union a' b' | a' <- toList a, b' <- toList b ] of
+            [ ] -> pure $ S.empty
+            x : [  ] -> pure $ S.singleton x
+            _ -> do
+              i <- realize a
+              j <- realize b
+              S.singleton . IS.singleton <$> add (ROr i j)
+
+        NLit (Literal b l) -> do
+          i <- (\x -> if b then x else minBound + x) <$> add (RLit l)
+          pure . S.singleton . IS.singleton $ i
+
+        NConst True ->
+          pure S.empty
+
+        NConst False ->
+          pure . S.singleton $ IS.empty
+{-# INLINEABLE compressNnf #-}
+
+reduceNnfSize :: ReducedNnf -> Int
+reduceNnfSize ReducedNnf {..} =
+  V.length redNnfItems
+
 reindex :: Int -> (Bool, Int)
 reindex n = (n >= 0, if n < 0 then n - minBound else n)
+
+negindex :: Int -> Int
+negindex n = if n < 0 then n - minBound else n + minBound
 
 unindex :: Bool -> Int -> Int
 unindex b n = if b then n + minBound else n
@@ -715,8 +844,8 @@ splitRnnf v red = memorizeRnnf g where
     compressNnfF add (NOr x y)
 
 
-type NnfTransformer a =
-  NnfF Int a -> Either a (NnfF Int a)
+-- type NnfTransformer a =
+--   NnfF Int a -> Either a (NnfF Int a)
 
 conditionNnf :: Literal Int -> ReducedNnf -> ReducedNnf
 conditionNnf l red = memorizeRnnf g where
@@ -744,19 +873,33 @@ conditionNnfF lit = \case
 --   NLit l -> either NLit NConst $ conditionLiteral lit l
 --   x -> x
 
+asConjunction :: ReducedNnf -> [ Nnf Int ]
+asConjunction = flip appEndo [] . snd . cata \case
+  NAnd (a', a) (b', b) ->
+    (a' /\ b', a <> b)
+  NOr (a, _) (b, _) ->
+    (a \/ b, Endo ((a \/ b) :))
+  NLit (Literal b l) ->
+    (var b l, Endo (var b l:))
+  NConst True  ->
+    (true, Endo (true:))
+  NConst False ->
+    (false, Endo (false:))
+
+
 conflictingVar :: ReducedNnf -> (Maybe Int, IS.IntSet)
 conflictingVar = cata \case
   NAnd (n, s) (n', s') ->
-    ( fmap minimum
+    ( fmap maximum
       . nonEmpty
       . catMaybes
       $ [ n,  n'
-        , fst <$> IS.minView (IS.intersection s s')
+        , fst <$> IS.maxView (IS.intersection s s')
         ]
     , IS.union s s'
     )
   NOr (n, s) (n', s') ->
-    ( minimum <$> nonEmpty (catMaybes [ n,  n'])
+    ( maximum <$> nonEmpty (catMaybes [ n,  n'])
     , IS.union s s'
     )
   NLit (Literal _ l) ->
@@ -784,14 +927,105 @@ minSat = cata \case
   NLit (Literal True a) -> IS.singleton a
   _ -> IS.empty
 
--- -- unify :: ReductionNnf -> (V.Vector IS.IntSet, ReducedNnf)
--- -- unify rn =
+reduceNnfVars :: ReducedNnf -> V.Vector Int
+reduceNnfVars =
+  V.mapMaybe (\case RLit l -> Just l; _ -> Nothing) . redNnfItems
 
--- --   where
--- --     deps = underNnf rn
--- --     graph = undefined
--- --     sccs = scc graph
+unify :: ReducedNnf -> (V.Vector IS.IntSet, ReducedNnf)
+unify nnf =
+  ( sccs
+  , memorizeRnnf fn
+  )
+  where
+    fn :: (Rnnf -> ST s Int) -> ST s (Either Bool Int)
+    fn add = flip cataM nnf \case
+      NAnd a b -> compressNnfF add (NAnd a b)
+      NOr a b  -> compressNnfF add (NOr a b)
+      NLit (Literal b l) ->
+        compressNnfF add (NLit (Literal b (helper IM.! l)))
+      NConst b ->
+        compressNnfF add (NConst b)
 
+    (graph, _) = buildGraphFromNodesAndEdges
+      [ (a, a) | a <- V.toList (reduceNnfVars nnf) ]
+      [ Edge () a b |  DDeps a b <- underDependencies nnf ]
+
+    sccs = V.fromList (scc graph)
+
+    helper = IM.fromList
+      [ (nodeLabel (nodes graph V.! j), i)
+      | (i, s) <- itoList sccs, j <- IS.toList s
+      ]
+
+boundVars :: ReducedNnf -> IS.IntSet
+boundVars = cata \case
+  NAnd a b -> a `IS.union` b
+  NOr a b -> a `IS.intersection` b
+  NLit (Literal b l)  -> IS.singleton (unindex b l)
+  _ -> IS.empty
+
+extractNegation :: Int -> ReducedNnf -> ReducedNnf
+extractNegation i nnf = memorizeRnnf fn where
+  fn :: (Rnnf -> ST s Int) -> ST s (Either Bool Int)
+  fn add = do
+    (xr, t) <- flip cataM nnf \a -> do
+      x <- case a of
+        NAnd (ax, t1) (bx, t2) -> do
+          x <- mk (NAnd ax bx)
+          t <- mk (NAnd t1 t2)
+          pure (x, t)
+        NOr (ax, t1) (bx, t2) -> do
+          x  <- mk (NOr ax bx)
+          ta <- mk (NOr ax t2)
+          tb <- mk (NOr bx t1)
+          y <- mk (NAnd x ta)
+          r <- mk (NAnd y tb)
+          t  <- mk (NOr t1 t2)
+          pure (r, t)
+
+        NLit (Literal b l)
+          | l == i -> liftM2 (,)
+            (mk $ NConst b)
+            if b then
+              (mk $ NLit (Literal b l))
+              else (mk $ NConst True)
+           
+          | otherwise -> liftM2 (,)
+            (mk $ NConst True)
+            (mk $ NLit (Literal b l))
+
+        NConst b -> liftM2 (,)
+          (mk $ NConst True)
+          (mk $ NConst b)
+
+      trc $ show a ++ " -> " ++ show x
+      return x
+
+    trc $ "XR : " ++ show xr
+    trc $ "T : " ++ show t
+
+    k <- flip cataM nnf \case
+      NAnd a b -> mk (NAnd a b)
+      NOr a b -> mk (NOr a b)
+      NLit (Literal b l)
+        | l == i /\ b ->
+          mk . NAnd xr =<< mk (NLit $ Literal b l)
+        | l == i /\ not b ->
+          mk (NConst True)
+        | otherwise ->
+          mk (NLit $ Literal b l)
+      NConst b ->
+        mk (NConst b)
+
+    mk . NAnd k =<< mk . NOr xr =<< mk (NLit $ Literal False i)
+
+    where
+      mk x = do
+        y <- compressNnfF add x
+        trc ("MK " ++ either (bool "F" "T") show y ++ "\t<- " ++ show x)
+        return y
+
+      trc a = if True then return () else traceM a
 
 -- | Print a reducedNnf as a dot graph
 dotReducedNnf :: ReducedNnf -> LazyText.Text
