@@ -322,6 +322,16 @@ assignVars fn = cata \case
   TVar a   -> liftF (fn a)
   TConst b -> liftF (TConst b)
 
+-- | A Traversal over all variables in a term
+traverseVariables :: Monad m => (a -> m (Term b)) -> Term a -> m (Term b)
+traverseVariables fn = cataM \case
+  TAnd a b -> pure . liftF $ TAnd a b
+  TOr  a b -> pure . liftF $ TOr a b
+  TNot a   -> pure . liftF $ TNot a
+  TVar a   -> fn a
+  TConst b -> pure . liftF $ TConst b
+
+
 -- | A literal is either true or false.
 data Literal a = Literal !Bool a
   deriving ( Eq, Ord, Generic, NFData
@@ -430,7 +440,6 @@ showsPrecNnfF = \case
   NConst True -> const $ showString "true"
   NConst False -> const $ showString "false"
 
-
 -- | Flattens an nnf
 flattenNnf :: Nnf a -> Nnf a
 flattenNnf = liftF . cata handle where
@@ -455,7 +464,7 @@ data Dependency a
   = DFalse
   | DLit !(Literal a)
   | DDeps !a !a
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Functor, Foldable, Traversable)
 
 infixr 5 ~~>
 (~~>) :: a -> a -> Dependency a
