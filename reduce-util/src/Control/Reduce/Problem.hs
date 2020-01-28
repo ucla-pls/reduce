@@ -301,7 +301,7 @@ runReductionProblem wf reducer p = do
     iterRef <- newIORef 1
     succRef <- newIORef (p ^. problemInitial)
 
-
+    checkRef <- newIORef True
     when doTryIntial . flip runReaderT env $ do
       let
         fp = "0000"
@@ -315,25 +315,31 @@ runReductionProblem wf reducer p = do
       L.info $ (L.displayString $ showJudgment judgment)
 
       liftIO $ record (MetricRow (Just s) 0 fp judgment result)
-
-    start <- liftIO $ getCurrentTime
-
-    ee <- goWith (p ^. problemInitial) $ \s -> flip runReaderT env $ do
-      (fp, _diff) <- checkTimeouts start iterRef opts
-
-      L.info $ "Trying (Iteration " <> L.displayString fp <> ")"
-      L.debug $ " Metric: " <> displayAnyMetric (p ^. problemMetric) (Just s)
-
-      (judgment, result) <- checkSolution fp p s
-
-      L.info $ (L.displayString $ showJudgment judgment)
-
-      liftIO $ record (MetricRow (Just s) _diff fp judgment result)
-
+      
       let success = judgment == Success
+      when (not success) $ writeIORef checkRef False
 
-      when success $ writeIORef succRef s
-      return success
+    ee <- readIORef checkRef >>= \case 
+      True -> do
+        start <- liftIO $ getCurrentTime
+        goWith (p ^. problemInitial) $ \s -> flip runReaderT env $ do
+          (fp, _diff) <- checkTimeouts start iterRef opts
+
+          L.info $ "Trying (Iteration " <> L.displayString fp <> ")"
+          L.debug $ " Metric: " <> displayAnyMetric (p ^. problemMetric) (Just s)
+
+          (judgment, result) <- checkSolution fp p s
+
+          L.info $ (L.displayString $ showJudgment judgment)
+
+          liftIO $ record (MetricRow (Just s) _diff fp judgment result)
+
+          let success = judgment == Success
+          when success $ writeIORef succRef s
+          return success
+      
+      False -> do 
+        return (Left ReductionFailedInitial)
 
     m <- readIORef succRef
     return $ case ee of
@@ -402,6 +408,8 @@ data ReductionException
   -- ^ The reduction failed to find a reduction.
   | ReductionInterupted
   -- ^ The reduction was interrupted.
+  | ReductionFailedInitial
+  -- ^ The reduction failed the initial run.
   deriving (Show, Eq, Ord)
 
 instance Exception ReductionException
