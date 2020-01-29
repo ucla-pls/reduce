@@ -324,7 +324,7 @@ runReductionProblem wf reducer p = do
       liftIO $ record (MetricRow (Just s) 0 fp judgment result)
       
       let success = judgment == Success
-      when (not success) $ writeIORef checkRef (doFailFast)
+      when (not success) $ writeIORef checkRef (not doFailFast)
 
     ee <- readIORef checkRef >>= \case 
       True -> do
