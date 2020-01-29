@@ -175,12 +175,16 @@ data ReductionOptions = ReductionOptions
   -- ^ The max number of invocations of the predicate (negative means infinite)
   , _redKeepFolders     :: !Bool
   -- ^ Whether to keep the folders or not
+  , _redKeepOutputs     :: !Bool
+  -- ^ Whether to keep the stdout and -errs'
   , _redMetricsFile        :: !FilePath
   -- ^ An absolute path to the metrics files, or relative to the work-folder
   , _redPredicateTimelimit :: !Double
   -- ^ the timelimit of a single run of the predicate in seconds.
   , _redTryInitial         :: !Bool
   -- ^ try if the initial problem is good (recored as 0000)
+  , _redFailFast         :: !Bool
+  -- ^ if an error occurs while trying the initial run fail imidiately
   } deriving (Show, Eq)
 
 makeLenses ''Problem
@@ -202,9 +206,11 @@ defaultReductionOptions = ReductionOptions
   { _redTotalTimelimit = -1
   , _redMaxIterations = -1
   , _redKeepFolders = True
+  , _redKeepOutputs = True
   , _redMetricsFile = "metrics.csv"
   , _redPredicateTimelimit = 60
   , _redTryInitial = False
+  , _redFailFast = False
   }
 
 makeClassy ''ReductionOptions
@@ -294,6 +300,7 @@ runReductionProblem wf reducer p = do
   opts <- view reductionOptions
   env <- ask
   doTryIntial <- view redTryInitial
+  doFailFast <- view redFailFast
 
   createDirectory wf
   withCurrentDirectory wf . liftIO $ do
@@ -317,7 +324,7 @@ runReductionProblem wf reducer p = do
       liftIO $ record (MetricRow (Just s) 0 fp judgment result)
       
       let success = judgment == Success
-      when (not success) $ writeIORef checkRef False
+      when (not success) $ writeIORef checkRef (doFailFast)
 
     ee <- readIORef checkRef >>= \case 
       True -> do
@@ -380,12 +387,24 @@ checkSolution ::
 checkSolution fp Problem{..} s = do
   timelimit <- view redPredicateTimelimit
   keepFolders <- view redKeepFolders
+  keepOutputs <- view redKeepOutputs
   case _problemExtractBase s of
     Just a -> do
       let runCmd = runCommand fp timelimit _problemCommand (_problemDescription a)
       res <- finally
         ( fmap snd <$> L.withLogger runCmd )
-        ( unless keepFolders (removePathForcibly fp) )
+        ( unless keepFolders $ do 
+          if keepOutputs 
+          then withSystemTempDirectory "move" $ \tmp ->  do
+            renameFile (fp </> "stdout") (tmp </> "stdout")
+            renameFile (fp </> "stderr") (tmp </> "stderr")
+            removePathForcibly fp 
+            createDirectory fp
+            renameFile (tmp </> "stdout") (fp </> "stdout")
+            renameFile (tmp </> "stderr") (fp </> "stderr")
+          else
+            removePathForcibly fp 
+        )
       let judgment = case resultOutput res of
             Just m
               | checkExpectation _problemExpectation m ->

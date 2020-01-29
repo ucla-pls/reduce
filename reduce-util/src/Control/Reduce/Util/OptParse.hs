@@ -67,7 +67,6 @@ parseCmdTemplate =
   ( strArgument (metavar "ARG.." <> help "arguments to the command.")
   )
 
-
 parsePredicateOptions :: Parser PredicateOptions
 parsePredicateOptions = do
   input <-
@@ -177,6 +176,11 @@ parseReductionOptions = do
     long "keep-folders"
     <> hidden
     <> help "keep the reduction folders after use?"
+  
+  _redKeepOutputs <- switch $
+    long "keep-outputs"
+    <> hidden
+    <> help "keep the stdout and stderr outputs?"
 
   _redMetricsFile <- strOption $
     long "metrics-file"
@@ -197,6 +201,12 @@ parseReductionOptions = do
     <> hidden
     <> showDefault
     <> help "try the intitial problem, recored as (0000)"
+  
+  _redFailFast <- switch $
+    long "fail-fast"
+    <> hidden
+    <> showDefault
+    <> help "exit quickly on errors, especially if the intitial try was bad."
 
   pure $ ReductionOptions {..}
 
