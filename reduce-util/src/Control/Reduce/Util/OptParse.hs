@@ -202,11 +202,11 @@ parseReductionOptions = do
     <> showDefault
     <> help "try the intitial problem, recored as (0000)"
   
-  _redFailFast <- switch $
-    long "fail-fast"
+  _redIgnoreFailure <- switch $
+    long "ignore-failure"
     <> hidden
     <> showDefault
-    <> help "exit quickly on errors, especially if the intitial try was bad."
+    <> help "ignore the failure of the initial try."
 
   pure $ ReductionOptions {..}
 

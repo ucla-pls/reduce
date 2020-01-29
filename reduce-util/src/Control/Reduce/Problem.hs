@@ -183,8 +183,8 @@ data ReductionOptions = ReductionOptions
   -- ^ the timelimit of a single run of the predicate in seconds.
   , _redTryInitial         :: !Bool
   -- ^ try if the initial problem is good (recored as 0000)
-  , _redFailFast         :: !Bool
-  -- ^ if an error occurs while trying the initial run fail imidiately
+  , _redIgnoreFailure         :: !Bool
+  -- ^ ignore the failure of the initial try.
   } deriving (Show, Eq)
 
 makeLenses ''Problem
@@ -210,7 +210,7 @@ defaultReductionOptions = ReductionOptions
   , _redMetricsFile = "metrics.csv"
   , _redPredicateTimelimit = 60
   , _redTryInitial = False
-  , _redFailFast = False
+  , _redIgnoreFailure = False
   }
 
 makeClassy ''ReductionOptions
@@ -300,7 +300,7 @@ runReductionProblem wf reducer p = do
   opts <- view reductionOptions
   env <- ask
   doTryIntial <- view redTryInitial
-  doFailFast <- view redFailFast
+  doIgnoreFailure <- view redIgnoreFailure
 
   createDirectory wf
   withCurrentDirectory wf . liftIO $ do
@@ -324,7 +324,7 @@ runReductionProblem wf reducer p = do
       liftIO $ record (MetricRow (Just s) 0 fp judgment result)
       
       let success = judgment == Success
-      when (not success) $ writeIORef checkRef (not doFailFast)
+      when (not success) $ writeIORef checkRef doIgnoreFailure
 
     ee <- readIORef checkRef >>= \case 
       True -> do
