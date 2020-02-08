@@ -25,7 +25,7 @@ mkDerivation {
     process profunctors reduce stm temporary text time transformers
     typed-process unliftio unordered-containers vector
   ];
-  preConfigure = "hpack";
+  prePatch = "hpack";
   homepage = "https://github.com/kalhauge/reduce#readme";
   license = stdenv.lib.licenses.bsd3;
 }

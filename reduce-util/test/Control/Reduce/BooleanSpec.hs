@@ -1,10 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Control.Reduce.BooleanSpec where
 
+-- base
 import Data.Maybe
 import Prelude hiding (not, and)
 import qualified Data.List as List
@@ -66,28 +68,26 @@ import SpecHelper
 --   )
 --   (TOr (TNot (TVar 4)) (TConst True))
 
--- example2 :: Term Int
--- example2 = TAnd (TAnd (TAnd (TAnd (TAnd (TAnd (TAnd (TAnd (TAnd (TAnd (TAnd (TAnd (TAnd (TAnd (TAnd (TConst True) (TOr (TNot (TVar 4)) (TConst True))) (TOr (TNot (TVar 4)) (TConst True))) (TOr (TNot (TVar 4)) (TAnd (TAnd (TAnd (TAnd (TAnd (TAnd (TAnd (TAnd (TAnd (TConst True) (TVar 0)) (TVar 1)) (TVar 1)) (TVar 2)) (TVar 1)) (TVar 2)) (TVar 3)) (TVar 2)) (TVar 3)))) (TOr (TNot (TVar 4)) (TConst True))) (TOr (TNot (TVar 4)) (TAnd (TOr (TConst False) (TAnd (TVar 24) (TConst True))) (TAnd (TConst True) (TAnd (TConst True) (TConst True)))))) (TOr (TNot (TVar 4)) (TConst True))) (TOr (TNot (TVar 4)) (TConst True))) (TOr (TNot (TVar 4)) (TConst True))) (TOr (TNot (TVar 4)) (TAnd (TOr (TOr (TOr (TOr (TOr (TOr (TOr (TOr (TOr (TOr (TOr (TOr (TOr (TOr (TOr (TConst False) (TAnd (TVar 27) (TConst True))) (TAnd (TVar 26) (TAnd (TConst True) (TVar 10)))) (TAnd (TVar 25) (TAnd (TAnd (TConst True) (TVar 10)) (TVar 9)))) (TAnd (TVar 24) (TAnd (TAnd (TAnd (TConst True) (TVar 10)) (TVar 9)) (TVar 8)))) (TAnd (TVar 24) (TAnd (TAnd (TAnd (TAnd (TConst True) (TVar 10)) (TVar 9)) (TVar 14)) (TVar 11)))) (TAnd (TVar 24) (TAnd (TAnd (TAnd (TAnd (TAnd (TConst True) (TVar 10)) (TVar 9)) (TVar 14)) (TVar 20)) (TVar 7)))) (TAnd (TVar 24) (TAnd (TAnd (TAnd (TConst True) (TVar 10)) (TVar 15)) (TVar 12)))) (TAnd (TVar 24) (TAnd (TAnd (TAnd (TAnd (TConst True) (TVar 10)) (TVar 15)) (TVar 21)) (TVar 11)))) (TAnd (TVar 24) (TAnd (TAnd (TAnd (TAnd (TAnd (TConst True) (TVar 10)) (TVar 15)) (TVar 21)) (TVar 20)) (TVar 7)))) (TAnd (TVar 24) (TAnd (TAnd (TConst True) (TVar 18)) (TVar 12)))) (TAnd (TVar 24) (TAnd (TAnd (TAnd (TConst True) (TVar 18)) (TVar 21)) (TVar 11)))) (TAnd (TVar 24) (TAnd (TAnd (TAnd (TAnd (TConst True) (TVar 18)) (TVar 21)) (TVar 20)) (TVar 7)))) (TAnd (TVar 24) (TAnd (TAnd (TConst True) (TVar 19)) (TVar 13)))) (TAnd (TVar 24) (TAnd (TAnd (TConst True) (TVar 16)) (TVar 5)))) (TAnd (TVar 24) (TAnd (TAnd (TConst True) (TVar 17)) (TVar 6)))) (TAnd (TConst True) (TAnd (TConst True) (TAnd (TConst True) (TConst True))))))) (TOr (TNot (TVar 4)) (TAnd (TAnd (TOr (TConst False) (TAnd (TVar 22) (TConst True))) (TAnd (TConst True) (TAnd (TConst True) (TConst True)))) (TAnd (TConst True) (TAnd (TConst True) (TConst True)))))) (TOr (TNot (TVar 4)) (TConst True))) (TOr (TNot (TVar 4)) (TConst True))) (TOr (TNot (TVar 4)) (TAnd (TOr (TConst False) (TAnd (TVar 28) (TConst True))) (TAnd (TConst True) (TAnd (TConst True) (TAnd (TConst True) (TConst True))))))) (TOr (TNot (TVar 4)) (TAnd (TAnd (TOr (TConst False) (TAnd (TVar 23) (TConst True))) (TAnd (TConst True) (TAnd (TConst True) (TConst True)))) (TAnd (TConst True) (TAnd (TConst True) (TConst True)))))) (TOr (TNot (TVar 4)) (TConst True))
 example1 :: Nnf Int
 example1 =
     (ff 4 \/ tt 0 /\ tt 1 )
     /\ (ff 4 \/ tt 24)
     /\ (tt 4
           ==> tt 27
-          \/ tt 26 /\ tt 10
-          \/ tt 25 /\ (tt 10 /\ tt 9)
-          \/ tt 24 /\ (tt 10 /\ tt 9 /\ tt 8)
-          \/ tt 24 /\ (tt 10 /\ tt 9 /\ tt 14 /\ tt 11)
-          \/ tt 24 /\ (tt 10 /\ tt 9 /\ tt 14 /\ tt 20 /\ tt 7)
-          \/ tt 24 /\ (tt 10 /\ tt 15 /\ tt 12)
-          \/ tt 24 /\ (tt 10 /\ tt 15 /\ tt 21 /\ tt 11)
-          \/ tt 24 /\ (tt 10 /\ tt 15 /\ tt 21 /\ tt 20 /\ tt 7)
-          \/ tt 24 /\ (tt 18 /\ tt 12)
-          \/ tt 24 /\ (tt 18 /\ tt 21 /\ tt 11)
-          \/ tt 24 /\ (tt 18 /\ tt 21 /\ tt 20 /\ tt 7)
-          \/ tt 24 /\ (tt 19 /\ tt 13)
-          \/ tt 24 /\ (tt 16 /\ tt 5)
-          \/ tt 24 /\ (tt 17 /\ tt 6)
+          \/ (tt 26 /\ tt 10)
+          \/ (tt 25 /\ (tt 10 /\ tt 9))
+          \/ (tt 24 /\ (tt 10 /\ tt 9 /\ tt 8))
+          \/ (tt 24 /\ (tt 10 /\ tt 9 /\ tt 14 /\ tt 11))
+          \/ (tt 24 /\ (tt 10 /\ tt 9 /\ tt 14 /\ tt 20 /\ tt 7))
+          \/ (tt 24 /\ (tt 10 /\ tt 15 /\ tt 12))
+          \/ (tt 24 /\ (tt 10 /\ tt 15 /\ tt 21 /\ tt 11))
+          \/ (tt 24 /\ (tt 10 /\ tt 15 /\ tt 21 /\ tt 20 /\ tt 7))
+          \/ (tt 24 /\ (tt 18 /\ tt 12))
+          \/ (tt 24 /\ (tt 18 /\ tt 21 /\ tt 11))
+          \/ (tt 24 /\ (tt 18 /\ tt 21 /\ tt 20 /\ tt 7))
+          \/ (tt 24 /\ (tt 19 /\ tt 13))
+          \/ (tt 24 /\ (tt 16 /\ tt 5))
+          \/ (tt 24 /\ (tt 17 /\ tt 6))
         )
     /\ (ff 4 \/ tt 22)
     /\ (ff 4 \/ tt 28)
@@ -307,7 +307,7 @@ spec = do
         `shouldBe`
         showRnnf ( reduceNnf (and [ tt 3, tt 2, tt 1 :: Nnf Int]))
 
-  fdescribe "extractNegation" $ do
+  describe "extractNegation" $ do
     let ex4 = reduceNnf $ and [ tt 1 , ff 1 \/ tt 2 :: Nnf Int]
     it ("work on " ++ showRnnf ex4) do
       let x' = extractNegation 1 ex4
@@ -372,6 +372,58 @@ spec = do
         Nothing ->
           expectationFailure "booo."
 
+  describe "main-example" $ do
+
+    let 
+      varsOf :: (Foldable f, Ord a) => f (S.Set a, S.Set a) -> S.Set a
+      varsOf = foldMap (\(a,b) -> S.union a b)
+
+      condition :: Ord a => S.Set a 
+        -> S.Set (S.Set a, S.Set a) 
+        -> (S.Set a, S.Set (S.Set a, S.Set a))
+      condition a =
+        foldMap \case 
+          (tts, ffs) 
+            | a `S.disjoint` ffs ->
+              let tts' = tts `S.difference` a
+              in if S.null tts' && S.size ffs == 1 
+              then (ffs, S.empty)
+              else (S.empty, S.singleton (tts', ffs))
+            | otherwise ->
+              (S.empty, S.empty)
+
+      propergate :: Ord a => S.Set a -> S.Set (S.Set a, S.Set a) 
+        -> (S.Set a, S.Set (S.Set a, S.Set a))
+      propergate a m = 
+        let (a', m') = condition a m 
+        in if S.null a'
+        then (a' <> a, m')
+        else propergate (a' <> a) m'
+      
+      splits :: Ord a => S.Set a -> S.Set (S.Set a, S.Set a) -> [(S.Set a, S.Set (S.Set a, S.Set a))]
+      splits = go 
+       where
+        go vs cnf = case S.lookupMin vs of 
+          Just p -> 
+            let (items', cnf') = makeSat (S.singleton p) cnf
+            in (items', cnf') : go (vs `S.difference` items') cnf'
+          Nothing -> 
+            []
+
+        makeSat items cnf = 
+          let (items', cnf') = propergate items cnf
+          in case S.lookupMin cnf' of
+            Just (trues, falses) 
+             | S.null trues ->
+               makeSat (S.insert (S.findMin falses) items') cnf'
+            _ -> 
+              (items', cnf')
+
+
+    it "can read a big nnf" $ do 
+      Just (nnf :: Nnf Int) <- decode <$> BL.readFile "test/data/nnf.json"
+      let cnf = toFreshCNF nnf
+      S.size cnf `shouldBe` 5090
 
 
   xdescribe "big nnf" $ do
@@ -389,19 +441,19 @@ spec = do
           k'' <- go 40 k'
           reduceNnfSize k'' `shouldBe` 25390
 
--- 11738   11738
--- 16713   15833
--- 18631   26630
--- 28225   46255
--- 44476   48629
--- 66856   82342
--- 79096   76165
--- 135454  120178
--- 168570  113869
--- 138534  168089
--- 52915   308421
--- 91162   377432
--- 163880
+          -- 11738   11738
+          -- 16713   15833
+          -- 18631   26630
+          -- 28225   46255
+          -- 44476   48629
+          -- 66856   82342
+          -- 79096   76165
+          -- 135454  120178
+          -- 168570  113869
+          -- 138534  168089
+          -- 52915   308421
+          -- 91162   377432
+          -- 163880
 
           where
             go 0 term = return term

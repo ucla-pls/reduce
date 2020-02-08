@@ -14,7 +14,7 @@ import Prelude hiding (not)
 import Data.Bool hiding (not)
 import GHC.Generics (Generic)
 import Data.STRef
-import Control.Monad.ST
+import Control.Monad.ST 
 
 -- text
 import qualified Data.Text.Lazy as LazyText
@@ -162,4 +162,5 @@ dotObdd Obdd {..} =
       key i <> " [label=\"" <> fromString (show v) <> "\"];\n "
         <> key i <> " -> " <> key l <> "[style=dashed];\n "
         <> key i <> " -> " <> key h <> ";\n "
+
 

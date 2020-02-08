@@ -682,6 +682,100 @@ reduceNnf b = memorizeRnnf g where
   g add = cataM (compressNnfF add) b
 {-# INLINEABLE reduceNnf #-}
 
+toCNF :: (Fixed (NnfF a) b, Show a, Ord a) => b -> S.Set (S.Set a, S.Set a)
+toCNF f =
+  cata cnf f (S.empty, S.empty)
+ where 
+  cnf 
+    :: (Show a, Ord a) => NnfF a ((S.Set a, S.Set a) -> S.Set (S.Set a, S.Set a)) 
+    -> (S.Set a, S.Set a) 
+    -> S.Set (S.Set a, S.Set a)
+  cnf = \case
+    NAnd a b -> \d -> a d <> b d
+    NOr a b -> \d -> S.fromList 
+      [ y 
+      | x <- S.toList (a d)
+      , y <- S.toList (b x)
+      ]
+    NLit (Literal n a) -> \(falses, trues) ->
+      case n of 
+        True  -> checkSat (falses, S.insert a trues)
+        False -> checkSat (S.insert a falses, trues)
+    NConst True -> const S.empty
+    NConst False -> S.singleton 
+
+  checkSat (falses, trues) 
+    | falses `S.disjoint` trues = 
+      S.singleton (falses, trues)
+    | otherwise = S.empty 
+
+toFreshCNF :: Fixed (NnfF Int) b => b -> S.Set (S.Set Int, S.Set Int)
+toFreshCNF f =
+  runST $ do 
+    next <- newSTRef (maxint + 1)
+    cata (cnf next) f (S.empty, S.empty)
+ where 
+  maxint = flip cata f \case 
+    NAnd a b -> max a b
+    NOr a b  -> max a b
+    NLit (Literal _ a)  -> a
+    _ -> 0
+
+  cnf nextid = \case
+    NAnd a b -> \d -> do 
+     x <- a d 
+     y <- b d
+     pure (x <> y)
+    NOr a b -> \d -> do 
+      xs <- a d
+      if S.size xs > 1 
+      then do
+        i <- freshvar 
+        ys <- b (over _2 (S.insert i) d)
+        pure (ys <> S.fromList 
+              [ (S.insert i fls, trs) | (fls, trs) <- S.toList xs]
+              )
+      else do
+        ys <- mapM b (S.toList xs)
+        pure $ S.unions ys
+
+    NLit (Literal n a) -> \(falses, trues) ->
+      pure $ case n of 
+        True  -> checkSat (falses, S.insert a trues)
+        False -> checkSat (S.insert a falses, trues)
+    NConst True -> pure . const S.empty
+    NConst False -> pure . S.singleton 
+
+   where
+     freshvar = do
+      a <- readSTRef nextid
+      writeSTRef nextid (a + 1) 
+      return a
+
+  checkSat (falses, trues) 
+    | falses `S.disjoint` trues = 
+      S.singleton (falses, trues)
+    | otherwise = S.empty 
+
+displayAClause :: (a -> ShowS) -> (S.Set a, S.Set a) -> ShowS
+displayAClause fn (falses, trues) =  
+  ( appEndo
+  . foldMap Endo
+  . L.intersperse (showString " /\\ ") 
+  . map fn
+  . S.toList 
+  $ falses )
+  .
+  showString " ---> "
+  . ( 
+  appEndo
+  . foldMap Endo
+  . L.intersperse (showString " \\/ ") 
+  . map fn
+  . S.toList 
+  $ trues
+  )
+
 displayCNF :: Foldable t => t (IS.IntSet) -> ShowS
 displayCNF =
   appEndo

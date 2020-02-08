@@ -25,6 +25,7 @@ import System.Process.Typed
 
 import qualified Data.Text.Lazy.IO as LazyText
 
+
 import Control.Reduce.Boolean.OBDD
 import Control.Reduce.Boolean
 import Control.Reduce.BooleanSpec
@@ -59,6 +60,11 @@ spec = do
         (dotObdd (compileObdd (toTerm (NnfAsTerm example1))))
       runProcess "dot -Tpdf test/outputs/obdd-example1.dot -o test/outputs/obdd-example1.pdf"
         `shouldReturn` ExitSuccess
+  
+  -- fdescribe "cudd" $ do
+  --   it "can do some stuff" $ do
+  --     Just x :: Maybe (Nnf Int) <- decode <$> BL.readFile "test/data/nnf.json"
+  --     -- termToCudd (toTerm (NnfAsTerm x))
 
   xdescribe "big nnf" $ do
     it "can process the big nnf" $ do
@@ -71,7 +77,9 @@ spec = do
           let v = V.map (compileObdd . toTerm . NnfAsTerm) (V.fromList cnj)
           V.length v `shouldBe` 3047
           v' <- compressV v
-          _ <- compressV v'
+          v'' <- compressV v'
+          _ <- compressV v''
+          -- _ <- compressV v'''
           -- v''' <- compressV v''
           -- v'''' <- compressV v'''
           -- _ <- compressV v''''
@@ -86,13 +94,5 @@ spec = do
             iforM_ z \i z' ->
               print (i, obddTop z')
             return z
+ 
 
-            -- i `shouldSatisfy` (< 80)
-            -- let
-            --   x = compileObdd (toTerm (NnfAsTerm a))
-            --   y = b /\ x
-            -- print (i, obddTop x, obddTop y)
-            -- return y
-
-          --
-          --   `shouldBe` 200
