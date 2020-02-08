@@ -38,7 +38,6 @@ import Data.Foldable
 import Data.Maybe
 import Data.List.NonEmpty (nonEmpty)
 import Data.STRef
-import qualified Data.List as L
 import GHC.Generics (Generic)
 import Prelude hiding (not, and, or)
 import qualified Prelude
@@ -219,8 +218,8 @@ hylo phi psi x = cata phi (ana psi x :: y)
 
 instance Functor f => Fixed f (Fix f) where
 
--- | Term is a free boolean structure with variables.
-data TermF a f
+-- | Stmt is a free boolean structure with variables.
+data StmtF a f
   = TAnd f f
   | TOr  f f
   | TNot f
@@ -233,7 +232,7 @@ data TermF a f
     , ToJSON, FromJSON , Binary
     )
 
-instance Bifunctor TermF where
+instance Bifunctor StmtF where
   bimap f s = \case
     TAnd a b -> TAnd (s a) (s b)
     TOr  a b -> TOr (s a) (s b)
@@ -241,15 +240,15 @@ instance Bifunctor TermF where
     TVar a   -> TVar (f a)
     TConst b -> TConst b
 
--- instance Bifoldable TermF where
--- instance Bitraversable TermF where
+-- instance Bifoldable StmtF where
+-- instance Bitraversable StmtF where
  
-newtype Term a = Term (Fix (TermF a))
+newtype Stmt a = Stmt (Fix (StmtF a))
   deriving (Eq, Ord, Generic)
   deriving newtype (ToJSON, FromJSON, Binary)
   deriving newtype NFData
 
-instance Functor Term where
+instance Functor Stmt where
   fmap f = cata $ liftF . \case
     TAnd a b -> TAnd a b
     TOr a b -> TOr a b
@@ -257,7 +256,7 @@ instance Functor Term where
     TVar l -> TVar (f l)
     TConst b -> TConst b
 
-instance Foldable Term where
+instance Foldable Stmt where
   foldMap f = cata \case
     TAnd a b -> a <> b
     TOr a b -> a <> b
@@ -265,7 +264,7 @@ instance Foldable Term where
     TVar l -> f l
     TConst _ -> mempty
 
-instance Traversable Term where
+instance Traversable Stmt where
   traverse f = cata $ fmap liftF . \case
     TAnd a b -> TAnd <$> a <*> b
     TOr a b -> TOr <$> a <*> b
@@ -273,9 +272,9 @@ instance Traversable Term where
     TVar l -> TVar <$> f l
     TConst b -> pure $ TConst b
 
-instance Fixed (TermF a) (Term a)
+instance Fixed (StmtF a) (Stmt a)
 
-instance Boolean (Term a) where
+instance Boolean (Stmt a) where
   (/\) a b = liftF (TAnd a b)
   (\/) a b = liftF (TOr a b)
   not   = liftF . TNot
@@ -287,12 +286,12 @@ instance Boolean (Term a) where
   {-# INLINE false #-}
   {-# INLINE true #-}
 
-instance BooleanAlgebra Term where
+instance BooleanAlgebra Stmt where
   tt a = liftF (TVar a)
   ff a = neg (liftF (TVar a))
 
-showsPrecTermF :: Show a => TermF a (Int -> ShowS) -> Int -> ShowS
-showsPrecTermF = \case
+showsPrecStmtF :: Show a => StmtF a (Int -> ShowS) -> Int -> ShowS
+showsPrecStmtF = \case
   TAnd a b -> \n -> showParen (n > 3) (a 3 . showString " ∧ " . b 4)
   TOr a b  -> \n -> showParen (n > 2) (a 2 . showString " ∨ " . b 3)
   TNot a -> \n -> showParen (n > 9) (showString "not " . a 10)
@@ -300,21 +299,21 @@ showsPrecTermF = \case
   TConst True -> const $ showString "true"
   TConst False -> const $ showString "false"
 
-instance Show a => Show (Term a) where
-  showsPrec n f = cata showsPrecTermF f n
+instance Show a => Show (Stmt a) where
+  showsPrec n f = cata showsPrecStmtF f n
 
-toTerm :: Fixed (TermF a) x => x -> Term a
-toTerm = cata liftF
-{-# INLINE toTerm #-}
+toStmt :: Fixed (StmtF a) x => x -> Stmt a
+toStmt = cata liftF
+{-# INLINE toStmt #-}
 
-fromTerm :: Fixed (TermF a) x => Term a -> x
-fromTerm = ana unliftF
-{-# INLINE fromTerm #-}
+fromStmt :: Fixed (StmtF a) x => Stmt a -> x
+fromStmt = ana unliftF
+{-# INLINE fromStmt #-}
 
-crossCompiler :: (Fixed (TermF a) x, Fixed (TermF a) y) => x -> y
-crossCompiler = fromTerm . toTerm
+crossCompiler :: (Fixed (StmtF a) x, Fixed (StmtF a) y) => x -> y
+crossCompiler = fromStmt . toStmt
 
-assignVars :: forall a b x. (Fixed (TermF a) x) => (a -> TermF b (Term b)) -> x -> Term b
+assignVars :: forall a b x. (Fixed (StmtF a) x) => (a -> StmtF b (Stmt b)) -> x -> Stmt b
 assignVars fn = cata \case
   TAnd a b -> liftF (TAnd a b)
   TOr  a b -> liftF (TOr a b)
@@ -323,7 +322,7 @@ assignVars fn = cata \case
   TConst b -> liftF (TConst b)
 
 -- | A Traversal over all variables in a term
-traverseVariables :: Monad m => (a -> m (Term b)) -> Term a -> m (Term b)
+traverseVariables :: Monad m => (a -> m (Stmt b)) -> Stmt a -> m (Stmt b)
 traverseVariables fn = cataM \case
   TAnd a b -> pure . liftF $ TAnd a b
   TOr  a b -> pure . liftF $ TOr a b
@@ -384,12 +383,12 @@ instance Foldable Nnf where
     NLit l -> foldMap f l
     NConst _ -> mempty
 
-newtype NnfAsTerm a = NnfAsTerm { nnfFromTerm :: Nnf a }
+newtype NnfAsStmt a = NnfAsStmt { nnfFromStmt :: Nnf a }
   deriving (Eq, Ord)
 
-instance Fixed (TermF a) (NnfAsTerm a) where
-  -- cata :: (TermF Int a -> a) -> b -> a
-  cata fn = cata (fn . handle) . nnfFromTerm where
+instance Fixed (StmtF a) (NnfAsStmt a) where
+  -- cata :: (StmtF Int a -> a) -> b -> a
+  cata fn = cata (fn . handle) . nnfFromStmt where
     handle = \case
       NAnd a b -> TAnd a b
       NOr a b -> TOr a b
@@ -397,8 +396,8 @@ instance Fixed (TermF a) (NnfAsTerm a) where
       NLit (Literal False i) -> TNot (fn $ TVar i)
       NConst b -> TConst b
 
-  -- ana  :: (a -> TermF Int a) -> a -> b
-  ana fn = NnfAsTerm . ana (uncurry go) . (True,) . fn where
+  -- ana  :: (a -> StmtF Int a) -> a -> b
+  ana fn = NnfAsStmt . ana (uncurry go) . (True,) . fn where
     go n = \case
       TAnd t1 t2 ->
         (if n then NAnd else NOr) (n, fn t1) (n, fn t2)
@@ -412,15 +411,15 @@ instance Fixed (TermF a) (NnfAsTerm a) where
         NConst (if n then b else not b)
 
 instance Show a => Show (Nnf a) where
-  showsPrec n f = cata showsPrecTermF (NnfAsTerm f) n
+  showsPrec n f = cata showsPrecStmtF (NnfAsStmt f) n
 
-instance Show a => Show (NnfAsTerm a) where
-  showsPrec n f = cata showsPrecTermF f n
+instance Show a => Show (NnfAsStmt a) where
+  showsPrec n f = cata showsPrecStmtF f n
 
 instance Boolean (Nnf a) where
   a /\ b  = liftF $ NAnd a b
   a \/ b  = liftF $ NOr a b
-  not     = nnfFromTerm . fromTerm . neg . toTerm . NnfAsTerm
+  not     = nnfFromStmt . fromStmt . neg . toStmt . NnfAsStmt
   true    = liftF $ NConst True
   false   = liftF $ NConst False
   {-# INLINE (/\) #-}
@@ -658,8 +657,8 @@ compressNnfF fn = \case
   NConst b ->
     pure $ Left b
 
-nnfToTerm :: Fixed (NnfF x) b => b -> Term x
-nnfToTerm = cata \case
+nnfToStmt :: Fixed (NnfF x) b => b -> Stmt x
+nnfToStmt = cata \case
   NAnd a b -> a /\ b
   NOr a b -> a \/ b
   NLit (Literal b l) -> var b l
@@ -682,120 +681,6 @@ reduceNnf b = memorizeRnnf g where
   g add = cataM (compressNnfF add) b
 {-# INLINEABLE reduceNnf #-}
 
-toCNF :: (Fixed (NnfF a) b, Show a, Ord a) => b -> S.Set (S.Set a, S.Set a)
-toCNF f =
-  cata cnf f (S.empty, S.empty)
- where 
-  cnf 
-    :: (Show a, Ord a) => NnfF a ((S.Set a, S.Set a) -> S.Set (S.Set a, S.Set a)) 
-    -> (S.Set a, S.Set a) 
-    -> S.Set (S.Set a, S.Set a)
-  cnf = \case
-    NAnd a b -> \d -> a d <> b d
-    NOr a b -> \d -> S.fromList 
-      [ y 
-      | x <- S.toList (a d)
-      , y <- S.toList (b x)
-      ]
-    NLit (Literal n a) -> \(falses, trues) ->
-      case n of 
-        True  -> checkSat (falses, S.insert a trues)
-        False -> checkSat (S.insert a falses, trues)
-    NConst True -> const S.empty
-    NConst False -> S.singleton 
-
-  checkSat (falses, trues) 
-    | falses `S.disjoint` trues = 
-      S.singleton (falses, trues)
-    | otherwise = S.empty 
-
-toFreshCNF :: Fixed (NnfF Int) b => b -> S.Set (S.Set Int, S.Set Int)
-toFreshCNF f =
-  runST $ do 
-    next <- newSTRef (maxint + 1)
-    cata (cnf next) f (S.empty, S.empty)
- where 
-  maxint = flip cata f \case 
-    NAnd a b -> max a b
-    NOr a b  -> max a b
-    NLit (Literal _ a)  -> a
-    _ -> 0
-
-  cnf nextid = \case
-    NAnd a b -> \d -> do 
-     x <- a d 
-     y <- b d
-     pure (x <> y)
-    NOr a b -> \d -> do 
-      xs <- a d
-      if S.size xs > 1 
-      then do
-        i <- freshvar 
-        ys <- b (over _2 (S.insert i) d)
-        pure (ys <> S.fromList 
-              [ (S.insert i fls, trs) | (fls, trs) <- S.toList xs]
-              )
-      else do
-        ys <- mapM b (S.toList xs)
-        pure $ S.unions ys
-
-    NLit (Literal n a) -> \(falses, trues) ->
-      pure $ case n of 
-        True  -> checkSat (falses, S.insert a trues)
-        False -> checkSat (S.insert a falses, trues)
-    NConst True -> pure . const S.empty
-    NConst False -> pure . S.singleton 
-
-   where
-     freshvar = do
-      a <- readSTRef nextid
-      writeSTRef nextid (a + 1) 
-      return a
-
-  checkSat (falses, trues) 
-    | falses `S.disjoint` trues = 
-      S.singleton (falses, trues)
-    | otherwise = S.empty 
-
-displayAClause :: (a -> ShowS) -> (S.Set a, S.Set a) -> ShowS
-displayAClause fn (falses, trues) =  
-  ( appEndo
-  . foldMap Endo
-  . L.intersperse (showString " /\\ ") 
-  . map fn
-  . S.toList 
-  $ falses )
-  .
-  showString " ---> "
-  . ( 
-  appEndo
-  . foldMap Endo
-  . L.intersperse (showString " \\/ ") 
-  . map fn
-  . S.toList 
-  $ trues
-  )
-
-displayCNF :: Foldable t => t (IS.IntSet) -> ShowS
-displayCNF =
-  appEndo
-  . foldMap Endo
-  . L.intersperse (showString " ")
-  . map displayClause
-  . toList
-
-displayClause :: IS.IntSet -> ShowS
-displayClause = showParen True
-  . appEndo
-  . foldMap Endo
-  . L.intersperse (showString " ")
-  . map displayLiteral
-  . IS.toList
-
-  where
-    displayLiteral i = case reindex i of
-      (True, l)  -> showsPrec 0 l
-      (False, l) -> showString "!" . showsPrec 0 l
 
 clauseLearning :: S.Set (IS.IntSet) -> S.Set (IS.IntSet)
 clauseLearning s = go s $ invert s where

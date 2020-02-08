@@ -670,7 +670,7 @@ toLogicGraphReductionM ::
   (Monad m, Ord k)
   => Bool
   -- ^ Overapproximate?
-  -> (s -> m (k, Term k))
+  -> (s -> m (k, Stmt k))
   -- ^ A key function
   -> (k -> Bool)
   -- ^ Make key true or false if not found?
@@ -694,7 +694,7 @@ toLogicGraphReductionM overapprox keyfn missing red = refineProblemA' refined wh
       keyLookup = M.fromList [ (mk, n :: [Int]) | (n, mk, _) <- items ]
       term  = and [ t | (_, _, t) <- items ]
       nnf :: Nnf [Int]
-      nnf = flattenNnf . nnfFromTerm . fromTerm $ flip assignVars term \k ->
+      nnf = flattenNnf . nnfFromStmt . fromStmt $ flip assignVars term \k ->
         maybe (TConst $ missing k) TVar $ (M.lookup k keyLookup :: Maybe [Int])
 
       deps = (if overapprox then overDependencies else underDependencies) nnf

@@ -43,7 +43,7 @@ spec = do
         `shouldBe` compileObdd (tt 2)
 
     it "can compile to example1" $ do
-      obddTop (compileObdd (toTerm (NnfAsTerm example1)))
+      obddTop (compileObdd (toStmt (NnfAsStmt example1)))
         `shouldBe` 423
 
 
@@ -57,14 +57,14 @@ spec = do
 
     it "can display example1" $ do
       LazyText.writeFile "test/outputs/obdd-example1.dot"
-        (dotObdd (compileObdd (toTerm (NnfAsTerm example1))))
+        (dotObdd (compileObdd (toStmt (NnfAsStmt example1))))
       runProcess "dot -Tpdf test/outputs/obdd-example1.dot -o test/outputs/obdd-example1.pdf"
         `shouldReturn` ExitSuccess
   
   -- fdescribe "cudd" $ do
   --   it "can do some stuff" $ do
   --     Just x :: Maybe (Nnf Int) <- decode <$> BL.readFile "test/data/nnf.json"
-  --     -- termToCudd (toTerm (NnfAsTerm x))
+  --     -- termToCudd (toStmt (NnfAsStmt x))
 
   xdescribe "big nnf" $ do
     it "can process the big nnf" $ do
@@ -74,7 +74,7 @@ spec = do
         Just t -> do
           let (_, k') = unify (compressNnf t)
           let cnj = asConjunction (compressNnf k')
-          let v = V.map (compileObdd . toTerm . NnfAsTerm) (V.fromList cnj)
+          let v = V.map (compileObdd . toStmt . NnfAsStmt) (V.fromList cnj)
           V.length v `shouldBe` 3047
           v' <- compressV v
           v'' <- compressV v'

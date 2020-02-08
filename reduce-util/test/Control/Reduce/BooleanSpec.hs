@@ -37,7 +37,7 @@ import Control.Reduce.Boolean
 import Control.Reduce.Boolean.OBDD
 import SpecHelper
 
--- example1 :: Term Int
+-- example1 :: Stmt Int
 -- example1 =
 --   TAnd
 --   (TAnd
@@ -108,20 +108,20 @@ spec :: Spec
 spec = do
   describe "term" $ do
     it "should handle equality" $ do
-      (tt 1 /\ tt 2 :: Term Int) `shouldBe`
+      (tt 1 /\ tt 2 :: Stmt Int) `shouldBe`
        (tt 1 /\ tt 2)
 
     it "should print nicely" $ do
-      show (tt 1 ∧ tt 2 ∨ ff 3 :: Term Int) `shouldBe`
+      show (tt 1 ∧ tt 2 ∨ ff 3 :: Stmt Int) `shouldBe`
        "tt 1 ∧ tt 2 ∨ not (tt 3)"
 
-      show (tt 1 ∧ (tt 2 ∨ ff 3) :: Term Int) `shouldBe`
+      show (tt 1 ∧ (tt 2 ∨ ff 3) :: Stmt Int) `shouldBe`
        "tt 1 ∧ (tt 2 ∨ not (tt 3))"
 
-      show (tt 1 ∧ tt 2 ∧ ff 3 :: Term Int) `shouldBe`
+      show (tt 1 ∧ tt 2 ∧ ff 3 :: Stmt Int) `shouldBe`
        "tt 1 ∧ tt 2 ∧ not (tt 3)"
 
-      show (tt 1 /\ tt 4 ==> tt 2 :: Term Int) `shouldBe`
+      show (tt 1 /\ tt 4 ==> tt 2 :: Stmt Int) `shouldBe`
        "not (tt 1 ∧ tt 4) ∨ tt 2"
 
 
@@ -135,8 +135,8 @@ spec = do
        (ff 1 ∨ ff 2)
 
     it "should enable compilation" $ do
-      (crossCompiler $ neg (tt 1 ∧ tt 2 :: Term Int)) `shouldBe`
-       (NnfAsTerm $ ff 1 \/ ff 2)
+      (crossCompiler $ neg (tt 1 ∧ tt 2 :: Stmt Int)) `shouldBe`
+       (NnfAsStmt $ ff 1 \/ ff 2)
 
       (tt 1 /\ tt 4 ==> tt 2 :: Nnf Int) `shouldBe`
        (ff 1 ∨ ff 4 ∨ tt 2)
@@ -336,21 +336,21 @@ spec = do
 
     it "work on example 1" do
       let x' = extractNegation 4 (reduceNnf example1)
-      show (compileObdd (nnfToTerm x'))
+      show (compileObdd (nnfToStmt x'))
         `shouldBe`
-        show (compileObdd (nnfToTerm example1))
+        show (compileObdd (nnfToStmt example1))
 
     it "work on example 2" do
       let x' = extractNegation 4 (reduceNnf example2)
       -- let x = show x'
-      compileObdd (nnfToTerm  x') `shouldBe`
-        compileObdd (nnfToTerm  example2)
+      compileObdd (nnfToStmt  x') `shouldBe`
+        compileObdd (nnfToStmt  example2)
 
-      compileObdd (nnfToTerm  $ extractNegation 2 (reduceNnf example2)) `shouldBe`
-        compileObdd (nnfToTerm  example2)
+      compileObdd (nnfToStmt  $ extractNegation 2 (reduceNnf example2)) `shouldBe`
+        compileObdd (nnfToStmt  example2)
       -- show x'
       --   `shouldBe`
-      --   show (compileObdd (nnfToTerm example1))
+      --   show (compileObdd (nnfToStmt example1))
 
     xit "large nnf" $ do
       x :: Maybe (Nnf Int) <- decode <$> BL.readFile "test/data/nnf.json"
@@ -371,60 +371,6 @@ spec = do
 
         Nothing ->
           expectationFailure "booo."
-
-  describe "main-example" $ do
-
-    let 
-      varsOf :: (Foldable f, Ord a) => f (S.Set a, S.Set a) -> S.Set a
-      varsOf = foldMap (\(a,b) -> S.union a b)
-
-      condition :: Ord a => S.Set a 
-        -> S.Set (S.Set a, S.Set a) 
-        -> (S.Set a, S.Set (S.Set a, S.Set a))
-      condition a =
-        foldMap \case 
-          (tts, ffs) 
-            | a `S.disjoint` ffs ->
-              let tts' = tts `S.difference` a
-              in if S.null tts' && S.size ffs == 1 
-              then (ffs, S.empty)
-              else (S.empty, S.singleton (tts', ffs))
-            | otherwise ->
-              (S.empty, S.empty)
-
-      propergate :: Ord a => S.Set a -> S.Set (S.Set a, S.Set a) 
-        -> (S.Set a, S.Set (S.Set a, S.Set a))
-      propergate a m = 
-        let (a', m') = condition a m 
-        in if S.null a'
-        then (a' <> a, m')
-        else propergate (a' <> a) m'
-      
-      splits :: Ord a => S.Set a -> S.Set (S.Set a, S.Set a) -> [(S.Set a, S.Set (S.Set a, S.Set a))]
-      splits = go 
-       where
-        go vs cnf = case S.lookupMin vs of 
-          Just p -> 
-            let (items', cnf') = makeSat (S.singleton p) cnf
-            in (items', cnf') : go (vs `S.difference` items') cnf'
-          Nothing -> 
-            []
-
-        makeSat items cnf = 
-          let (items', cnf') = propergate items cnf
-          in case S.lookupMin cnf' of
-            Just (trues, falses) 
-             | S.null trues ->
-               makeSat (S.insert (S.findMin falses) items') cnf'
-            _ -> 
-              (items', cnf')
-
-
-    it "can read a big nnf" $ do 
-      Just (nnf :: Nnf Int) <- decode <$> BL.readFile "test/data/nnf.json"
-      let cnf = toFreshCNF nnf
-      S.size cnf `shouldBe` 5090
-
 
   xdescribe "big nnf" $ do
     it "can read a nnf" $ do

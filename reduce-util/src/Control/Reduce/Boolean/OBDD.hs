@@ -133,7 +133,7 @@ instance Boolean Obdd where
   (\/) = apply (\/)
   not a = a { obddTrue = obddFalse a, obddFalse = obddTrue a }
 
-compileObdd :: Term Int -> Obdd
+compileObdd :: Stmt Int -> Obdd
 compileObdd = cata \case
   TAnd a b ->
     apply (/\) a b
