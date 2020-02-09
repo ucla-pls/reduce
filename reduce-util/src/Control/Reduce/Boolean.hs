@@ -109,10 +109,11 @@ instance Boolean Bool where
   false = False
 
 class BooleanAlgebra f where
-  tt :: a -> f a
-  ff :: a -> f a
+  type LitVar f 
+  tt :: LitVar f -> f
+  ff :: LitVar f -> f
 
-  var :: Bool -> a -> f a
+  var :: Bool -> (LitVar f) -> f 
   var True  = tt
   var False = ff
 
@@ -286,7 +287,8 @@ instance Boolean (Stmt a) where
   {-# INLINE false #-}
   {-# INLINE true #-}
 
-instance BooleanAlgebra Stmt where
+instance BooleanAlgebra (Stmt a) where
+  type LitVar (Stmt a) = a
   tt a = liftF (TVar a)
   ff a = neg (liftF (TVar a))
 
@@ -338,9 +340,13 @@ data Literal a = Literal !Bool a
            , Binary, Functor, Foldable, Traversable
            )
 
-instance BooleanAlgebra Literal where
+instance BooleanAlgebra (Literal a) where
+  type LitVar (Literal a) = a
   tt = Literal True
   ff = Literal False
+
+variable :: Literal a -> a
+variable (Literal _ a) = a
 
 instance Show a => Show (Literal a) where
   showsPrec n (Literal b i) =
@@ -426,7 +432,8 @@ instance Boolean (Nnf a) where
   {-# INLINE (\/) #-}
   {-# INLINE not #-}
 
-instance BooleanAlgebra Nnf where
+instance BooleanAlgebra (Nnf a) where
+  type LitVar (Nnf a) = a
   tt = liftF . NLit . tt
   ff = liftF . NLit . ff
 
@@ -469,7 +476,8 @@ infixr 5 ~~>
 (~~>) :: a -> a -> Dependency a
 (~~>) = DDeps
 
-instance BooleanAlgebra Dependency where
+instance BooleanAlgebra (Dependency a) where
+  type LitVar (Dependency a) = a
   tt = DLit . tt
   ff = DLit . ff
 

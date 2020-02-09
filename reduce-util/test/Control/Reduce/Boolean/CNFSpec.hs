@@ -10,6 +10,7 @@ import qualified Data.IntSet as IS
 
 import Control.Reduce.Boolean
 import Control.Reduce.Boolean.CNF 
+import qualified Control.Reduce.Boolean.LiteralSet as LS 
 
 
 spec :: Spec 
@@ -29,11 +30,11 @@ spec =
     it "can do forward propergation" $ do
       let ex = and [ ff 0 \/ tt 1
                    , ff 1 \/ tt 2 
-                   , tt 4 \/ ff 1 \/ ff 2 :: Nnf Int 
+                   , ff 2 \/ tt 3 :: Nnf Int 
                    ]
-      let (a, b) = unitPropergation (unsafeFromLiterals [tt 0]) (toCNF ex) 
+      let (a, b) = unitPropergation (LS.fromList' [tt 0]) (toCNF ex) 
       debugCnf b
-      a `shouldBe` unsafeFromLiterals [tt 0, tt 1, tt 2]
+      a `shouldBe` Just (LS.fromList' [tt 0, tt 1, tt 2, tt 3])
 
 
 
