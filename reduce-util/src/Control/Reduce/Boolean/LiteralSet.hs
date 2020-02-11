@@ -15,8 +15,8 @@ import Data.Semigroup
 import Data.Coerce
 import Data.Maybe
 import Text.Show
-import Prelude hiding (null)
-import Data.Foldable hiding (null)
+import Prelude hiding (null, map)
+import Data.Foldable hiding (null, toList)
 import qualified Data.List as L
 
 -- containers
@@ -71,6 +71,16 @@ litUnion :: IntLiteralSet -> IntLiteralSet -> Maybe IntLiteralSet
 litUnion is1 is2 =
   foldrM litInsert is1 (litToList is2)
 
+litDifference :: IntLiteralSet -> IntLiteralSet -> IntLiteralSet
+litDifference (IntLiteralSet is1) (IntLiteralSet is2) =
+  IntLiteralSet (is1 `IS.difference` is2)
+
+litMap :: (IntLiteral -> IntLiteral) -> IntLiteralSet -> Maybe IntLiteralSet
+litMap fn = litFromList . L.map fn . litToList
+
+litVmap :: (Int -> Int) -> IntLiteralSet -> Maybe IntLiteralSet
+litVmap fn = litFromList . L.map (fromLiteral . fmap fn . toLiteral) . litToList
+
 litFromList :: [IntLiteral] -> Maybe IntLiteralSet 
 litFromList = foldrM litInsert empty
 
@@ -79,7 +89,7 @@ litToList = coerce . IS.toList . internalIntSet
 
 instance Show IntLiteralSet where
   showsPrec n c = showParen (n > 9) $ 
-    showString "fromLiteralList" . (showListWith shows . IS.toList . internalIntSet $ c)
+    showString "fromList " . (showListWith shows . L.map toLiteral . toList $ c)
 
 class IsIntLiteralSet a where
   toLiteralSet   :: a -> IntLiteralSet 
@@ -102,6 +112,15 @@ fromList' = fromJust . fromList
 toList :: IsIntLiteralSet a => a -> [IntLiteral] 
 toList = litToList . toLiteralSet
 {-# INLINE toList #-}
+
+map :: IsIntLiteralSet a => (IntLiteral -> IntLiteral) -> a -> Maybe a
+map fn = fmap fromLiteralSet . litMap fn . toLiteralSet
+{-# INLINE map #-}
+
+-- | Variable map
+vmap :: IsIntLiteralSet a => (Int -> Int) -> a -> Maybe a
+vmap fn = fmap fromLiteralSet . litVmap fn . toLiteralSet
+{-# INLINE vmap #-}
   
 member :: IsIntLiteralSet a => IntLiteral -> a -> Bool
 member lit (toLiteralSet -> is) = lit `litMember` is
@@ -130,6 +149,15 @@ union :: IsIntLiteralSet a => a -> a -> Maybe a
 union (toLiteralSet -> is1) (toLiteralSet -> is2) = 
   fromLiteralSet <$> is1 `litUnion` is2
 {-# INLINE union #-}
+
+difference :: IsIntLiteralSet a => a -> a -> a
+difference (toLiteralSet -> is1) (toLiteralSet -> is2) = 
+  fromLiteralSet (is1 `litDifference` is2)
+{-# INLINE difference #-}
+
+singleton :: IsIntLiteralSet a => IntLiteral -> a
+singleton (IntLiteral a) = fromLiteralSet (IntLiteralSet (IS.singleton a))
+{-# INLINE singleton #-}
 
 unSingleton :: IsIntLiteralSet a => a -> Maybe IntLiteral
 unSingleton a = case minView a of
@@ -181,11 +209,21 @@ conditionClause (IntLiteral x) (Clause (IntLiteralSet s)) =
 
 displayImplication :: (Int -> ShowS) -> Clause -> ShowS
 displayImplication showKey c =
-  showItems " /\\ " falses . showString " ==> " . showItems " \\/ " trues
+  if null c 
+  then showString "false"
+  else showsFalses . showString " ==> " . showsTrues
  where 
-   (falses, trues) = splitLiterals c
-   showItems del =
-     appEndo . foldMap Endo . L.intersperse (showString del) . map showKey . IS.toList 
+  showsFalses 
+    | IS.null falses = showString "true" 
+    | otherwise = showItems " /\\ " falses
+   
+  showsTrues 
+    | IS.null trues = showString "false" 
+    | otherwise = showItems " \\/ " trues
+
+  (falses, trues) = splitLiterals c
+  showItems del =
+    appEndo . foldMap Endo . L.intersperse (showString del) . L.map showKey . IS.toList 
 
 
 -- | A Term is a conjuction of literals. This can be 

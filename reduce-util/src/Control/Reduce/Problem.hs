@@ -60,8 +60,6 @@ module Control.Reduce.Problem
   , toGraphReductionDeep
   , toGraphReductionDeepM
 
-  , toLogicGraphReductionM
-
   , meassure
 
   , toIndexed
@@ -517,7 +515,6 @@ toStringified fx =
 meassure :: Metric r => (Maybe s -> r) -> Problem a s -> Problem a s
 meassure sr = problemMetric %~ addMetric sr
 
-
 -- | Given a 'Reduction' from s given t, make the problem to reduce
 -- a list of t's with indicies.
 toReductionList :: Reduction s t -> Problem a s -> Problem a (V.Vector (Maybe t))
@@ -665,52 +662,53 @@ reductionGraphM keyfn red s = do
   where
     addInit = (\case [] -> id; a -> (Edge () a (tail a) :))
 
--- | Like graph reduction but uses logic instead.
-toLogicGraphReductionM ::
-  (Monad m, Ord k)
-  => Bool
-  -- ^ Overapproximate?
-  -> (s -> m (k, Stmt k))
-  -- ^ A key function
-  -> (k -> Bool)
-  -- ^ Make key true or false if not found?
-  -> PartialReduction s s
-  -- ^ A partial reduction
-  -> Problem a s
-  -> m (( Graph () ([Int], k)
-        , IS.IntSet
-        , [IS.IntSet]
-        , Nnf Int
-        )
-       , Problem a [IS.IntSet]
-       )
-toLogicGraphReductionM overapprox keyfn missing red = refineProblemA' refined where
-  refined s = do
-    items <- forM (itoListOf (deepSubelements red) s) $ \(n, a) -> do
-      (mk, term) <- keyfn a
-      return (n, mk, term)
+-- -- | Like graph reduction but uses logic instead.
+-- toLogicGraphReductionM ::
+--   (Monad m, Ord k)
+--   => Bool
+--   -- ^ Overapproximate?
+--   -> (s -> m (k, Stmt k))
+--   -- ^ A key function
+--   -> (k -> Bool)
+--   -- ^ Make key true or false if not found?
+--   -> PartialReduction s s
+--   -- ^ A partial reduction
+--   -> Problem a s
+--   -> m (( Graph () ([Int], k)
+--         , IS.IntSet
+--         , [IS.IntSet]
+--         , Nnf Int
+--         )
+--        , Problem a [IS.IntSet]
+--        )
+-- toLogicGraphReductionM overapprox keyfn missing red = refineProblemA' refined where
+--   refined s = do
+--     items <- forM (itoListOf (deepSubelements red) s) $ \(n, a) -> do
+--       (mk, term) <- keyfn a
+--       return (n, mk, term)
 
-    let
-      keyLookup = M.fromList [ (mk, n :: [Int]) | (n, mk, _) <- items ]
-      term  = and [ t | (_, _, t) <- items ]
-      nnf :: Nnf [Int]
-      nnf = flattenNnf . nnfFromStmt . fromStmt $ flip assignVars term \k ->
-        maybe (TConst $ missing k) TVar $ (M.lookup k keyLookup :: Maybe [Int])
+--     let
+--       keyLookup = M.fromList [ (mk, n :: [Int]) | (n, mk, _) <- items ]
+--       term  = and [ t | (_, _, t) <- items ]
+--       nnf :: Nnf [Int]
+--       nnf = flattenNnf . nnfFromStmt . fromStmt $ flip assignVars term \k ->
+--         maybe (TConst $ missing k) TVar $ (M.lookup k keyLookup :: Maybe [Int])
 
-      deps = (if overapprox then overDependencies else underDependencies) nnf
+--       deps = (if overapprox then overDependencies else underDependencies) nnf
 
-      required = S.fromList [ f | DLit (Literal True f) <- deps]
-        -- TODO Currently all false literals are ignored.
+--       required = S.fromList [ f | DLit (Literal True f) <- deps]
+--         -- TODO Currently all false literals are ignored.
 
-      (graph, lookupGrph) =
-        buildGraphFromNodesAndEdges
-        [ (n, ((n, k), n `S.member` required)) | (n, k, _) <- items ]
-        (  [ Edge () i j | DDeps i j <- deps ]
-          ++ [ Edge () n rest | (n@ (_:rest), _, _) <- items ]
-        )
+--       (graph, lookupGrph) =
+--         buildGraphFromNodesAndEdges
+--         [ (n, ((n, k), n `S.member` required)) | (n, k, _) <- items ]
+--         (  [ Edge () i j | DDeps i j <- deps ]
+--           ++ [ Edge () n rest | (n@ (_:rest), _, _) <- items ]
+--         )
 
-      (grph, core, _targets, fromClosures) = restrictGraph red s graph
-    pure ((grph, core, _targets, (fromJust . lookupGrph <$> nnf)), (fromClosures, _targets))
+--       (grph, core, _targets, fromClosures) = restrictGraph red s graph
+--     pure ((grph, core, _targets, (fromJust . lookupGrph <$> nnf)), (fromClosures, _targets))
+
 
 
 -- | Get an indexed list of elements, this enables us to differentiate between stuff.

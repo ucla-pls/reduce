@@ -600,9 +600,22 @@ memorizer fn = runST $ do
 
   itemsM <- readSTRef itemsVar
   items <- V.freeze itemsM
+  count <- readSTRef countVar
 
-  return (b, items)
+  return (b, V.take count items)
 {-# INLINEABLE memorizer #-}
+
+memorizeNnf ::
+  (Eq a, Hashable a, Fixed (NnfF a) b)
+  => b -> (Nnf Int, V.Vector a)
+memorizeNnf x = memorizer \fresh -> do
+  n <- flip cata x \case
+    NAnd a b -> NAnd <$> (liftF <$> a) <*> (liftF <$> b)
+    NOr a b  -> NOr <$> (liftF <$> a) <*> (liftF <$> b)
+    NLit l   -> NLit <$> traverse fresh l
+    NConst t -> pure $ NConst t
+  pure $ liftF n
+
 
 memorizeRnnf ::
   (forall s. (Rnnf -> ST s Int) -> ST s (Either Bool Int))
