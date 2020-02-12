@@ -1,4 +1,5 @@
 {-# LANGUAGE ConstraintKinds           #-}
+{-# LANGUAGE ViewPatterns           #-}
 {-# LANGUAGE BlockArguments           #-}
 {-# LANGUAGE DataKinds                 #-}
 {-# LANGUAGE ExistentialQuantification #-}
@@ -59,6 +60,7 @@ module Control.Reduce.Problem
   , toReductionDeep
   , toGraphReductionDeep
   , toGraphReductionDeepM
+  , toLogicReductionM
 
   , meassure
 
@@ -88,6 +90,7 @@ import           Control.Exception          (AsyncException (..))
 import           Data.Functor
 import           Data.Foldable (fold)
 import           Data.Time
+import           Data.Tuple
 import           Text.Printf
 import Prelude hiding (and)
 import qualified Data.List.NonEmpty         as NE
@@ -122,6 +125,9 @@ import qualified Data.IntSet                as IS
 import qualified Data.Set                   as S
 import qualified Data.Map.Strict            as M
 
+-- hashable 
+import Data.Hashable
+
 -- mtl
 import Control.Monad.Reader
 
@@ -132,6 +138,7 @@ import           Control.Reduce
 import           Control.Reduce.Command
 import           Control.Reduce.Graph
 import           Control.Reduce.Boolean hiding (not)
+import           Control.Reduce.Boolean.CNF
 import           Control.Reduce.Metric
 import           Control.Reduce.Reduction
 import qualified Control.Reduce.Util.Logger as L
@@ -589,6 +596,41 @@ toGraphReductionDeepM keyfn red = refineProblemA' refined where
     (graph, _) <- reductionGraphM keyfn red s
     let (grph, core, _targets, fromClosures) = restrictGraph red s graph
     pure ((grph, core, _targets), (fromClosures, _targets))
+
+
+-- | Generate an IPF problem
+toLogicReductionM :: 
+  (Monad m, Eq k, Hashable k, Ord k) 
+  => (s -> m (k, Stmt k))
+  -> PartialReduction s s 
+  -> Problem a s
+  -> m ((CNF, V.Vector [Int]), Problem a IPF)
+toLogicReductionM keyfn red = refineProblemA' refined where
+  refined s = do
+    (M.fromList -> revlookup, stmts) <- 
+      fmap unzip 
+      . mapM (\(i, a) -> keyfn a <&> \(k, st) -> ((k, i), st)) 
+      . itoListOf (deepSubelements red) 
+      $ s
+
+    let 
+      renamed = stmts & traverse.traverseVariables %~ maybe true tt . flip M.lookup revlookup
+      stmt = and renamed /\ and 
+        [ tt k ==> tt pk
+        | k@(_:pk) <- M.elems revlookup
+        ]
+
+    let 
+      (nnf, v) = memorizeNnf (flattenNnf . nnfFromStmt . fromStmt $ stmt)
+      
+      cnf = toMinimalCNF (maxVariable nnf) nnf
+
+      ipf = fromJust . fromCNF $ cnf
+
+      fromIpf ipf' = limit (deepReduction red) (`S.member` varset) s
+        where varset = S.fromList . mapMaybe (v V.!?) . IS.toList $ ipfVars ipf'
+
+    return ((cnf, v), (fromIpf, ipf))
 
 restrictGraph ::
   PartialReduction s s

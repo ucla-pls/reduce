@@ -17,7 +17,7 @@ import qualified Data.Text as Text
 import Data.Aeson
 
 -- vector
-import qualified Data.Vector as V
+-- import qualified Data.Vector as V
 
 -- bytestring
 import qualified Data.ByteString.Lazy as BL
@@ -75,22 +75,21 @@ spec = do
             , ff 2 \/ tt 3 \/ tt 1
             , ff 3 \/ tt 2  :: Nnf Int 
             ]
-      debugCnf ex
-      let a = weightedSubIPFs (fromIntegral . IS.size) (fromJust $ fromCNF ex)
-      putStrLn ""
-      mapM_ (\(c, x) -> do print c; debugIpf x; putStrLn "") a
+      -- debugCnf ex
+      let _ = weightedSubIPFs (fromIntegral . IS.size) (fromJust $ fromCNF ex)
+      -- putStrLn ""
+      -- mapM_ (\(c, x) -> do print c; debugIpf x; putStrLn "") a
+      True `shouldBe` True
     
-    fit "run it on a real case" $ do 
+    it "run it on a real case" $ do 
       Just (ex :: Nnf Text.Text) <- 
         fmap and . sequence . map decode . BLC.lines 
         <$> BL.readFile "test/data/main-example.json"
-      let (nnf, lup) = memorizeNnf ex
-      print lup
+      let (nnf, _) = memorizeNnf ex
       let cnf = toMinimalCNF (maxVariable nnf) nnf
-      
-      let a = weightedSubIPFs (fromIntegral . IS.size) (fromJust $ fromCNF cnf)
-      putStrLn ""
-      mapM_ (\(c, x) -> do print c; debugIpfWith (\i -> showString $ Text.unpack (lup V.! i)) x; putStrLn "") a
+      let _ = weightedSubIPFs (fromIntegral . IS.size) (fromJust $ fromCNF cnf)
+      True `shouldBe` True
+
 
 
       -- let (cnf', lup') = compressCNF IS.empty (fromIntegral . IS.size) cnf

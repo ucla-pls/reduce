@@ -324,13 +324,13 @@ assignVars fn = cata \case
   TConst b -> liftF (TConst b)
 
 -- | A Traversal over all variables in a term
-traverseVariables :: Monad m => (a -> m (Stmt b)) -> Stmt a -> m (Stmt b)
-traverseVariables fn = cataM \case
-  TAnd a b -> pure . liftF $ TAnd a b
-  TOr  a b -> pure . liftF $ TOr a b
-  TNot a   -> pure . liftF $ TNot a
+traverseVariables :: Applicative m => (a -> m (Stmt b)) -> Stmt a -> m (Stmt b)
+traverseVariables fn = cata \case
+  TAnd a b -> liftF <$> (TAnd <$> a <*> b)
+  TOr  a b -> liftF <$> (TOr <$> a <*> b)
+  TNot a   -> liftF <$> (TNot <$> a)
   TVar a   -> fn a
-  TConst b -> pure . liftF $ TConst b
+  TConst b -> pure $ liftF (TConst b)
 
 
 -- | A literal is either true or false.
