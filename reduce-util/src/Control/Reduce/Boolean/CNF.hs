@@ -27,7 +27,7 @@ import           Data.Maybe
 import           Text.Show
 import           Data.Foldable
 import           Data.Functor
-import           Control.Applicative
+-- import           Control.Applicative
 import qualified Data.List                     as L
 
 -- containers
@@ -293,16 +293,18 @@ limitIPF' is (IPF cnf _ facts) =
 weightedSubIPFs :: 
   (IS.IntSet -> Double) 
   -> IPF 
-  -> V.Vector (IS.IntSet, IPF)
+  -> ((IS.IntSet, IPF), V.Vector (IS.IntSet, IPF))
 weightedSubIPFs cost ipf@(IPF cnf vars facts) =
-  V.map snd 
-  . V.postscanr (\s (ipf', _) -> 
+  over _1 V.head
+  . V.splitAt 1
+  . V.map snd 
+  . V.scanr (\s (ipf', _) -> 
       let con = foldMap (\i -> back V.! traceShowId i) $ IS.toList s
       in ( limitIPF' (ipfVars ipf' `IS.difference` con) ipf'
          , (con, conditionIPF con ipf')
          )
       ) 
-    (ipf, undefined) 
+    (ipf, undefined)
   $ V.fromList choices
  where
   -- (knowns, pclauses, bipf) = splitIPF ipf
@@ -341,7 +343,6 @@ resolve target clauses = case IS.minView freeAgents of
     return
       (snd . LS.splitLiterals . fromJust $ after', V.mapMaybe id cnfResult)
 
-
 binarySearchV :: MonadPlus m => (x -> m ()) -> V.Vector x -> m x
 binarySearchV p as = do
   V.unsafeIndex as <$> binarySearch (p . V.unsafeIndex as) 0 (V.length as)
@@ -349,10 +350,11 @@ binarySearchV p as = do
 ipfBinaryReduction
   :: (Monad m) => (IS.IntSet -> Double) -> Reducer m IPF
 ipfBinaryReduction cost ((\p -> lift . p >=> guard) -> p) = runMaybeT . go where
-  go ipf = msum
-    [ takeIfSolution ipf
-    , binarySearchV p (V.map snd $ weightedSubIPFs cost ipf) 
-      >>= \ipf' -> go ipf' <|> return ipf'
+  go ipf@(weightedSubIPFs cost -> (a, rest)) = msum
+    [ takeIfSolution (snd a)
+    , binarySearchV p (V.map snd rest) 
+      >>= \ipf' -> go ipf'
+    , return ipf
     ]
   takeIfSolution a = p a $> a
 
