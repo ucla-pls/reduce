@@ -54,7 +54,7 @@ import qualified Control.Reduce.Graph          as G
 -- reduce
 import           Control.Reduce
 
-import Debug.Trace
+-- import Debug.Trace
 
 -- | A CNF is a set of literals. A literal is a variable id, and if it is 
 -- negative it will be substracted 1000.
@@ -299,7 +299,7 @@ weightedSubIPFs cost ipf@(IPF cnf vars facts) =
   . V.splitAt 1
   . V.map snd 
   . V.scanr (\s (ipf', _) -> 
-      let con = foldMap (\i -> back V.! traceShowId i) $ IS.toList s
+      let con = foldMap (\i -> back V.! i) $ IS.toList s
       in ( limitIPF' (ipfVars ipf' `IS.difference` con) ipf'
          , (con, conditionIPF con ipf')
          )
