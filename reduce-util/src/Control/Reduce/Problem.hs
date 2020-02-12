@@ -125,9 +125,6 @@ import qualified Data.IntSet                as IS
 import qualified Data.Set                   as S
 import qualified Data.Map.Strict            as M
 
--- hashable 
-import Data.Hashable
-
 -- mtl
 import Control.Monad.Reader
 
@@ -600,7 +597,7 @@ toGraphReductionDeepM keyfn red = refineProblemA' refined where
 
 -- | Generate an IPF problem
 toLogicReductionM :: 
-  (Monad m, Eq k, Hashable k, Ord k) 
+  (Monad m, Ord k) 
   => (s -> m (k, Stmt k))
   -> PartialReduction s s 
   -> Problem a s
