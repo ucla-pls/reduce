@@ -53,6 +53,7 @@ dependencies:
 - hashable
 - hashtables
 - binary
+- primitive
     
 ghc-options:
   - -Wall
