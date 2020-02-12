@@ -7,19 +7,21 @@ import SpecHelper
 
 -- base 
 import Prelude hiding (or, and)
+import Data.Maybe
+--import Data.Foldable hiding (or, and)
 
--- -- text
--- import qualified Data.Text as Text
+-- text
+import qualified Data.Text as Text
 
--- -- aeson
--- import Data.Aeson
+-- aeson
+import Data.Aeson
 
--- -- vector
--- import qualified Data.Vector as V
+-- vector
+import qualified Data.Vector as V
 
--- -- bytestring
--- import qualified Data.ByteString.Lazy as BL
--- import qualified Data.ByteString.Lazy.Char8 as BLC
+-- bytestring
+import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Lazy.Char8 as BLC
 
 -- containers
 import qualified Data.IntSet as IS
@@ -58,12 +60,12 @@ spec = do
         (LS.fromList' [ ff 0, tt 1 ] :: LS.Clause)
         `shouldBe` Nothing
   
-    it "can map some thing" $ do 
-      let ex = and [ ff 0 \/ tt 1
-                   , ff 1 \/ tt 2 
-                   , ff 2 \/ tt 3 :: Nnf Int 
-                   ]
-      debugCnf (vmapCNF (\case 1 -> 0; a -> a) (toCNF ex))
+    -- it "can map some thing" $ do 
+    --   let ex = and [ ff 0 \/ tt 1
+    --                , ff 1 \/ tt 2 
+    --                , ff 2 \/ tt 3 :: Nnf Int 
+    --                ]
+    --   -- debugCnf (vmapCNF (\case 1 -> 0; a -> a) (toCNF ex))
 
 
   describe "possitive progression" $ do
@@ -73,8 +75,33 @@ spec = do
             , ff 2 \/ tt 3 \/ tt 1
             , ff 3 \/ tt 2  :: Nnf Int 
             ]
-      let a = positiveProgression (cnfVariables ex) ex
-      a `shouldBe` map IS.fromList [[0], [1], [2], [3]]
+      debugCnf ex
+      let a = weightedSubIPFs (fromIntegral . IS.size) (fromJust $ fromCNF ex)
+      putStrLn ""
+      mapM_ (\(c, x) -> do print c; debugIpf x; putStrLn "") a
+    
+    fit "run it on a real case" $ do 
+      Just (ex :: Nnf Text.Text) <- 
+        fmap and . sequence . map decode . BLC.lines 
+        <$> BL.readFile "test/data/main-example.json"
+      let (nnf, lup) = memorizeNnf ex
+      print lup
+      let cnf = toMinimalCNF (maxVariable nnf) nnf
+      
+      let a = weightedSubIPFs (fromIntegral . IS.size) (fromJust $ fromCNF cnf)
+      putStrLn ""
+      mapM_ (\(c, x) -> do print c; debugIpfWith (\i -> showString $ Text.unpack (lup V.! i)) x; putStrLn "") a
+
+
+      -- let (cnf', lup') = compressCNF IS.empty (fromIntegral . IS.size) cnf
+      -- print lup'
+      -- debugCnf cnf'
+
+      -- let terms = positiveProgression (cnfVariables cnf') cnf'
+      -- print terms
+
+      -- forM_ [[lup V.! l' |  l' <- IS.toList (lup' V.! l) ] | t <- terms, l <- IS.toList t] print
+      -- print [ (map (map (lup' V.!) . IS.toList) terms ]
 
     -- it "can caluclate graph" $ do
     --   let ex = toCNF $ and 
@@ -85,24 +112,6 @@ spec = do
     --   let (_, cnf') = compressCNF IS.empty (fromIntegral . IS.size) ex
     --   (v, cnf') `shouldBe` (v, cnf')
 
-    -- fit "run it on a real case" $ do 
-    --   Just (x :: Nnf Text.Text) <- 
-    --     fmap and . sequence . map decode . BLC.lines 
-    --     <$> BL.readFile "test/data/main-example.json"
-    --   let (nnf, lup) = memorizeNnf x
-    --   print nnf
-    --   print lup
-    --   let cnf = toMinimalCNF (maxVariable nnf) nnf
-    --   debugCnf cnf
-    --   let (cnf', lup') = compressCNF IS.empty (fromIntegral . IS.size) cnf
-    --   print lup'
-    --   debugCnf cnf'
-
-    --   let terms = positiveProgression (cnfVariables cnf') cnf'
-    --   print terms
-
-    --   forM_ [[lup V.! l' |  l' <- IS.toList (lup' V.! l) ] | t <- terms, l <- IS.toList t] print
-    --   -- print [ (map (map (lup' V.!) . IS.toList) terms ]
 
 
 

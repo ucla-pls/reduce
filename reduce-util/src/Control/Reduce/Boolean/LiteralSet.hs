@@ -75,6 +75,7 @@ litDifference :: IntLiteralSet -> IntLiteralSet -> IntLiteralSet
 litDifference (IntLiteralSet is1) (IntLiteralSet is2) =
   IntLiteralSet (is1 `IS.difference` is2)
 
+
 litMap :: (IntLiteral -> IntLiteral) -> IntLiteralSet -> Maybe IntLiteralSet
 litMap fn = litFromList . L.map fn . litToList
 
@@ -166,11 +167,29 @@ unSingleton a = case minView a of
   _ -> Nothing
 {-# INLINE unSingleton #-}
 
+toNegativeLiterals :: IS.IntSet -> IS.IntSet
+toNegativeLiterals = IS.fromDistinctAscList . L.map (\a -> a + minBound) . IS.toAscList 
+
+fromNegativeLiterals :: IS.IntSet -> IS.IntSet
+fromNegativeLiterals = IS.fromDistinctAscList . L.map (\a -> a - minBound) . IS.toAscList 
+
 splitLiterals :: IsIntLiteralSet a => a -> (IS.IntSet, IS.IntSet)
 splitLiterals (toLiteralSet -> IntLiteralSet is) =
-  (IS.fromDistinctAscList . L.map (\a -> a - minBound) $ IS.toDescList falses, trues)
+  (fromNegativeLiterals falses, trues)
   where (falses, trues) = IS.split (negate 1) is
 {-# INLINE splitLiterals #-}
+
+joinLiterals :: IsIntLiteralSet a => (IS.IntSet, IS.IntSet) -> Maybe a
+joinLiterals (falses, trues) 
+  | falses `IS.disjoint` trues = Just (joinLiterals' (falses, trues))
+  | otherwise = Nothing
+{-# INLINE joinLiterals #-}
+
+-- | Join the literals but do not check that the two sets are disjoint
+joinLiterals' :: IsIntLiteralSet a => (IS.IntSet, IS.IntSet) -> a
+joinLiterals' (falses, trues) =
+  fromLiteralSet . IntLiteralSet $ toNegativeLiterals falses `IS.union` trues
+{-# INLINE joinLiterals' #-}
 
 variables :: IsIntLiteralSet a => a -> IS.IntSet
 variables = view both . splitLiterals
@@ -205,6 +224,16 @@ conditionClause (IntLiteral x) (Clause (IntLiteralSet s)) =
     if x `IS.member` s
     then Nothing
     else Just . Clause . IntLiteralSet $ (x - minBound) `IS.delete` s
+
+-- | Limit a clause to only talk about these variables, its the same 
+-- as conditioning on the negative inverse.
+limitClause :: IS.IntSet -> Clause -> Maybe Clause
+limitClause x (Clause c)
+  | trues `IS.isSubsetOf` x =
+    Just $ joinLiterals' (trues, falses `IS.intersection` x)
+  | otherwise =
+    Nothing 
+  where (trues, falses) = splitLiterals c
 
 
 displayImplication :: (Int -> ShowS) -> Clause -> ShowS
