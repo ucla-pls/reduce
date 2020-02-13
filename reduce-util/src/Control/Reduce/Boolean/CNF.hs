@@ -357,8 +357,9 @@ ipfBinaryReduction
 ipfBinaryReduction cost ((\p -> lift . p >=> guard) -> p) = runMaybeT . go where
   go ipf@(weightedSubIPFs cost -> (a, rest)) = msum
     [ takeIfSolution (snd a)
-    , binarySearchV p (V.map snd rest) 
-      >>= \ipf' -> go ipf'
+    , if Prelude.not $ V.null rest then
+         binarySearchV p (V.map snd rest) >>= \ipf' -> go ipf'
+      else mzero
     , return ipf
     ]
   takeIfSolution a = p a $> a
