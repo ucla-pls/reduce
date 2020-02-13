@@ -55,8 +55,8 @@ negateLiteral (IntLiteral i)
 newtype IntLiteralSet = IntLiteralSet { internalIntSet :: IS.IntSet }
   deriving (Eq, Ord, Semigroup, Monoid)
 
-empty :: IntLiteralSet
-empty = mempty
+litEmpty :: IntLiteralSet
+litEmpty = mempty
 
 litMember :: IntLiteral -> IntLiteralSet -> Bool
 litMember (IntLiteral l) (IntLiteralSet is) = l `IS.member` is
@@ -113,6 +113,10 @@ fromList' = fromJust . fromList
 toList :: IsIntLiteralSet a => a -> [IntLiteral] 
 toList = litToList . toLiteralSet
 {-# INLINE toList #-}
+
+empty :: IsIntLiteralSet a => a
+empty = fromLiteralSet $ litEmpty
+
 
 map :: IsIntLiteralSet a => (IntLiteral -> IntLiteral) -> a -> Maybe a
 map fn = fmap fromLiteralSet . litMap fn . toLiteralSet

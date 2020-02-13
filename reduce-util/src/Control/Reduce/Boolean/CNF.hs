@@ -245,9 +245,19 @@ debugIpfWith fn (IPF cnf vars facts) = do
   putStrLn $ "Facts: " ++ showListWith fn (IS.toList facts) ""
   forM_ (cnfClauses cnf) \a -> putStrLn (LS.displayImplication fn a "")
 
+removeSingletons :: CNF -> Maybe (Term, CNF)
+removeSingletons cnf = do
+  singletons <- LS.fromList . mapMaybe LS.unSingleton . S.toList $ cnfClauses cnf
+  let (mterm, cnf') = unitPropergation singletons cnf
+  term <- mterm
+  return (term, cnf')
+
+
 fromCNF :: CNF -> Maybe IPF
-fromCNF cnf | any (IS.null . snd . LS.splitLiterals) $ cnfClauses cnf = Nothing
-            | otherwise = Just (IPF cnf (cnfVariables cnf) IS.empty)
+fromCNF cnf 
+  | any (IS.null . snd . LS.splitLiterals) $ cnfClauses cnf = Nothing
+  | otherwise = removeSingletons cnf <&> \(LS.splitLiterals -> (_, trues), cnf') -> 
+      (IPF cnf' (cnfVariables cnf) trues)
 
 conditionCNF :: IS.IntSet -> CNF -> CNF
 conditionCNF is = CNF
