@@ -274,7 +274,7 @@ limitIPF' :: IS.IntSet -> IPF -> IPF
 limitIPF' is (IPF cnf _ facts) =
   IPF 
     (CNF . S.fromList . mapMaybe (LS.limitClause is) . S.toList $ cnfClauses cnf)
-    is
+    (is `IS.union` facts)
     facts
 
 learnClauseIPF :: IS.IntSet -> IPF -> IPF
@@ -288,53 +288,26 @@ learnClauseIPF is ipf
       ) 
     }
  
--- compressAndProgress :: 
---   IS.IntSet 
---   -> (IS.IntSet -> Double) 
---   -> CNF 
---   -> [IS.IntSet]
--- compressAndProgress vars cost cnf =
---   [ foldMap (\i -> back V.! i) (IS.toList set)
---   | set <- positiveProgression (IS.fromDistinctAscList [0..V.length back - 1]) cnf'
---   ]
---   where 
---     (cnf', back) = compressCNF vars cost cnf
-
-
-weightedSubIPFs :: 
+weightedSubDisjunctions :: 
   (IS.IntSet -> Double) 
   -> IPF 
-  -> ((IS.IntSet, IPF), V.Vector (IS.IntSet, IPF))
-weightedSubIPFs cost ipf@(IPF cnf vars facts) =
-  ( let con = foldMap (\i -> back V.! i) $ IS.toList minimal 
-    in (con, limitIPF' (ipfFacts ipf `IS.union` con) ipf)
-  , V.map snd 
-    . V.postscanr (\s (ipf', _) -> 
-        let con = foldMap (\i -> back V.! i) $ IS.toList s
-        in ( limitIPF' (ipfVars ipf' `IS.difference` con) ipf'
-           , (con, learnClauseIPF con ipf')
-           )
-        ) 
-      (ipf, undefined)
-    $ V.fromList choices
-  )
+  -> (IS.IntSet, [IS.IntSet])
+weightedSubDisjunctions cost (IPF cnf vars facts) =
+  let (m, clauses') = findMinimum (V.fromList . S.toList . cnfClauses $ cnf')
+  in (unmap m, go (thvars `IS.difference` m) clauses')
  where
-  -- (knowns, pclauses, bipf) = splitIPF ipf
+  unmap = foldMap (\i -> back V.! i) . IS.toList
   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
+  thvars = IS.fromList [0..V.length back -1] 
 
-  (minimal, choices) = 
-    let (m, clauses') = findMinimum (V.fromList . S.toList . cnfClauses $ cnf')
-    in (m, go (thvars `IS.difference` minimal) clauses')
-    where 
-      thvars = IS.fromList [0..V.length back -1] 
-  
   go vs clauses = case IS.minView vs of
     Just (p, _) ->
       let (term, clauses') = positiveResolution p clauses
-      in  term : go (vs `IS.difference` term) clauses'
+      in  unmap term : go (vs `IS.difference` term) clauses'
     Nothing -> []
 
   -- Find something that satisfy the results
+  {-# SCC findMinimum #-}
   findMinimum :: V.Vector Clause -> (IS.IntSet, V.Vector Clause)
   findMinimum clauses = case IS.minView (freeAgents clauses) of
     Just (x, _) -> 
@@ -346,7 +319,7 @@ weightedSubIPFs cost ipf@(IPF cnf vars facts) =
       let (trues, falses) = LS.splitLiterals c
       in  if IS.null trues then falses else IS.empty
 
-
+  {-# SCC positiveResolution #-}
   positiveResolution :: Int -> V.Vector Clause -> (IS.IntSet, V.Vector Clause)
   positiveResolution target clauses = runST $ do
     current <- V.thaw (V.map Just clauses)
@@ -366,12 +339,20 @@ binarySearchV p as = do
 ipfBinaryReduction
   :: (Monad m) => (IS.IntSet -> Double) -> Reducer m IPF
 ipfBinaryReduction cost ((\p -> lift . p >=> guard) -> p) = runMaybeT . go where
-  go ipf@(weightedSubIPFs cost -> (a, rest)) = msum
-    [ takeIfSolution (snd a)
-    , if Prelude.not $ V.null rest then
-         binarySearchV p (V.map snd rest) >>= \ipf' -> go ipf'
+  {-# SCC go #-}
+  go ipf@(weightedSubDisjunctions cost -> (a, as)) = msum
+    [ takeIfSolution (limitIPF' a ipf)
+    , if Prelude.not $ L.null as then do
+         i <- binarySearch (p . range) 0 (L.length as - 1)
+         let (rest, r:_) = L.splitAt (i - 1) as
+         go (limitIPF' (IS.unions (r:rest)) $ learnClauseIPF r ipf)
       else mzero
     , return ipf
     ]
+    where range i = limitIPF' (IS.unions $ L.take i as) ipf
+
   takeIfSolution a = p a $> a
+
+
+
 

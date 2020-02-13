@@ -76,7 +76,7 @@ spec = do
             , ff 3 \/ tt 2  :: Nnf Int 
             ]
       -- debugCnf ex
-      let _ = weightedSubIPFs (fromIntegral . IS.size) (fromJust $ fromCNF ex)
+      let _ = weightedSubDisjunctions (fromIntegral . IS.size) (fromJust $ fromCNF ex)
       -- putStrLn ""
       -- mapM_ (\(c, x) -> do print c; debugIpf x; putStrLn "") a
       True `shouldBe` True
@@ -87,7 +87,7 @@ spec = do
         <$> BL.readFile "test/data/main-example.json"
       let (nnf, _) = memorizeNnf ex
       let cnf = toMinimalCNF (maxVariable nnf) nnf
-      let _ = weightedSubIPFs (fromIntegral . IS.size) (fromJust $ fromCNF cnf)
+      let _ = weightedSubDisjunctions (fromIntegral . IS.size) (fromJust $ fromCNF cnf)
       True `shouldBe` True
 
 
