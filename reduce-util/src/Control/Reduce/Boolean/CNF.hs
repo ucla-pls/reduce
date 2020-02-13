@@ -349,7 +349,7 @@ weightedSubIPFs cost ipf@(IPF cnf vars facts) =
 
 binarySearchV :: MonadPlus m => (x -> m ()) -> V.Vector x -> m x
 binarySearchV p as = do
-  V.unsafeIndex as <$> binarySearch (p . V.unsafeIndex as) 0 (V.length as - 1)
+  (as V.!) <$> binarySearch (p . (as V.!)) 0 (V.length as - 1)
 
 ipfBinaryReduction
   :: (Monad m) => (IS.IntSet -> Double) -> Reducer m IPF
