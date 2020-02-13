@@ -295,7 +295,8 @@ weightedSubIPFs ::
   -> IPF 
   -> ((IS.IntSet, IPF), V.Vector (IS.IntSet, IPF))
 weightedSubIPFs cost ipf@(IPF cnf vars facts) =
-  ( (minimal, limitIPF' minimal (conditionIPF minimal ipf)) 
+  ( let con = foldMap (\i -> back V.! i) $ IS.toList minimal 
+    in (con, limitIPF' con (conditionIPF con ipf)) 
   , V.map snd 
     . V.postscanr (\s (ipf', _) -> 
         let con = foldMap (\i -> back V.! i) $ IS.toList s
