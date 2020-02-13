@@ -277,6 +277,17 @@ limitIPF' is (IPF cnf _ facts) =
     is
     facts
 
+learnClauseIPF :: IS.IntSet -> IPF -> IPF
+learnClauseIPF is ipf 
+  | IS.size is == 0 = error "can't learn an empty clause"
+  | IS.size is == 1 = conditionIPF is ipf
+  | otherwise       = ipf 
+    { ipfClauses = CNF 
+      ( S.insert (LS.joinLiterals' (IS.empty, is)) 
+      $ cnfClauses (ipfClauses ipf)
+      ) 
+    }
+ 
 -- compressAndProgress :: 
 --   IS.IntSet 
 --   -> (IS.IntSet -> Double) 
@@ -296,12 +307,12 @@ weightedSubIPFs ::
   -> ((IS.IntSet, IPF), V.Vector (IS.IntSet, IPF))
 weightedSubIPFs cost ipf@(IPF cnf vars facts) =
   ( let con = foldMap (\i -> back V.! i) $ IS.toList minimal 
-    in (con, limitIPF' con (conditionIPF con ipf)) 
+    in (con, limitIPF' (ipfFacts ipf `IS.union` con) ipf)
   , V.map snd 
     . V.postscanr (\s (ipf', _) -> 
         let con = foldMap (\i -> back V.! i) $ IS.toList s
         in ( limitIPF' (ipfVars ipf' `IS.difference` con) ipf'
-           , (con, conditionIPF con ipf')
+           , (con, learnClauseIPF con ipf')
            )
         ) 
       (ipf, undefined)
