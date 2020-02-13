@@ -229,6 +229,7 @@ cnfDependencies =
 -- | Implicative Positive Form, 
 -- The requirements is that all clauses contain at least one possitive
 -- varaible.
+-- All singleton positive variables are split from the set.
 data IPF = IPF 
   { ipfClauses :: CNF
   , ipfVars    :: IS.IntSet 
@@ -243,7 +244,6 @@ debugIpfWith fn (IPF cnf vars facts) = do
   putStrLn $ "Vars:  " ++ showListWith fn (IS.toList vars) ""
   putStrLn $ "Facts: " ++ showListWith fn (IS.toList facts) ""
   forM_ (cnfClauses cnf) \a -> putStrLn (LS.displayImplication fn a "")
-
 
 fromCNF :: CNF -> Maybe IPF
 fromCNF cnf | any (IS.null . snd . LS.splitLiterals) $ cnfClauses cnf = Nothing
@@ -295,50 +295,54 @@ weightedSubIPFs ::
   -> IPF 
   -> ((IS.IntSet, IPF), V.Vector (IS.IntSet, IPF))
 weightedSubIPFs cost ipf@(IPF cnf vars facts) =
-  over _1 V.head
-  . V.splitAt 1
-  . V.map snd 
-  . V.scanr (\s (ipf', _) -> 
-      let con = foldMap (\i -> back V.! i) $ IS.toList s
-      in ( limitIPF' (ipfVars ipf' `IS.difference` con) ipf'
-         , (con, conditionIPF con ipf')
-         )
-      ) 
-    (ipf, undefined)
-  $ V.fromList choices
+  ( (minimal, limitIPF' minimal (conditionIPF minimal ipf)) 
+  , V.map snd 
+    . V.postscanr (\s (ipf', _) -> 
+        let con = foldMap (\i -> back V.! i) $ IS.toList s
+        in ( limitIPF' (ipfVars ipf' `IS.difference` con) ipf'
+           , (con, conditionIPF con ipf')
+           )
+        ) 
+      (ipf, undefined)
+    $ V.fromList choices
+  )
  where
   -- (knowns, pclauses, bipf) = splitIPF ipf
   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
 
-  choices :: [IS.IntSet]
-  choices = go (IS.fromList [0..V.length back -1]) (V.fromList . S.toList . cnfClauses $ cnf') 
+  (minimal, choices) = 
+    let (m, clauses') = findMinimum (V.fromList . S.toList . cnfClauses $ cnf')
+    in (m, go (thvars `IS.difference` minimal) clauses')
+    where 
+      thvars = IS.fromList [0..V.length back -1] 
   
   go vs clauses = case IS.minView vs of
     Just (p, _) ->
-      let (term, clauses') = resolve (IS.singleton p) clauses
+      let (term, clauses') = positiveResolution p clauses
       in  term : go (vs `IS.difference` term) clauses'
     Nothing -> []
 
--- Find something that satisfy the results
-resolve :: IS.IntSet -> V.Vector Clause -> (IS.IntSet, V.Vector Clause)
-resolve target clauses = case IS.minView freeAgents of
-  Just (x, _) -> over _1 (IS.union after) $ resolve (IS.singleton x) results
-  Nothing     -> (after, results)
- where
-  freeAgents = flip
-    foldMap
-    results
-    \c ->
+  -- Find something that satisfy the results
+  findMinimum :: V.Vector Clause -> (IS.IntSet, V.Vector Clause)
+  findMinimum clauses = case IS.minView (freeAgents clauses) of
+    Just (x, _) -> 
+      let (required, rest) = positiveResolution x clauses
+      in over _1 (IS.union required) $ findMinimum rest
+    Nothing     -> (IS.empty, clauses)
+   where
+    freeAgents = foldMap \c ->
       let (trues, falses) = LS.splitLiterals c
       in  if IS.null trues then falses else IS.empty
 
-  (after, results) = runST $ do
+
+  positiveResolution :: Int -> V.Vector Clause -> (IS.IntSet, V.Vector Clause)
+  positiveResolution target clauses = runST $ do
     current <- V.thaw (V.map Just clauses)
     let clauseLookup = clauseLookupMap clauses
     after' <- unitPropergationM
       current
       (\i -> IM.findWithDefault [] (variable . LS.toLiteral $ i) clauseLookup)
-      (fromJust (LS.fromList (map tt . IS.toList $ target)))
+      (LS.singleton (tt target))
     cnfResult <- V.freeze current
     return
       (snd . LS.splitLiterals . fromJust $ after', V.mapMaybe id cnfResult)
