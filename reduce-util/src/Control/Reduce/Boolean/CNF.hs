@@ -29,6 +29,7 @@ import           Data.Foldable
 import           Data.Functor
 -- import           Control.Applicative
 import qualified Data.List                     as L
+import qualified Data.List.NonEmpty            as NE
 
 -- containers
 import qualified Data.IntSet                   as IS
@@ -307,16 +308,28 @@ weightedSubDisjunctions ::
   -> IPF 
   -> (IS.IntSet, [IS.IntSet])
 weightedSubDisjunctions cost (IPF cnf vars facts) =
-  let (m, clauses') = findMinimum (V.fromList . S.toList . cnfClauses $ cnf')
-  in (unmap m, go (IS.fromList [0..V.length back -1]  `IS.difference` m) clauses')
+  (\(a NE.:| x) -> (a, x))
+  . NE.map (unmap . fst) 
+  $ subDisjunctions (IS.fromList [0..V.length back -1]) cnf'
  where
   unmap = foldMap (\i -> back V.! i) . IS.toList
   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
 
+-- | Caluclate a list of variabels that statisifies the cnf from left to
+-- rigth.
+subDisjunctions :: IS.IntSet -> CNF -> NE.NonEmpty (IS.IntSet, V.Vector Clause)
+subDisjunctions vs' cnf =
+  let (m, clauses) = findMinimum (V.fromList . S.toList . cnfClauses $ cnf)
+  in (m, clauses) NE.:| go (vs' `IS.difference` m) clauses
+
+ where
+  {-# SCC go #-}
   go vs clauses = case IS.minView vs of
     Just (p, _) ->
-      let (term, clauses') = positiveResolution p clauses
-      in  unmap term : go (vs `IS.difference` term) clauses'
+      let 
+        (term,  clauses') = positiveResolution p clauses
+        (term', clauses'') = findMinimum clauses'
+      in (term' `IS.union` term, clauses'') : go (vs `IS.difference` term) clauses''
     Nothing -> []
 
   -- Find something that satisfy the results

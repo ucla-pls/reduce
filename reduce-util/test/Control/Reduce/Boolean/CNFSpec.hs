@@ -11,6 +11,8 @@ import           Prelude                 hiding ( or
                                                 , not
                                                 )
 import           Data.Maybe
+import           Text.Show
+import           Data.Foldable hiding (or, and)
 --import Data.Foldable hiding (or, and)
 
 -- text
@@ -173,8 +175,12 @@ spec = do
               )
       let (nnf, x) = memorizeNnf ex
       let cnf = toMinimalCNF (maxVariable nnf) nnf
-      debugCnfWith (\i -> maybe (shows i) showString (x V.!? i))  cnf
-      debugCnfWith (\i -> maybe (shows i) showString (x V.!? i)) (toCNF nnf)
+      let printer = (\i -> maybe (shows i) showString (x V.!? i))
+      debugCnfWith printer  cnf
+      -- debugCnfWith (\i -> maybe (shows i) showString (x V.!? i)) (toCNF nnf)
+
+      let (_, y) = weightedSubDisjunctions (fromIntegral . IS.size . fst . IS.split 12) (fromJust $ fromCNF cnf)
+      forM_ y (\u -> putStrLn $ showListWith printer (IS.toList u) "")
 
   describe "possitive progression" $ do
     it "caluclate it on a small case" $ do
