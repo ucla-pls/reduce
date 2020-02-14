@@ -304,11 +304,10 @@ weightedSubDisjunctions ::
   -> (IS.IntSet, [IS.IntSet])
 weightedSubDisjunctions cost (IPF cnf vars facts) =
   let (m, clauses') = findMinimum (V.fromList . S.toList . cnfClauses $ cnf')
-  in (unmap m, go (thvars `IS.difference` m) clauses')
+  in (unmap m, go (IS.fromList [0..V.length back -1]  `IS.difference` m) clauses')
  where
   unmap = foldMap (\i -> back V.! i) . IS.toList
   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
-  thvars = IS.fromList [0..V.length back -1] 
 
   go vs clauses = case IS.minView vs of
     Just (p, _) ->
@@ -353,13 +352,13 @@ ipfBinaryReduction cost ((\p -> lift . p >=> guard) -> p) = runMaybeT . go where
   go ipf@(weightedSubDisjunctions cost -> (a, as)) = msum
     [ takeIfSolution (limitIPF' a ipf)
     , if Prelude.not $ L.null as then do
-         i <- binarySearch (p . range) 0 (L.length as - 1)
-         let (rest, r:_) = L.splitAt (i - 1) as
-         go (limitIPF' (IS.unions (r:rest)) $ learnClauseIPF r ipf)
+         i <- binarySearch (p . range) 0 (L.length as)
+         let (as', r:_) = L.splitAt (i - 1) as
+         go (limitIPF' (IS.unions (r:a:as')) $ learnClauseIPF r ipf)
       else mzero
     , return ipf
     ]
-    where range i = limitIPF' (IS.unions $ L.take i as) ipf
+    where range i = limitIPF' (IS.unions $ a:L.take i as) ipf
 
   takeIfSolution a = p a $> a
 
