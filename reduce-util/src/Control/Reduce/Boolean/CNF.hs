@@ -352,7 +352,7 @@ ipfBinaryReduction cost ((\p -> lift . p >=> guard) -> p) = runMaybeT . go where
   go ipf@(weightedSubDisjunctions cost -> (a, as)) = msum
     [ takeIfSolution (limitIPF' a ipf)
     , if Prelude.not $ L.null as then do
-         i <- binarySearch (p . range) 0 (L.length as)
+         i <- binarySearch (p . range) 1 (L.length as)
          let (as', r:_) = L.splitAt (i - 1) as
          go (limitIPF' (IS.unions (r:a:as')) $ learnClauseIPF r ipf)
       else mzero
