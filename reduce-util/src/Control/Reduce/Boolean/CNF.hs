@@ -292,6 +292,14 @@ limitIPF' is (IPF cnf _ facts) =
     (is `IS.union` facts)
     facts
 
+limitIPF'' :: IS.IntSet -> IPF -> Maybe IPF
+limitIPF'' is (IPF cnf _ facts) =
+  let cnf' = CNF . S.fromList . mapMaybe (LS.limitClause is) . S.toList $ cnfClauses cnf
+  in removeSingletons cnf' <&> \(t, cnf'') -> 
+    IPF cnf''
+    (is `IS.union` facts)
+    (facts `IS.union` snd (LS.splitLiterals t))
+
 learnClauseIPF :: IS.IntSet -> IPF -> IPF
 learnClauseIPF is ipf 
   | IS.size is == 0 = error "can't learn an empty clause"
@@ -321,7 +329,6 @@ subDisjunctions :: IS.IntSet -> CNF -> NE.NonEmpty (IS.IntSet, V.Vector Clause)
 subDisjunctions vs' cnf =
   let (m, clauses) = findMinimum (V.fromList . S.toList . cnfClauses $ cnf)
   in (m, clauses) NE.:| go (vs' `IS.difference` m) clauses
-
  where
   {-# SCC go #-}
   go vs clauses = case IS.minView vs of
@@ -373,7 +380,7 @@ ipfBinaryReduction cost ((\p -> lift . p >=> guard) -> p) = runMaybeT . go where
     , if Prelude.not $ L.null as then do
          i <- binarySearch (p . range) 1 (L.length as)
          let (as', r:_) = L.splitAt (i - 1) as
-         go (limitIPF' (IS.unions (r:a:as')) $ learnClauseIPF r ipf)
+         go (fromJust . limitIPF'' (IS.unions (r:a:as')) $ learnClauseIPF r ipf)
       else mzero
     , return ipf
     ]
