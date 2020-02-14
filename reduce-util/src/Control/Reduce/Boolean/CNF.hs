@@ -93,17 +93,16 @@ toMinimalCNF maxvar f = CNF $ runST $ do
       pure (x <> y)
     NOr a b -> \d -> do
       (xs, xtmps) <- a d
-      (S.unions -> ys, ytmps) <- unzip <$> mapM b (S.toList xs)
-      if S.size ys > 1
+      if S.size xs > 1
         then do
           i           <- freshvar
-          (ys', ytmps') <- b (fromJust $ tt i `LS.insert` d)
+          (ys, ytmps) <- b (fromJust $ tt i `LS.insert` d)
           let tmps =
                 S.map (fromJust . LS.insert (ff i) . (`LS.difference` d)) xs
-          pure (ys', xtmps <> ytmps' <> tmps)
+          pure (ys, xtmps <> ytmps <> tmps)
         else do
-          -- (ys, ytmps) <- unzip <$> mapM b (S.toList xs)
-          pure $ (ys, xtmps <> S.unions ytmps)
+          (ys, ytmps) <- unzip <$> mapM b (S.toList xs)
+          pure $ (S.unions ys, xtmps <> S.unions ytmps)
 
     NLit l ->
       \d ->
@@ -123,8 +122,12 @@ cnfVariables :: CNF -> IS.IntSet
 cnfVariables = foldMap LS.variables . cnfClauses
 
 debugCnf :: CNF -> IO ()
-debugCnf cnf =
-  forM_ (cnfClauses cnf) \a -> putStrLn (LS.displayImplication shows a "")
+debugCnf =
+  debugCnfWith shows
+
+debugCnfWith :: (Int -> ShowS) -> CNF -> IO ()
+debugCnfWith fn cnf =
+  forM_ (cnfClauses cnf) \a -> putStrLn (LS.displayImplication fn a "")
 
 cnfSize :: CNF -> Int
 cnfSize = S.size . cnfClauses
@@ -327,8 +330,10 @@ weightedSubDisjunctions cost (IPF cnf vars facts) =
    where
     freeAgents = foldMap \c ->
       let (falses, trues) = LS.splitLiterals c
-      in  if IS.null falses then trues else IS.empty
-
+      in if IS.null falses 
+        then (if IS.size trues == 1 then error "unexpected" else trues) 
+         else IS.empty
+  
   {-# SCC positiveResolution #-}
   positiveResolution :: Int -> V.Vector Clause -> (IS.IntSet, V.Vector Clause)
   positiveResolution target clauses = runST $ do
