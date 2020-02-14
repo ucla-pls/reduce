@@ -326,8 +326,9 @@ weightedSubDisjunctions cost (IPF cnf vars facts) =
 -- | Caluclate a list of variabels that statisifies the cnf from left to
 -- rigth.
 subDisjunctions :: IS.IntSet -> CNF -> NE.NonEmpty (IS.IntSet, V.Vector Clause)
-subDisjunctions vs' cnf =
-  let (m, clauses) = findMinimum (V.fromList . S.toList . cnfClauses $ cnf)
+subDisjunctions vs' (fromJust . removeSingletons -> (t, cnf))  =
+  let (IS.union (snd . LS.splitLiterals $ t) -> m, clauses) = 
+        findMinimum (V.fromList . S.toList . cnfClauses $ cnf)
   in (m, clauses) NE.:| go (vs' `IS.difference` m) clauses
  where
   {-# SCC go #-}
