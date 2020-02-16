@@ -323,6 +323,18 @@ weightedSubDisjunctions cost (IPF cnf vars facts) =
   unmap = foldMap (\i -> back V.! i) . IS.toList
   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
 
+weightedSubDisjunctionsWithCNFs :: 
+  (IS.IntSet -> Double) 
+  -> IPF 
+  -> ((IS.IntSet, IS.IntSet, V.Vector Clause), [(IS.IntSet, IS.IntSet, V.Vector Clause)])
+weightedSubDisjunctionsWithCNFs cost (IPF cnf vars facts) =
+  (\(a NE.:| x) -> (a, x))
+  . NE.map (\(a, c) -> (unmap a, a, c)) 
+  $ subDisjunctions (IS.fromList [0..V.length back -1]) cnf'
+ where
+  unmap = foldMap (\i -> back V.! i) . IS.toList
+  (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
+
 -- | Caluclate a list of variabels that statisifies the cnf from left to
 -- rigth.
 subDisjunctions :: IS.IntSet -> CNF -> NE.NonEmpty (IS.IntSet, V.Vector Clause)
