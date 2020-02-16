@@ -26,6 +26,12 @@ import           System.Directory
 -- text
 import qualified Data.Text as Text
 
+-- cryptohash-sha256
+import           Crypto.Hash.SHA256         as Sha256
+
+-- bytestring
+import qualified Data.ByteString.Lazy            as BL
+
 -- base
 import           Data.Char                        (toLower)
 import qualified Data.List                        as List
@@ -67,7 +73,7 @@ parseCmdTemplate =
   ( strArgument (metavar "ARG.." <> help "arguments to the command.")
   )
 
-parsePredicateOptions :: Parser PredicateOptions
+parsePredicateOptions :: Parser (IO PredicateOptions)
 parsePredicateOptions = do
   input <-
     option str
@@ -79,17 +85,18 @@ parsePredicateOptions = do
       <> hidden
       )
 
-  _predOptPriorExpectation <-
+  _predOptPriorExpectationIO <-
     parseExpectation
 
-  pure $
+  pure $ do
+    _predOptPriorExpectation <- _predOptPriorExpectationIO
     let ms = map Text.strip . Text.splitOn "," . Text.pack $ input
-    in PredicateOptions
-    { _predOptPreserveExitCode = List.elem "exit" ms || List.elem "exitcode" ms
-    , _predOptPreserveStdout = List.elem "out" ms || List.elem "stdout" ms
-    , _predOptPreserveStderr = List.elem "err" ms || List.elem "stderr" ms
-    , _predOptPriorExpectation = _predOptPriorExpectation
-    }
+    pure $ PredicateOptions
+      { _predOptPreserveExitCode = List.elem "exit" ms || List.elem "exitcode" ms
+      , _predOptPreserveStdout = List.elem "out" ms || List.elem "stdout" ms
+      , _predOptPreserveStderr = List.elem "err" ms || List.elem "stderr" ms
+      , _predOptPriorExpectation = _predOptPriorExpectation
+      }
 
 data WorkFolder
   = TempWorkFolder !String
@@ -132,7 +139,7 @@ parseWorkFolder template = do
     Nothing -> do
       TempWorkFolder $ template
 
-parseExpectation :: Parser Expectation
+parseExpectation :: Parser (IO Expectation)
 parseExpectation = do
   _expectedExitCode <-
     optional . fmap exitCodeFromInt . option auto $
@@ -140,19 +147,27 @@ parseExpectation = do
     <> help "require a specific exit code."
     <> hidden
 
-  _expectedStdout <- pure Nothing
-    -- optional . option auto $
-    -- long "out"
-    -- <> help "require a specific stdout hash."
-    -- <> hidden
+  _expectedStdoutIO <- 
+    optional . option str $
+    long "out"
+    <> help "require a specific stdout file."
+    <> hidden
 
-  _expectedStderr <- pure Nothing
-    -- optional . option auto $
-    -- long "err"
-    -- <> help "require a specific stderr hash."
-    -- <> hidden
+  _expectedStderrIO <- 
+    optional . option str $
+    long "err"
+    <> help "require a specific stderr file."
+    <> hidden
 
-  pure $ Expectation {..}
+  pure $ do
+    _expectedStdout <- traverse findHash _expectedStdoutIO 
+    _expectedStderr <- traverse findHash _expectedStderrIO 
+    pure $ Expectation {..}
+
+ where
+  findHash fp = do
+    Sha256.hashlazyAndLength <$> BL.readFile fp
+       
 
 parseReductionOptions :: Parser (ReductionOptions)
 parseReductionOptions = do
@@ -270,7 +285,6 @@ parseOutputFile =
     <> metavar "OUTPUT"
     <> help "specifies where to put the output"
     <> short 'o'
-
 
 boundedToEnum :: (Bounded a, Enum a) => Int -> a
 boundedToEnum i =

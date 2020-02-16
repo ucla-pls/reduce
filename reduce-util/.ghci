@@ -1,4 +1,4 @@
 :set -fwarn-unused-binds -fwarn-unused-imports
 :set -isrc
 :set -itest
-:load Spec Control.Reduce.Util
+:load Spec Control.Reduce.Util Control.Reduce.Util.OptParse

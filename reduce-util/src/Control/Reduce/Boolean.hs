@@ -573,6 +573,7 @@ instance Hashable Rnnf where
       s `hashWithSalt` (2 :: Int) `hashWithSalt` l
   {-# INLINE hashWithSalt #-}
 
+-- Warning. There Might be a bug in this hashmap
 memorizer ::
   (Eq a, Hashable a)
   => (forall s. (a -> ST s Int) -> ST s b)
