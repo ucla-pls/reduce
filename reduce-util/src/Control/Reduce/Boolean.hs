@@ -61,6 +61,7 @@ import qualified Data.Vector.Mutable as VM
 import qualified Data.Set as S
 import qualified Data.IntSet as IS
 import qualified Data.IntMap.Strict as IM
+import qualified Data.Map.Strict as M
 
 -- hashtables
 import qualified Data.HashTable.ST.Cuckoo as CHT
@@ -605,10 +606,47 @@ memorizer fn = runST $ do
   return (b, V.take count items)
 {-# INLINEABLE memorizer #-}
 
+ordMemorizer ::
+  (Ord a)
+  => (forall s. (a -> ST s Int) -> ST s b)
+  -> (b, V.Vector a)
+ordMemorizer fn = runST $ do
+  mapRef <- newSTRef M.empty
+  countVar <- newSTRef 0
+  itemsVar <- newSTRef =<< VM.new 128
+    -- =<< readSTRef countVar
+
+  b <- fn \new -> do 
+    m <- readSTRef mapRef
+    -- alterF :: (Functor f, Ord k) => (Maybe a -> f (Maybe a)) -> k -> Map k a -> f (Map k a) 
+    case M.lookup new m of 
+      Just k -> 
+        return k
+      Nothing -> do
+        count <- readSTRef countVar
+        writeSTRef countVar (count+1)
+        itemsM <- readSTRef itemsVar
+        itemsM' <- if VM.length itemsM <= count
+          then do
+            itemsM' <- VM.grow itemsM count
+            writeSTRef itemsVar itemsM'
+            return itemsM'
+          else return itemsM
+        VM.unsafeWrite itemsM' count new
+        writeSTRef mapRef (M.insert new count m)
+        return count
+
+  itemsM <- readSTRef itemsVar
+  items <- V.freeze itemsM
+  count <- readSTRef countVar
+
+  return (b, V.take count items)
+{-# INLINEABLE ordMemorizer #-}
+
 memorizeNnf ::
-  (Eq a, Hashable a, Fixed (NnfF a) b)
+  (Ord a, Fixed (NnfF a) b)
   => b -> (Nnf Int, V.Vector a)
-memorizeNnf x = memorizer \fresh -> do
+memorizeNnf x = ordMemorizer \fresh -> do
   n <- flip cata x \case
     NAnd a b -> NAnd <$> (liftF <$> a) <*> (liftF <$> b)
     NOr a b  -> NOr <$> (liftF <$> a) <*> (liftF <$> b)
