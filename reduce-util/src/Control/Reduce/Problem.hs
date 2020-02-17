@@ -291,14 +291,16 @@ setupProblem workDir template a desc = L.phase "Calculating Initial Problem" $ d
 runReductionProblem ::
   forall a s env m.
   MonadReductor env m
-  => FilePath
+  => UTCTime
+  -- ^ The reduction start time
+  -> FilePath
   -- ^ The work directory
   -> Reducer IO s
   -- ^ The reducer to use on the problem
   -> Problem a s
   -- ^ The `Problem` to reduce
   -> m (Maybe ReductionException, s)
-runReductionProblem wf reducer p = do
+runReductionProblem start wf reducer p = do
   opts <- view reductionOptions
   env <- ask
   doTryIntial <- view redTryInitial
@@ -330,9 +332,8 @@ runReductionProblem wf reducer p = do
 
     ee <- readIORef checkRef >>= \case 
       True -> do
-        start <- liftIO $ getCurrentTime
         goWith (p ^. problemInitial) $ \s -> flip runReaderT env $ do
-          (fp, _diff) <- checkTimeouts start iterRef opts
+          (fp, _diff) <- checkTimeouts iterRef opts
 
           L.info $ "Trying (Iteration " <> L.displayString fp <> ")"
           L.debug $ " Metric: " <> displayAnyMetric (p ^. problemMetric) (Just s)
@@ -365,7 +366,7 @@ runReductionProblem wf reducer p = do
         , Handler (return . Left)
         ]
 
-    checkTimeouts start iterRef ReductionOptions{..} = do
+    checkTimeouts iterRef ReductionOptions{..} = do
       now <- liftIO $ getCurrentTime
       let _diff = now `diffUTCTime` start
       when (0 < _redTotalTimelimit && _redTotalTimelimit < realToFrac _diff) $
