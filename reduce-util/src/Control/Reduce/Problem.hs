@@ -314,9 +314,11 @@ runReductionProblem start wf reducer p = do
 
     checkRef <- newIORef True
     when doTryIntial . flip runReaderT env $ do
+      now <- liftIO getCurrentTime
       let
         fp = "0000"
         s = p ^. problemInitial
+        _diff = now `diffUTCTime` start
 
       L.info $ "Trying (Initial " <> L.displayString fp <> ")"
       L.debug $ " Metric: " <> displayAnyMetric (p ^. problemMetric) (Just s)
@@ -325,7 +327,7 @@ runReductionProblem start wf reducer p = do
 
       L.info $ (L.displayString $ showJudgment judgment)
 
-      liftIO $ record (MetricRow (Just s) 0 fp judgment result)
+      liftIO $ record (MetricRow (Just s) _diff fp judgment result)
       
       let success = judgment == Success
       when (not success) $ writeIORef checkRef doIgnoreFailure
