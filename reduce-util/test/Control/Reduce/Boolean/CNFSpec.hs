@@ -11,8 +11,9 @@ import           Prelude                 hiding ( or
                                                 , not
                                                 )
 import           Data.Maybe
-import           Text.Show
-import           Data.Foldable hiding (or, and)
+import qualified Data.List.NonEmpty as NE
+--import           Text.Show
+--import           Data.Foldable hiding (or, and)
 --import Data.Foldable hiding (or, and)
 
 -- text
@@ -30,6 +31,7 @@ import qualified Data.ByteString.Lazy.Char8    as BLC
 
 -- containers
 import qualified Data.IntSet                   as IS
+import qualified Data.Set                   as S
 
 import           Control.Reduce.Boolean
 import           Control.Reduce.Boolean.CNF
@@ -66,134 +68,14 @@ spec = do
           (LS.fromList' [ff 0, tt 1] :: LS.Clause)
         `shouldBe` Nothing
 
-    -- it "can map some thing" $ do 
-    --   let ex = and [ ff 0 \/ tt 1
-    --                , ff 1 \/ tt 2 
-    --                , ff 2 \/ tt 3 :: Nnf Int 
-    --                ]
-    --   -- debugCnf (vmapCNF (\case 1 -> 0; a -> a) (toCNF ex))
-
-  describe "toMinimalCnf" $ do
-    fit "can handle an example" $ do
-      let
-        ex :: Nnf String
-        ex =
-          ( not
-                (tt
-                  "laundrycommon/commonclass/accordion/AccordionMenu.setBackground:(Ljava/awt/Color;)V!code"
-                )
-            ∨ tt "laundrycommon/commonclass/accordion/AccordionRootItem"
-            )
-            ∧ ( not
-                  (tt
-                    "laundrycommon/commonclass/accordion/AccordionMenu.setBackground:(Ljava/awt/Color;)V!code"
-                  )
-              ∨ tt "laundrycommon/commonclass/accordion/AccordionMenu"
-              ∧ tt "laundrycommon/commonclass/accordion/AccordionMenu"
-              ∧ tt "laundrycommon/commonclass/accordion/AccordionRootItem"
-              ∧ tt "laundrycommon/commonclass/accordion/AccordionRootItem"
-              ∧ tt "laundrycommon/commonclass/accordion/AccordionRootItem"
-              ∧ tt "laundrycommon/commonclass/accordion/AccordionBranch"
-              ∧ tt "laundrycommon/commonclass/accordion/AccordionBranch"
-              ∧ tt "laundrycommon/commonclass/accordion/AccordionMenu"
-              ∧ tt "laundrycommon/commonclass/accordion/AccordionMenu"
-              ∧ tt "laundrycommon/commonclass/accordion/AccordionLeafItem"
-              ∧ tt "laundrycommon/commonclass/accordion/AccordionLeafItem"
-              )
-            ∧ ( not
-                  (tt
-                    "laundrycommon/commonclass/accordion/AccordionMenu.setBackground:(Ljava/awt/Color;)V!code"
-                  )
-              ∨ tt
-                  "laundrycommon/commonclass/accordion/AccordionMenu.leafMap:Ljava/util/TreeMap;"
-              )
-            ∧ ( not
-                  (tt
-                    "laundrycommon/commonclass/accordion/AccordionMenu.setBackground:(Ljava/awt/Color;)V!code"
-                  )
-              ∨ tt
-                  "laundrycommon/commonclass/accordion/AccordionMenu.leafMap:Ljava/util/TreeMap;"
-              )
-            ∧ ( not
-                  (tt
-                    "laundrycommon/commonclass/accordion/AccordionMenu.setBackground:(Ljava/awt/Color;)V!code"
-                  )
-              ∨ ( tt
-                    "laundrycommon/commonclass/accordion/AccordionRootItem<S]laundrycommon/commonclass/accordion/AccordionItem"
-                ∧ tt
-                    "laundrycommon/commonclass/accordion/AccordionItem<S]javax/swing/JLabel"
-                ∨ tt
-                    "laundrycommon/commonclass/accordion/AccordionRootItem<S]laundrycommon/commonclass/accordion/AccordionItem"
-                ∧ tt
-                    "laundrycommon/commonclass/accordion/AccordionItem<S]javax/swing/JLabel"
-                )
-              )
-            ∧ ( not
-                  (tt
-                    "laundrycommon/commonclass/accordion/AccordionMenu.setBackground:(Ljava/awt/Color;)V!code"
-                  )
-              ∨ tt
-                  "laundrycommon/commonclass/accordion/AccordionRootItem.getBranchPanel:()Llaundrycommon/commonclass/accordion/AccordionBranch;"
-              )
-            ∧ ( not
-                  (tt
-                    "laundrycommon/commonclass/accordion/AccordionMenu.setBackground:(Ljava/awt/Color;)V!code"
-                  )
-              ∨ ( tt
-                    "laundrycommon/commonclass/accordion/AccordionBranch<S]javax/swing/JPanel"
-                ∨ tt
-                    "laundrycommon/commonclass/accordion/AccordionBranch<S]javax/swing/JPanel"
-                )
-              )
-            ∧ ( not
-                  (tt
-                    "laundrycommon/commonclass/accordion/AccordionMenu.setBackground:(Ljava/awt/Color;)V!code"
-                  )
-              ∨ tt
-                  "laundrycommon/commonclass/accordion/AccordionMenu.selectionColor:Ljava/awt/Color;"
-              )
-            ∧ ( not
-                  (tt
-                    "laundrycommon/commonclass/accordion/AccordionMenu.setBackground:(Ljava/awt/Color;)V!code"
-                  )
-              ∨ tt
-                  "laundrycommon/commonclass/accordion/AccordionMenu.leafMap:Ljava/util/TreeMap;"
-              )
-            ∧ ( not
-                  (tt
-                    "laundrycommon/commonclass/accordion/AccordionMenu.setBackground:(Ljava/awt/Color;)V!code"
-                  )
-              ∨ ( tt
-                    "laundrycommon/commonclass/accordion/AccordionLeafItem<S]laundrycommon/commonclass/accordion/AccordionItem"
-                ∧ tt
-                    "laundrycommon/commonclass/accordion/AccordionItem<S]javax/swing/JLabel"
-                ∨ tt
-                    "laundrycommon/commonclass/accordion/AccordionLeafItem<S]laundrycommon/commonclass/accordion/AccordionItem"
-                ∧ tt
-                    "laundrycommon/commonclass/accordion/AccordionItem<S]javax/swing/JLabel"
-                )
-              )
-      let (nnf, x) = memorizeNnf ex
-      let cnf = toMinimalCNF (maxVariable nnf) nnf
-      let printer = (\i -> maybe (shows i) showString (x V.!? i))
-      debugCnfWith printer  cnf
-      -- debugCnfWith (\i -> maybe (shows i) showString (x V.!? i)) (toCNF nnf)
-
-      let (_, y) = weightedSubDisjunctions (fromIntegral . IS.size . fst . IS.split 12) (fromJust $ fromCNF cnf)
-      forM_ y (\u -> putStrLn $ showListWith printer (IS.toList u) "")
-
   describe "possitive progression" $ do
     it "caluclate it on a small case" $ do
       let
         ex = toCNF
           $ and [ff 1 \/ tt 0, ff 2 \/ tt 3 \/ tt 1, ff 3 \/ tt 2 :: Nnf Int]
-      -- debugCnf ex
-      let
-        _ = weightedSubDisjunctions (fromIntegral . IS.size)
-                                    (fromJust $ fromCNF ex)
-      -- putStrLn ""
-      -- mapM_ (\(c, x) -> do print c; debugIpf x; putStrLn "") a
-      True `shouldBe` True
+      
+      progression 5 (V.fromList . S.toList . cnfClauses $ ex) 
+        `shouldBe` (IS.fromList [0, 1, 2] NE.:| [IS.fromList [3], IS.fromList [4]])
 
     it "run it on a real case" $ do
       Just (ex :: Nnf Text.Text) <-
@@ -201,34 +83,20 @@ spec = do
           "test/data/main-example.json"
       let (nnf, _) = memorizeNnf ex
       let cnf      = toMinimalCNF (maxVariable nnf) nnf
-      let
-        _ = weightedSubDisjunctions (fromIntegral . IS.size)
-                                    (fromJust $ fromCNF cnf)
-      True `shouldBe` True
-
-
-
-      -- let (cnf', lup') = compressCNF IS.empty (fromIntegral . IS.size) cnf
-      -- print lup'
-      -- debugCnf cnf'
-
-      -- let terms = positiveProgression (cnfVariables cnf') cnf'
-      -- print terms
-
-      -- forM_ [[lup V.! l' |  l' <- IS.toList (lup' V.! l) ] | t <- terms, l <- IS.toList t] print
-      -- print [ (map (map (lup' V.!) . IS.toList) terms ]
-
-    -- it "can caluclate graph" $ do
-    --   let ex = toCNF $ and 
-    --         [ ff 1 \/ tt 0 
-    --         , ff 2 \/ tt 3 \/ tt 1
-    --         , ff 3 \/ tt 2  :: Nnf Int 
-    --         ]
-    --   let (_, cnf') = compressCNF IS.empty (fromIntegral . IS.size) ex
-    --   (v, cnf') `shouldBe` (v, cnf')
-
-
-
-
-
+      weightedProgression 
+        (fromIntegral . IS.size)
+        (fromJust $ fromCNF cnf)
+        `shouldBe` 
+        ( IS.fromList [0,1,2,3,4,5,6,8,12,13,17,18,21,24]
+        , [ IS.fromList [14,15]
+          , IS.fromList [23]
+          , IS.fromList [20]
+          , IS.fromList [11]
+          , IS.fromList [9,10]
+          , IS.fromList [7]
+          , IS.fromList [19]
+          , IS.fromList [22]
+          , IS.fromList [16]
+          ]
+        )
 

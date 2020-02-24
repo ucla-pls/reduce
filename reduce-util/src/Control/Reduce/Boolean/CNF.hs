@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -24,10 +25,11 @@ import           Data.STRef
 import           Control.Monad
 import           Data.Semigroup
 import           Data.Maybe
-import           Text.Show
+import           Data.Function
 import           Data.Foldable
+import           Control.Applicative
+import           Text.Show
 import           Data.Functor
--- import           Control.Applicative
 import qualified Data.List                     as L
 import qualified Data.List.NonEmpty            as NE
 
@@ -311,29 +313,108 @@ learnClauseIPF is ipf
       ) 
     }
  
-weightedSubDisjunctions :: 
+weightedProgression :: 
   (IS.IntSet -> Double) 
   -> IPF 
   -> (IS.IntSet, [IS.IntSet])
-weightedSubDisjunctions cost (IPF cnf vars facts) =
+weightedProgression cost (IPF cnf vars facts) =
   (\(a NE.:| x) -> (a, x))
-  . NE.map (unmap . fst) 
-  $ subDisjunctions (IS.fromList [0..V.length back -1]) cnf'
+  . fmap unmap
+  $ progression (V.length back) (V.fromList . S.toList . cnfClauses $ cnf')
  where
   unmap = foldMap (\i -> back V.! i) . IS.toList
   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
 
-weightedSubDisjunctionsWithCNFs :: 
-  (IS.IntSet -> Double) 
-  -> IPF 
-  -> ((IS.IntSet, IS.IntSet, V.Vector Clause), [(IS.IntSet, IS.IntSet, V.Vector Clause)])
-weightedSubDisjunctionsWithCNFs cost (IPF cnf vars facts) =
-  (\(a NE.:| x) -> (a, x))
-  . NE.map (\(a, c) -> (unmap a, a, c)) 
-  $ subDisjunctions (IS.fromList [0..V.length back -1]) cnf'
- where
-  unmap = foldMap (\i -> back V.! i) . IS.toList
-  (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
+progression :: Int -> V.Vector Clause -> NE.NonEmpty IS.IntSet
+progression numVars cnf = runST $ do
+  clauses <- V.thaw (V.map Just cnf) 
+  clauseLookup <- VM.replicate numVars IS.empty 
+  visited <- VM.replicate numVars False  
+
+  factsRef   <- newSTRef IS.empty
+  optionsRef <- newSTRef IS.empty
+
+  let
+    addFact x   = modifySTRef factsRef (IS.insert x)
+    
+    addOption i = modifySTRef optionsRef (IS.insert i)
+
+    visit choices = forM_ (IS.toList choices) \i -> 
+      VM.write visited i True
+
+    findNextUnvisited i 
+      | i < VM.length visited = VM.read visited i >>= \case
+        True -> findNextUnvisited (i + 1)
+        False -> return $ Just i
+      | otherwise = return $ Nothing
+
+    nextFact = do 
+      (x, v) <- MaybeT (fmap IS.minView $ readSTRef factsRef)
+      lift $ writeSTRef factsRef v
+      return x
+    
+    nextOptionVar = MaybeT $ do 
+      options <- readSTRef optionsRef
+      optionClauses <- catMaybes <$> mapM (VM.read clauses) (IS.toList options)
+      return $ NE.nonEmpty optionClauses <&> minimum . fmap \vars -> 
+        case IS.minView (LS.variables vars) of
+          Just (m, _) -> m
+          Nothing -> error "Invalid state. CNF is not IPF"
+
+    updateFactsAndOptions i (c :: Clause) = do
+      let (falses, trues) = LS.splitLiterals c
+      case IS.minView trues of
+        Nothing -> error $ "CNF is not IPF, no true variables in clause " <> show i
+        Just (x, v) 
+          | IS.null v -> addFact x
+          | IS.null falses -> addOption i 
+          | otherwise -> return ()
+
+    propergate a = do
+      cids <- VM.read clauseLookup a 
+      VM.write clauseLookup a IS.empty
+      forM_ (IS.toList cids) \cidx -> do 
+        mclause <- VM.read clauses cidx >>= \case
+          Just clause -> case LS.conditionClause (tt a) clause of
+            Just clause' -> do
+              updateFactsAndOptions cidx clause'
+              return (Just clause')
+            Nothing -> do
+              forM_ (IS.toList $ LS.variables clause) \i -> 
+                VM.modify clauseLookup (IS.delete cidx) i
+              return Nothing
+          Nothing -> 
+            return Nothing
+        VM.write clauses cidx mclause
+
+    minimize = IS.empty & fix (\rec vs -> do
+      runMaybeT (nextFact <|> nextOptionVar) >>= \case
+       Just a -> do 
+         propergate a
+         rec (IS.insert a vs)
+       Nothing -> do
+        return vs
+      )
+    
+    progress i = findNextUnvisited i >>= \case
+      Just i' -> do
+        addFact i'
+        choices <- minimize
+        visit choices
+        (choices:) <$> progress (i' + 1)
+      Nothing -> 
+        return []
+  
+  iforM_ cnf \i c -> do 
+    updateFactsAndOptions i c
+    forM_ (IS.toList $ LS.variables c)
+      (VM.modify clauseLookup (IS.insert i))
+
+  choices <- minimize 
+  visit choices
+  (choices NE.:|) <$> progress 0
+
+
 
 -- | Caluclate a list of variabels that statisifies the cnf from left to
 -- rigth.
@@ -380,6 +461,8 @@ subDisjunctions vs' (fromJust . removeSingletons -> (t, cnf))  =
     return
       (snd . LS.splitLiterals . fromJust $ after', V.mapMaybe id cnfResult)
 
+
+
 binarySearchV :: MonadPlus m => (x -> m ()) -> V.Vector x -> m x
 binarySearchV p as = do
   (as V.!) <$> binarySearch (p . (as V.!)) 0 (V.length as - 1)
@@ -388,7 +471,7 @@ ipfBinaryReduction
   :: (Monad m) => (IS.IntSet -> Double) -> Reducer m IPF
 ipfBinaryReduction cost ((\p -> lift . p >=> guard) -> p) = runMaybeT . go where
   {-# SCC go #-}
-  go ipf@(weightedSubDisjunctions cost -> (a, as)) = msum
+  go ipf@(weightedProgression cost -> (a, as)) = msum
     [ takeIfSolution (limitIPF' a ipf)
     , if Prelude.not $ L.null as then do
          i <- binarySearch (p . range) 1 (L.length as)
