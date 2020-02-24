@@ -320,35 +320,35 @@ runReductionProblem start wf reducer p = do
         s = p ^. problemInitial
         _diff = now `diffUTCTime` start
 
-      L.info $ "Trying (Initial " <> L.displayString fp <> ")"
-      L.debug $ " Metric: " <> displayAnyMetric (p ^. problemMetric) (Just s)
+      L.phase ("Trying (Initial " <> L.displayString fp <> ")") $ do
+        L.debug $ " Metric: " <> displayAnyMetric (p ^. problemMetric) (Just s)
 
-      (judgment, result) <- checkSolution fp p s
+        (judgment, result) <- checkSolution fp p s
 
-      L.info $ (L.displayString $ showJudgment judgment)
+        L.info $ (L.displayString $ showJudgment judgment)
 
-      liftIO $ record (MetricRow (Just s) _diff fp judgment result)
-      
-      let success = judgment == Success
-      when (not success) $ writeIORef checkRef doIgnoreFailure
+        liftIO $ record (MetricRow (Just s) _diff fp judgment result)
+        
+        let success = judgment == Success
+        when (not success) $ writeIORef checkRef doIgnoreFailure
 
     ee <- readIORef checkRef >>= \case 
       True -> do
         goWith (p ^. problemInitial) $ \s -> flip runReaderT env $ do
           (fp, _diff) <- checkTimeouts iterRef opts
 
-          L.info $ "Trying (Iteration " <> L.displayString fp <> ")"
-          L.debug $ " Metric: " <> displayAnyMetric (p ^. problemMetric) (Just s)
+          L.phase ("Trying (Iteration " <> L.displayString fp <> ")") $ do
+            L.debug $ " Metric: " <> displayAnyMetric (p ^. problemMetric) (Just s)
 
-          (judgment, result) <- checkSolution fp p s
+            (judgment, result) <- checkSolution fp p s
 
-          L.info $ (L.displayString $ showJudgment judgment)
+            L.info $ (L.displayString $ showJudgment judgment)
 
-          liftIO $ record (MetricRow (Just s) _diff fp judgment result)
+            liftIO $ record (MetricRow (Just s) _diff fp judgment result)
 
-          let success = judgment == Success
-          when success $ writeIORef succRef s
-          return success
+            let success = judgment == Success
+            when success $ writeIORef succRef s
+            return success
       
       False -> do 
         return (Left ReductionFailedInitial)
