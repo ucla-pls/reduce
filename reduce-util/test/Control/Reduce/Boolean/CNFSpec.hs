@@ -75,7 +75,13 @@ spec = do
           $ and [ff 1 \/ tt 0, ff 2 \/ tt 3 \/ tt 1, ff 3 \/ tt 2 :: Nnf Int]
       
       progression 5 (V.fromList . S.toList . cnfClauses $ ex) 
-        `shouldBe` (IS.fromList [0, 1, 2] NE.:| [IS.fromList [3], IS.fromList [4]])
+        `shouldBe` (IS.fromList [] NE.:| 
+                   [ IS.fromList [0]
+                   , IS.fromList [1]
+                   , IS.fromList [2]
+                   , IS.fromList [3]
+                   , IS.fromList [4]
+                   ])
 
     it "run it on a real case" $ do
       Just (ex :: Nnf Text.Text) <-
@@ -87,16 +93,28 @@ spec = do
         (fromIntegral . IS.size)
         (fromJust $ fromCNF cnf)
         `shouldBe` 
-        ( IS.fromList [0,1,2,3,4,5,6,8,12,13,17,18,21,24]
-        , [ IS.fromList [14,15]
+        ( IS.fromList []
+        , [ IS.fromList [18]
+          , IS.fromList [24]
+          , IS.fromList [17]
+          , IS.fromList [8]
+          , IS.fromList [6]
+          , IS.fromList [21]
+          , IS.fromList [13]
+          , IS.fromList [12]
+          , IS.fromList [4]
+          , IS.fromList [2]
+          , IS.fromList [14, 15]
           , IS.fromList [23]
           , IS.fromList [20]
           , IS.fromList [11]
-          , IS.fromList [9,10]
+          , IS.fromList [9, 10]
           , IS.fromList [7]
+          , IS.fromList [5]
           , IS.fromList [19]
+          , IS.fromList [3]
+          , IS.fromList [0, 1]
           , IS.fromList [22]
           , IS.fromList [16]
-          ]
-        )
+          ])
 

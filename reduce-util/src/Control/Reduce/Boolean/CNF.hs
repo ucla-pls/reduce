@@ -22,6 +22,7 @@ import           Control.Monad.Primitive
 -- base
 import           Control.Monad.ST
 import           Data.STRef
+-- import           Text.Printf
 import           Control.Monad
 import           Data.Semigroup
 import           Data.Maybe
@@ -366,7 +367,7 @@ progression numVars cnf = runST $ do
       case IS.minView trues of
         Nothing -> error $ "CNF is not IPF, no true variables in clause " <> show i
         Just (x, v) 
-          | IS.null v -> addFact x
+          | IS.null v && IS.null falses -> addFact x
           | IS.null falses -> addOption i 
           | otherwise -> return ()
 
@@ -404,12 +405,27 @@ progression numVars cnf = runST $ do
         (choices:) <$> progress (i' + 1)
       Nothing -> 
         return []
-  
+
+    -- debugState = do
+    --   readSTRef factsRef >>= \_ -> do 
+    --     traceM " "
+    --   readSTRef factsRef >>= \a ->
+    --     traceM $ "FACT: " ++ showListWith shows (IS.toList a) ""
+    --   readSTRef optionsRef >>= \a -> 
+    --     traceM $ "OPTS: " ++ showListWith shows (IS.toList a) "" 
+    --   forM_ [0..VM.length clauses - 1] $ \i -> 
+    --     VM.read clauses i >>= \a ->
+    --       case a of 
+    --         Just x -> 
+    --           traceM $ printf "%04i" i ++ ": " ++ (LS.displayImplication shows) x ""
+    --         Nothing -> 
+    --           return ()
+     
   iforM_ cnf \i c -> do 
     updateFactsAndOptions i c
     forM_ (IS.toList $ LS.variables c)
       (VM.modify clauseLookup (IS.insert i))
-
+  
   choices <- minimize 
   visit choices
   (choices NE.:|) <$> progress 0
