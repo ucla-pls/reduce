@@ -331,7 +331,6 @@ progression numVars cnf = runST $ do
   clauses <- V.thaw (V.map Just cnf) 
   clauseLookup <- VM.replicate numVars IS.empty 
   visited <- VM.replicate numVars False  
-
   factsRef   <- newSTRef IS.empty
   optionsRef <- newSTRef IS.empty
 
@@ -394,42 +393,39 @@ progression numVars cnf = runST $ do
          propergate a
          rec (IS.insert a vs)
        Nothing -> do
+        visit vs
         return vs
       )
     
     progress i = findNextUnvisited i >>= \case
       Just i' -> do
         addFact i'
-        choices <- minimize
-        visit choices
-        (choices:) <$> progress (i' + 1)
+        (:) <$> minimize <*> progress (i' + 1)
       Nothing -> 
         return []
-
-    -- debugState = do
-    --   readSTRef factsRef >>= \_ -> do 
-    --     traceM " "
-    --   readSTRef factsRef >>= \a ->
-    --     traceM $ "FACT: " ++ showListWith shows (IS.toList a) ""
-    --   readSTRef optionsRef >>= \a -> 
-    --     traceM $ "OPTS: " ++ showListWith shows (IS.toList a) "" 
-    --   forM_ [0..VM.length clauses - 1] $ \i -> 
-    --     VM.read clauses i >>= \a ->
-    --       case a of 
-    --         Just x -> 
-    --           traceM $ printf "%04i" i ++ ": " ++ (LS.displayImplication shows) x ""
-    --         Nothing -> 
-    --           return ()
      
   iforM_ cnf \i c -> do 
     updateFactsAndOptions i c
     forM_ (IS.toList $ LS.variables c)
       (VM.modify clauseLookup (IS.insert i))
   
-  choices <- minimize 
-  visit choices
-  (choices NE.:|) <$> progress 0
+  (NE.:|) <$> minimize <*> progress 0
 
+
+-- debugState = do
+--   readSTRef factsRef >>= \_ -> do 
+--     traceM " "
+--   readSTRef factsRef >>= \a ->
+--     traceM $ "FACT: " ++ showListWith shows (IS.toList a) ""
+--   readSTRef optionsRef >>= \a -> 
+--     traceM $ "OPTS: " ++ showListWith shows (IS.toList a) "" 
+--   forM_ [0..VM.length clauses - 1] $ \i -> 
+--     VM.read clauses i >>= \a ->
+--       case a of 
+--         Just x -> 
+--           traceM $ printf "%04i" i ++ ": " ++ (LS.displayImplication shows) x ""
+--         Nothing -> 
+--           return ()
 
 
 -- | Caluclate a list of variabels that statisifies the cnf from left to
