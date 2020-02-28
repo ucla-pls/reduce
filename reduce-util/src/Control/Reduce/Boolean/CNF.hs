@@ -412,22 +412,6 @@ progression numVars cnf = runST $ do
   (NE.:|) <$> minimize <*> progress 0
 
 
--- debugState = do
---   readSTRef factsRef >>= \_ -> do 
---     traceM " "
---   readSTRef factsRef >>= \a ->
---     traceM $ "FACT: " ++ showListWith shows (IS.toList a) ""
---   readSTRef optionsRef >>= \a -> 
---     traceM $ "OPTS: " ++ showListWith shows (IS.toList a) "" 
---   forM_ [0..VM.length clauses - 1] $ \i -> 
---     VM.read clauses i >>= \a ->
---       case a of 
---         Just x -> 
---           traceM $ printf "%04i" i ++ ": " ++ (LS.displayImplication shows) x ""
---         Nothing -> 
---           return ()
-
-
 -- | Caluclate a list of variabels that statisifies the cnf from left to
 -- rigth.
 subDisjunctions :: IS.IntSet -> CNF -> NE.NonEmpty (IS.IntSet, V.Vector Clause)
@@ -472,8 +456,6 @@ subDisjunctions vs' (fromJust . removeSingletons -> (t, cnf))  =
     cnfResult <- V.freeze current
     return
       (snd . LS.splitLiterals . fromJust $ after', V.mapMaybe id cnfResult)
-
-
 
 binarySearchV :: MonadPlus m => (x -> m ()) -> V.Vector x -> m x
 binarySearchV p as = do

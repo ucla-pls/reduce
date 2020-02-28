@@ -53,6 +53,7 @@ module Control.Reduce.Problem
   , liftProblem
   , refineProblem
   , refineProblemA
+  , refineProblemA'
 
   -- ** Problem Refinements
   , toReductionList
