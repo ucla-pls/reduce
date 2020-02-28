@@ -319,7 +319,7 @@ weightedProgression ::
   -> IPF 
   -> (IS.IntSet, [IS.IntSet])
 weightedProgression cost (IPF cnf vars facts) =
-  (\(a NE.:| x) -> (a, x))
+  (\(a NE.:| x) -> (a <> facts, x))
   . fmap unmap
   $ progression (V.length back) (V.fromList . S.toList . cnfClauses $ cnf')
  where
