@@ -58,10 +58,10 @@ import qualified Control.Reduce.Util.Logger as L
 -- | Like `reducitonWith` but in case you use the `Binary` reduction
 -- type the cost function is just the length of the list.
 reduction :: Monad m => ReducerName -> Reducer m [a]
-reduction = reductionWith length
+reduction = reductionWith (fromIntegral . length)
 
 -- | Reduction given a cost function and the type of reduction.
-reductionWith :: Monad m => ([a] -> Int) -> ReducerName -> Reducer m [a]
+reductionWith :: Monad m => ([a] -> Double) -> ReducerName -> Reducer m [a]
 reductionWith cost = \case
   Ddmin  -> ddmin
   Linear -> linearReduction

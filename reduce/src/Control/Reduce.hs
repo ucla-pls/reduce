@@ -160,7 +160,7 @@ binaryReduction (asMaybeGuard -> p) es =
 
 -- | Like a the binary reductor, but uses a generic cost function. Is functionally
 -- equivilent to 'binaryReduction' if the const function is 'List.length'.
-genericBinaryReduction :: (Monad m) => ([a] -> Int) -> Reducer m [a]
+genericBinaryReduction :: (Monad m) => ([a] -> Double) -> Reducer m [a]
 genericBinaryReduction cost (asMaybeGuard -> p) =
   runMaybeT . go []
   where

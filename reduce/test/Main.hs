@@ -32,7 +32,7 @@ tests =
           (baseTests (genericBinaryReduction (const 1)))
       ]
     , testGroup "sets" <$> sequence
-        [ testSpec "gBiRed" $ setsTests (toSetReducer $ genericBinaryReduction (IS.size . IS.unions))
+        [ testSpec "gBiRed" $ setsTests (toSetReducer $ genericBinaryReduction (fromIntegral . IS.size . IS.unions))
         , testSpec "sBiRed" $ setsTests setBinaryReduction
         ]
     ]
