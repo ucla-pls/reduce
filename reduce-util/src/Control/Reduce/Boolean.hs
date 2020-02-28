@@ -417,10 +417,11 @@ instance Fixed (StmtF a) (NnfAsStmt a) where
         NConst (if n then b else not b)
 
 instance Show a => Show (Nnf a) where
-  showsPrec n f = cata showsPrecStmtF (NnfAsStmt f) n
+  showsPrec = showsPrecNnfWith showsPrec 
 
 instance Show a => Show (NnfAsStmt a) where
   showsPrec n f = cata showsPrecStmtF f n
+
 
 instance Boolean (Nnf a) where
   a /\ b  = liftF $ NAnd a b
@@ -436,6 +437,18 @@ instance BooleanAlgebra (Nnf a) where
   type LitVar (Nnf a) = a
   tt = liftF . NLit . tt
   ff = liftF . NLit . ff
+
+showsNnfWith :: (a -> ShowS) -> Nnf a -> ShowS
+showsNnfWith showsVar = showsPrecNnfWith (const showsVar) 0 
+
+showsPrecNnfWith :: (Int -> a -> ShowS) -> Int -> Nnf a -> ShowS
+showsPrecNnfWith showsVar = flip $ cata \case
+  NAnd a b -> \n -> showParen (n > 3) (a 3 . showString " ∧ " . b 4)
+  NOr a b  -> \n -> showParen (n > 2) (a 2 . showString " ∨ " . b 3)
+  NLit (Literal b i) -> \n ->
+    showParen (n > 9) (showString (if b then "tt " else "ff ") . showsVar 10 i)
+  NConst True -> const $ showString "true"
+  NConst False -> const $ showString "false"
 
 showsPrecNnfF :: Show a => NnfF a (Int -> ShowS) -> Int -> ShowS
 showsPrecNnfF = \case
