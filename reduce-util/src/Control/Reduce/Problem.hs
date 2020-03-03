@@ -31,6 +31,7 @@ module Control.Reduce.Problem
   , problemDescription
   , problemExpectation
   , problemExtractBase
+  , problemCost
 
   -- ** Constructors
   , setupProblem
@@ -158,6 +159,8 @@ data Problem a s = Problem
   -- ^ An way of computing metrics of s
   , _problemExpectation :: !Expectation
   -- ^ The expected output of the CmdInput
+  , _problemCost        :: !(s -> Double)
+  -- ^ The cost function of the problem
   , _problemCommand     :: !CmdTemplate
   -- ^ The command template to run.
   }
@@ -281,6 +284,7 @@ setupProblem workDir template a desc = L.phase "Calculating Initial Problem" $ d
         , _problemDescription = desc
         , _problemExpectation = (zipExpectation opts output <> _predOptPriorExpectation opts)
         , _problemCommand = template
+        , _problemCost = const 0.0
         , _problemMetric = emptyMetric
         }
     Nothing ->
@@ -296,7 +300,7 @@ runReductionProblem ::
   -- ^ The reduction start time
   -> FilePath
   -- ^ The work directory
-  -> Reducer IO s
+  -> ((s -> Double) -> Reducer IO s)
   -- ^ The reducer to use on the problem
   -> Problem a s
   -- ^ The `Problem` to reduce
@@ -362,7 +366,7 @@ runReductionProblem start wf reducer p = do
         maybe (Just ReductionFailed, m) (Nothing,) a
   where
     goWith a f = liftIO $ do
-      catches (Right <$> reducer f a)
+      catches (Right <$> reducer (p^.problemCost) f a)
         [ Handler $ \case
             UserInterrupt -> return $ Left ReductionInterupted
             x -> throwIO x
@@ -462,6 +466,7 @@ refineProblem f p@Problem {..} =
   p { _problemInitial = t
     , _problemExtractBase = (tf >=> _problemExtractBase)
     , _problemMetric = contramap (>>= tf) _problemMetric
+    , _problemCost = (\s -> maybe 0.0 _problemCost (tf s))
     }
   where
     (tf, t) = f _problemInitial
@@ -477,6 +482,7 @@ refineProblemA f p@Problem {..} = do
     p { _problemInitial = t
       , _problemExtractBase = (tf >=> _problemExtractBase)
       , _problemMetric = contramap (>>= tf) _problemMetric
+      , _problemCost = (\s -> maybe 0.0 _problemCost (tf s))
       }
 
 refineProblemA' :: Functor m
@@ -489,6 +495,7 @@ refineProblemA' f p@Problem {..} = do
     , p { _problemInitial = t
       , _problemExtractBase = (tf >=> _problemExtractBase)
       , _problemMetric = contramap (>>= tf) _problemMetric
+      , _problemCost = (\s -> maybe 0.0 _problemCost (tf s))
       }
     )
 
