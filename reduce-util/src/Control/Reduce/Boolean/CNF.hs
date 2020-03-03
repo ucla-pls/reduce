@@ -225,6 +225,19 @@ compressCNF vars cost cnf = (vmapCNF (variableMap IM.!) cnf, compression)
     -- map back into our space
       $ G.partition graph
 
+-- | Shrink a CNF
+shrinkCNF
+  :: IS.IntSet
+  -- ^ The variables
+  -> CNF
+  -- ^ CNF
+  -> (CNF, V.Vector Int)
+shrinkCNF vars cnf = (vmapCNF (variableMap IM.!) cnf, compression)
+ where
+  variableMap = ifoldMap (\i a -> IM.singleton a i) compression
+  compression =
+    V.fromList (IS.toList $ cnfVariables cnf <> vars)
+
 cnfDependencies :: CNF -> [(Int, Int)]
 cnfDependencies =
   mapMaybe (both unSingleton . LS.splitLiterals) . S.toList . cnfClauses
@@ -320,7 +333,7 @@ fastLWCC ::
   -> IS.IntSet
   -> IS.IntSet
 fastLWCC cost ipf input =
-  facts `IS.union` unmap (minimizeCNF (IS.size vars) (V.fromList . S.toList . cnfClauses $ cnf'))
+  facts `IS.union` unmap (minimizeCNF (V.length back) (V.fromList . S.toList . cnfClauses $ cnf'))
  where
   (IPF cnf vars facts) = conditionIPF input ipf
   unmap = foldMap (\i -> back V.! i) . IS.toList
@@ -331,9 +344,11 @@ fasterLWCC ::
   -> IS.IntSet
   -> IS.IntSet
 fasterLWCC ipf input =
-  facts `IS.union` minimizeCNF (IS.size vars) (V.fromList . S.toList . cnfClauses $ cnf) 
+  facts `IS.union` unmap (minimizeCNF (V.length back) (V.fromList . S.toList . cnfClauses $ cnf'))
  where
   (IPF cnf vars facts) = conditionIPF input ipf
+  unmap = foldMap (\i -> IS.singleton $ back V.! i) . IS.toList
+  (cnf', back) = shrinkCNF (vars `IS.difference` facts) cnf
  
 minimizeCNF :: Int -> V.Vector Clause -> IS.IntSet
 minimizeCNF numVars cnf = runST $ do
