@@ -320,11 +320,20 @@ fastLWCC ::
   -> IS.IntSet
   -> IS.IntSet
 fastLWCC cost ipf input =
-  unmap $ minimizeCNF (V.length back) (V.fromList . S.toList . cnfClauses $ cnf') 
+  facts `IS.union` unmap (minimizeCNF (IS.size vars) (V.fromList . S.toList . cnfClauses $ cnf'))
  where
   (IPF cnf vars facts) = conditionIPF input ipf
   unmap = foldMap (\i -> back V.! i) . IS.toList
   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
+
+fasterLWCC :: 
+  IPF 
+  -> IS.IntSet
+  -> IS.IntSet
+fasterLWCC ipf input =
+  facts `IS.union` minimizeCNF (IS.size vars) (V.fromList . S.toList . cnfClauses $ cnf) 
+ where
+  (IPF cnf vars facts) = conditionIPF input ipf
  
 minimizeCNF :: Int -> V.Vector Clause -> IS.IntSet
 minimizeCNF numVars cnf = runST $ do
