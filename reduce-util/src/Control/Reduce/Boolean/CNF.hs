@@ -313,7 +313,90 @@ learnClauseIPF is ipf
       $ cnfClauses (ipfClauses ipf)
       ) 
     }
+
+fastLWCC :: 
+  (IS.IntSet -> Double) 
+  -> IS.IntSet
+  -> IPF 
+  -> IS.IntSet
+fastLWCC cost con (conditionIPF con -> IPF cnf vars facts) =
+  unmap $ minimizeCNF (V.length back) (V.fromList . S.toList . cnfClauses $ cnf') 
+ where
+  unmap = foldMap (\i -> back V.! i) . IS.toList
+  (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
  
+minimizeCNF :: Int -> V.Vector Clause -> IS.IntSet
+minimizeCNF numVars cnf = runST $ do
+  clauses <- V.thaw (V.map Just cnf) 
+  clauseLookup <- VM.replicate numVars IS.empty 
+  visited <- VM.replicate numVars False  
+  factsRef   <- newSTRef IS.empty
+  optionsRef <- newSTRef IS.empty
+
+  let
+    addFact x   = modifySTRef factsRef (IS.insert x)
+    
+    addOption i = modifySTRef optionsRef (IS.insert i)
+
+    visit choices = forM_ (IS.toList choices) \i -> 
+      VM.write visited i True
+
+    nextFact = do 
+      (x, v) <- MaybeT (fmap IS.minView $ readSTRef factsRef)
+      lift $ writeSTRef factsRef v
+      return x
+    
+    nextOptionVar = MaybeT $ do 
+      options <- readSTRef optionsRef
+      optionClauses <- catMaybes <$> mapM (VM.read clauses) (IS.toList options)
+      return $ NE.nonEmpty optionClauses <&> minimum . fmap \vars -> 
+        case IS.minView (LS.variables vars) of
+          Just (m, _) -> m
+          Nothing -> error "Invalid state. CNF is not IPF"
+
+    updateFactsAndOptions i (c :: Clause) = do
+      let (falses, trues) = LS.splitLiterals c
+      case IS.minView trues of
+        Nothing -> error $ "CNF is not IPF, no true variables in clause " <> show i
+        Just (x, v) 
+          | IS.null v && IS.null falses -> addFact x
+          | IS.null falses -> addOption i 
+          | otherwise -> return ()
+
+    propergate a = do
+      cids <- VM.read clauseLookup a 
+      VM.write clauseLookup a IS.empty
+      forM_ (IS.toList cids) \cidx -> do 
+        mclause <- VM.read clauses cidx >>= \case
+          Just clause -> case LS.conditionClause (tt a) clause of
+            Just clause' -> do
+              updateFactsAndOptions cidx clause'
+              return (Just clause')
+            Nothing -> do
+              forM_ (IS.toList $ LS.variables clause) \i -> 
+                VM.modify clauseLookup (IS.delete cidx) i
+              return Nothing
+          Nothing -> 
+            return Nothing
+        VM.write clauses cidx mclause
+
+    minimize = IS.empty & fix (\rec vs -> do
+      runMaybeT (nextFact <|> nextOptionVar) >>= \case
+       Just a -> do 
+         propergate a
+         rec (IS.insert a vs)
+       Nothing -> do
+        visit vs
+        return vs
+      )
+     
+  iforM_ cnf \i c -> do 
+    updateFactsAndOptions i c
+    forM_ (IS.toList $ LS.variables c)
+      (VM.modify clauseLookup (IS.insert i))
+  
+  minimize 
+
 weightedProgression :: 
   (IS.IntSet -> Double) 
   -> IPF 
@@ -462,19 +545,21 @@ binarySearchV p as = do
   (as V.!) <$> binarySearch (p . (as V.!)) 0 (V.length as - 1)
 
 ipfBinaryReduction
-  :: (Monad m) => (IS.IntSet -> Double) -> Reducer m IPF
-ipfBinaryReduction cost ((\p -> lift . p >=> guard) -> p) = runMaybeT . go where
+  :: (Monad m) => IPF -> (IS.IntSet -> Double) -> Reducer m IS.IntSet
+ipfBinaryReduction ipf' cost ((\p -> lift . p >=> guard) -> p) is = 
+  runMaybeT $ go (limitIPF' is ipf')
+ where
   {-# SCC go #-}
   go ipf@(weightedProgression cost -> (a, as)) = msum
-    [ takeIfSolution (limitIPF' a ipf)
+    [ takeIfSolution (is `IS.union` ipfFacts ipf)
     , if Prelude.not $ L.null as then do
          i <- binarySearch (p . range) 1 (L.length as)
          let (as', r:_) = L.splitAt (i - 1) as
          go (fromJust . limitIPF'' (IS.unions (r:a:as')) $ learnClauseIPF r ipf)
       else mzero
-    , return ipf
+    , return (ipfVars ipf)
     ]
-    where range i = limitIPF' (IS.unions $ a:L.take i as) ipf
+    where range i = IS.unions $ ipfFacts ipf:a:L.take i as
 
   takeIfSolution a = p a $> a
 
