@@ -561,7 +561,7 @@ ipfBinaryReduction ipf' cost ((\p -> lift . p >=> guard) -> p) is =
  where
   {-# SCC go #-}
   go ipf@(weightedProgression cost -> (a, as)) = msum
-    [ takeIfSolution (is `IS.union` ipfFacts ipf)
+    [ takeIfSolution (a `IS.union` ipfFacts ipf)
     , if Prelude.not $ L.null as then do
          i <- binarySearch (p . range) 1 (L.length as)
          let (as', r:_) = L.splitAt (i - 1) as
