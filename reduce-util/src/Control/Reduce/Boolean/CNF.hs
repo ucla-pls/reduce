@@ -316,12 +316,13 @@ learnClauseIPF is ipf
 
 fastLWCC :: 
   (IS.IntSet -> Double) 
-  -> IS.IntSet
   -> IPF 
   -> IS.IntSet
-fastLWCC cost con (conditionIPF con -> IPF cnf vars facts) =
+  -> IS.IntSet
+fastLWCC cost ipf input =
   unmap $ minimizeCNF (V.length back) (V.fromList . S.toList . cnfClauses $ cnf') 
  where
+  (IPF cnf vars facts) = conditionIPF input ipf
   unmap = foldMap (\i -> back V.! i) . IS.toList
   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
  
