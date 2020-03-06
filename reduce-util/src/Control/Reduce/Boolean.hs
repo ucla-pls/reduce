@@ -301,6 +301,15 @@ showsPrecStmtF = \case
   TConst True -> const $ showString "true"
   TConst False -> const $ showString "false"
 
+showsStmtWith :: (a -> ShowS) -> Stmt a -> ShowS
+showsStmtWith showsVar = ($ (0::Int)) . cata \case
+  TAnd a b -> \n -> showParen (n > 3) (a 3 . showString " ∧ " . b 4)
+  TOr a b  -> \n -> showParen (n > 2) (a 2 . showString " ∨ " . b 3)
+  TNot a -> \n -> showParen (n > 9) (showString "not " . a 10)
+  TVar i -> \n -> showParen (n > 9) (showString "tt " . showsVar i)
+  TConst True -> const $ showString "true"
+  TConst False -> const $ showString "false"
+
 instance Show a => Show (Stmt a) where
   showsPrec n f = cata showsPrecStmtF f n
 
