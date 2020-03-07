@@ -230,8 +230,8 @@ shrinkCNF
   -- ^ The variables
   -> CNF
   -- ^ CNF
-  -> (CNF, V.Vector Int)
-shrinkCNF vars cnf = (vmapCNF (variableMap IM.!) cnf, compression)
+  -> (CNF, IM.IntMap Int, V.Vector Int)
+shrinkCNF vars cnf = (vmapCNF (variableMap IM.!) cnf, variableMap, compression)
  where
   variableMap = ifoldMap (\i a -> IM.singleton a i) compression
   compression =
@@ -342,12 +342,14 @@ fasterLWCC ::
   IPF 
   -> IS.IntSet
   -> IS.IntSet
-fasterLWCC ipf input =
-  facts `IS.union` unmap (minimizeCNF (V.length back) (V.fromList . S.toList . cnfClauses $ cnf'))
+fasterLWCC (IPF cnf vars facts) = \input -> 
+  facts `IS.union` 
+    unmap (minimizeCNF' lp (f ++ map (there IM.!) (IS.toList input), o) (V.length back) clauses)
  where
-  (IPF cnf vars facts) = conditionIPF input ipf
   unmap = foldMap (\i -> IS.singleton $ back V.! i) . IS.toList
-  (cnf', back) = shrinkCNF (vars `IS.difference` facts) cnf
+  (cnf', there, back) = shrinkCNF (vars `IS.difference` facts) cnf
+  (lp, (f, o)) = initializePropergation (V.length back) clauses
+  clauses = (V.fromList . S.toList . cnfClauses $ cnf')
  
 updateV :: VM.MVector s a -> Int -> (a -> ST s (x, a)) -> ST s x
 updateV m i fn = VM.read m i >>= \a -> do
@@ -376,8 +378,8 @@ updateFactsAndOptions factsRef optionsRef (LS.splitLiterals -> (falses, trues)) 
 initializePropergation :: 
     Int 
   -> V.Vector Clause 
-  -> ST s (V.Vector [Int], ([Int], IS.IntSet))
-initializePropergation numVars cnf = do
+  -> (V.Vector [Int], ([Int], IS.IntSet))
+initializePropergation numVars cnf = runST $ do
   clauseLookup <- VM.replicate numVars IS.empty 
   factsRef   <- newSTRef []
   optionsRef <- newSTRef IS.empty
@@ -422,11 +424,14 @@ propergateToSatisfy visited clauses clauseLookup (facts, options) = do
   minimize IS.empty 
 
 minimizeCNF :: Int -> V.Vector Clause -> IS.IntSet
-minimizeCNF numVars cnf = runST $ do
+minimizeCNF numVars cnf = 
+  let (cl, x) = (initializePropergation numVars cnf)
+  in minimizeCNF' cl x numVars cnf
+
+minimizeCNF' :: V.Vector [Int] -> ([Int], IS.IntSet) -> Int -> V.Vector Clause -> IS.IntSet
+minimizeCNF' cl x numVars cnf = runST $ do
   visited <- VM.replicate numVars False  
   clauses <- V.thaw (V.map Just cnf) 
-
-  (cl, x) <- initializePropergation numVars cnf
   propergateToSatisfy visited clauses cl x
 
 progression :: Int -> V.Vector Clause -> NE.NonEmpty IS.IntSet
@@ -434,9 +439,10 @@ progression numVars cnf = runST $ do
   clauses <- V.thaw (V.map Just cnf) 
   visited <- VM.replicate numVars False  
   
-  (cl, x) <- initializePropergation numVars cnf
 
   let
+    (cl, x) = initializePropergation numVars cnf
+
     findNextUnvisited i 
       | i < VM.length visited = VM.read visited i >>= \case
         True -> findNextUnvisited (i + 1)
