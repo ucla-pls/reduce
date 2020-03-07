@@ -343,8 +343,8 @@ fasterLWCC ::
   -> IS.IntSet
   -> IS.IntSet
 fasterLWCC (IPF cnf vars facts) = \input -> 
-  facts `IS.union` 
-    unmap (minimizeCNF' lp (f ++ map (there IM.!) (IS.toList input), o) (V.length back) clauses)
+  input `IS.union` facts `IS.union` 
+    unmap (minimizeCNF' lp (f ++ mapMaybe (there IM.!?) (IS.toList input), o) (V.length back) clauses)
  where
   unmap = foldMap (\i -> IS.singleton $ back V.! i) . IS.toList
   (cnf', there, back) = shrinkCNF (vars `IS.difference` facts) cnf
