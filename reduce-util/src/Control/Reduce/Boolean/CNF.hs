@@ -26,7 +26,6 @@ import           Data.STRef
 import           Control.Monad
 import           Data.Semigroup
 import           Data.Maybe
-import           Data.Function
 import           Data.Foldable
 import           Control.Applicative
 import           Text.Show
@@ -350,77 +349,107 @@ fasterLWCC ipf input =
   unmap = foldMap (\i -> IS.singleton $ back V.! i) . IS.toList
   (cnf', back) = shrinkCNF (vars `IS.difference` facts) cnf
  
-minimizeCNF :: Int -> V.Vector Clause -> IS.IntSet
-minimizeCNF numVars cnf = runST $ do
-  clauses <- V.thaw (V.map Just cnf) 
-  clauseLookup <- VM.replicate numVars IS.empty 
-  visited <- VM.replicate numVars False  
-  factsRef   <- newSTRef IS.empty
-  optionsRef <- newSTRef IS.empty
+updateV :: VM.MVector s a -> Int -> (a -> ST s (x, a)) -> ST s x
+updateV m i fn = VM.read m i >>= \a -> do
+  (x, a') <- fn a
+  x <$ VM.write m i a'
 
-  let
-    addFact x   = modifySTRef factsRef (IS.insert x)
-    
+updateSTRef :: STRef s a -> (a -> ST s (Maybe (x, a))) -> ST s (Maybe x)
+updateSTRef m fn = readSTRef m >>= \a -> do
+  fn a >>= \case
+    Just (x, a') -> Just x <$ writeSTRef m a'
+    Nothing -> return Nothing
+
+
+updateFactsAndOptions :: STRef s [Int] -> STRef s IS.IntSet -> Clause -> ST s ()
+updateFactsAndOptions factsRef optionsRef (LS.splitLiterals -> (falses, trues)) = do
+  case IS.minView trues of
+    Nothing -> error $ "CNF is not IPF, no true variables in clause" 
+    Just (x, v) 
+      | IS.null v && IS.null falses -> addFact x
+      | IS.null falses -> addOption x 
+      | otherwise -> return ()
+  where
+    addFact x   = modifySTRef factsRef (x:)
     addOption i = modifySTRef optionsRef (IS.insert i)
 
-    visit choices = forM_ (IS.toList choices) \i -> 
-      VM.write visited i True
-
-    nextFact = do 
-      (x, v) <- MaybeT (fmap IS.minView $ readSTRef factsRef)
-      lift $ writeSTRef factsRef v
-      return x
-    
-    nextOptionVar = MaybeT $ do 
-      options <- readSTRef optionsRef
-      optionClauses <- catMaybes <$> mapM (VM.read clauses) (IS.toList options)
-      return $ NE.nonEmpty optionClauses <&> minimum . fmap \vars -> 
-        case IS.minView (LS.variables vars) of
-          Just (m, _) -> m
-          Nothing -> error "Invalid state. CNF is not IPF"
-
-    updateFactsAndOptions i (c :: Clause) = do
-      let (falses, trues) = LS.splitLiterals c
-      case IS.minView trues of
-        Nothing -> error $ "CNF is not IPF, no true variables in clause " <> show i
-        Just (x, v) 
-          | IS.null v && IS.null falses -> addFact x
-          | IS.null falses -> addOption i 
-          | otherwise -> return ()
-
-    propergate a = do
-      cids <- VM.read clauseLookup a 
-      VM.write clauseLookup a IS.empty
-      forM_ (IS.toList cids) \cidx -> do 
-        mclause <- VM.read clauses cidx >>= \case
-          Just clause -> case LS.conditionClause (tt a) clause of
-            Just clause' -> do
-              updateFactsAndOptions cidx clause'
-              return (Just clause')
-            Nothing -> do
-              forM_ (IS.toList $ LS.variables clause) \i -> 
-                VM.modify clauseLookup (IS.delete cidx) i
-              return Nothing
-          Nothing -> 
-            return Nothing
-        VM.write clauses cidx mclause
-
-    minimize = IS.empty & fix (\rec vs -> do
-      runMaybeT (nextFact <|> nextOptionVar) >>= \case
-       Just a -> do 
-         propergate a
-         rec (IS.insert a vs)
-       Nothing -> do
-        visit vs
-        return vs
-      )
-     
+initializePropergation :: 
+    Int 
+  -> V.Vector Clause 
+  -> ST s (V.Vector [Int], ([Int], IS.IntSet))
+initializePropergation numVars cnf = do
+  clauseLookup <- VM.replicate numVars IS.empty 
+  factsRef   <- newSTRef []
+  optionsRef <- newSTRef IS.empty
+  
   iforM_ cnf \i c -> do 
-    updateFactsAndOptions i c
+    updateFactsAndOptions factsRef optionsRef c
     forM_ (IS.toList $ LS.variables c)
       (VM.modify clauseLookup (IS.insert i))
+
+  (,) <$> (V.map (IS.toList) <$> V.freeze clauseLookup)
+    <*> ((,) <$> readSTRef factsRef <*> readSTRef optionsRef)
+
+
+propergateToSatisfy :: 
+  VM.MVector s Bool
+  -> VM.MVector s (Maybe Clause)
+  -> V.Vector [Int] 
+  -> ([Int], IS.IntSet)
+  -> ST s IS.IntSet
+propergateToSatisfy visited clauses clauseLookup (facts, options) = do
+  factsRef   <- newSTRef facts
+  optionsRef <- newSTRef options
   
-  minimize 
+  let
+    nextFact = MaybeT $ updateSTRef factsRef (return . uncons)
+    nextOptionVar = MaybeT $ updateSTRef optionsRef (return . IS.minView)
+
+    propergate a = forM_ (clauseLookup V.! a) \cidx -> do 
+      updateV clauses cidx \case 
+        Just (LS.conditionClause (tt a) -> mclause) -> do
+          (,mclause) <$> traverse_ (updateFactsAndOptions factsRef optionsRef) mclause
+        Nothing -> return ((), Nothing)
+    
+    minimize vs = runMaybeT (nextFact <|> nextOptionVar) >>= \case
+      Just a -> updateV visited a (return . (,True)) >>= \case
+        True -> minimize vs
+        False -> do
+          propergate a
+          minimize (IS.insert a vs)
+      Nothing -> return vs
+    
+  minimize IS.empty 
+
+minimizeCNF :: Int -> V.Vector Clause -> IS.IntSet
+minimizeCNF numVars cnf = runST $ do
+  visited <- VM.replicate numVars False  
+  clauses <- V.thaw (V.map Just cnf) 
+
+  (cl, x) <- initializePropergation numVars cnf
+  propergateToSatisfy visited clauses cl x
+
+progression :: Int -> V.Vector Clause -> NE.NonEmpty IS.IntSet
+progression numVars cnf = runST $ do
+  clauses <- V.thaw (V.map Just cnf) 
+  visited <- VM.replicate numVars False  
+  
+  (cl, x) <- initializePropergation numVars cnf
+
+  let
+    findNextUnvisited i 
+      | i < VM.length visited = VM.read visited i >>= \case
+        True -> findNextUnvisited (i + 1)
+        False -> return $ Just i
+      | otherwise = return $ Nothing
+    
+    progress i = findNextUnvisited i >>= \case
+      Just i' -> do
+        (:) <$> propergateToSatisfy visited clauses cl ([i], IS.empty) <*> progress (i' + 1)
+      Nothing -> 
+        return []
+
+  (NE.:|) <$> propergateToSatisfy visited clauses cl x <*> progress 0
 
 weightedProgression :: 
   (IS.IntSet -> Double) 
@@ -434,90 +463,6 @@ weightedProgression cost (IPF cnf vars facts) =
   unmap = foldMap (\i -> back V.! i) . IS.toList
   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
 
-progression :: Int -> V.Vector Clause -> NE.NonEmpty IS.IntSet
-progression numVars cnf = runST $ do
-  clauses <- V.thaw (V.map Just cnf) 
-  clauseLookup <- VM.replicate numVars IS.empty 
-  visited <- VM.replicate numVars False  
-  factsRef   <- newSTRef IS.empty
-  optionsRef <- newSTRef IS.empty
-
-  let
-    addFact x   = modifySTRef factsRef (IS.insert x)
-    
-    addOption i = modifySTRef optionsRef (IS.insert i)
-
-    visit choices = forM_ (IS.toList choices) \i -> 
-      VM.write visited i True
-
-    findNextUnvisited i 
-      | i < VM.length visited = VM.read visited i >>= \case
-        True -> findNextUnvisited (i + 1)
-        False -> return $ Just i
-      | otherwise = return $ Nothing
-
-    nextFact = do 
-      (x, v) <- MaybeT (fmap IS.minView $ readSTRef factsRef)
-      lift $ writeSTRef factsRef v
-      return x
-    
-    nextOptionVar = MaybeT $ do 
-      options <- readSTRef optionsRef
-      optionClauses <- catMaybes <$> mapM (VM.read clauses) (IS.toList options)
-      return $ NE.nonEmpty optionClauses <&> minimum . fmap \vars -> 
-        case IS.minView (LS.variables vars) of
-          Just (m, _) -> m
-          Nothing -> error "Invalid state. CNF is not IPF"
-
-    updateFactsAndOptions i (c :: Clause) = do
-      let (falses, trues) = LS.splitLiterals c
-      case IS.minView trues of
-        Nothing -> error $ "CNF is not IPF, no true variables in clause " <> show i
-        Just (x, v) 
-          | IS.null v && IS.null falses -> addFact x
-          | IS.null falses -> addOption i 
-          | otherwise -> return ()
-
-    propergate a = do
-      cids <- VM.read clauseLookup a 
-      VM.write clauseLookup a IS.empty
-      forM_ (IS.toList cids) \cidx -> do 
-        mclause <- VM.read clauses cidx >>= \case
-          Just clause -> case LS.conditionClause (tt a) clause of
-            Just clause' -> do
-              updateFactsAndOptions cidx clause'
-              return (Just clause')
-            Nothing -> do
-              forM_ (IS.toList $ LS.variables clause) \i -> 
-                VM.modify clauseLookup (IS.delete cidx) i
-              return Nothing
-          Nothing -> 
-            return Nothing
-        VM.write clauses cidx mclause
-
-    minimize = IS.empty & fix (\rec vs -> do
-      runMaybeT (nextFact <|> nextOptionVar) >>= \case
-       Just a -> do 
-         propergate a
-         rec (IS.insert a vs)
-       Nothing -> do
-        visit vs
-        return vs
-      )
-    
-    progress i = findNextUnvisited i >>= \case
-      Just i' -> do
-        addFact i'
-        (:) <$> minimize <*> progress (i' + 1)
-      Nothing -> 
-        return []
-     
-  iforM_ cnf \i c -> do 
-    updateFactsAndOptions i c
-    forM_ (IS.toList $ LS.variables c)
-      (VM.modify clauseLookup (IS.insert i))
-  
-  (NE.:|) <$> minimize <*> progress 0
 
 
 -- | Caluclate a list of variabels that statisifies the cnf from left to
