@@ -1,8 +1,10 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE BlockArguments #-}
@@ -11,6 +13,11 @@ module Control.Reduce.Boolean.CNF where
 
 -- lens
 import           Control.Lens
+import           Data.Set.Lens
+
+-- parsec
+import Text.Megaparsec
+import Text.Megaparsec.Char
 
 -- vector 
 import qualified Data.Vector                   as V
@@ -25,10 +32,13 @@ import           Data.STRef
 -- import           Text.Printf
 import           Control.Monad
 import           Data.Semigroup
+import           Data.Bifunctor
 import           Data.Maybe
+import           Data.Tuple
+import           Data.Void
 import           Data.Either
 import           Data.Foldable
-import           Control.Applicative
+-- import           Control.Applicative
 import           Text.Show
 import           Data.Functor
 import qualified Data.List                     as L
@@ -37,7 +47,13 @@ import qualified Data.List.NonEmpty            as NE
 -- containers
 import qualified Data.IntSet                   as IS
 import qualified Data.IntMap.Strict            as IM
+import qualified Data.Map.Strict            as M
 import qualified Data.Set                      as S
+
+-- text 
+import qualified Data.Text as Text
+import qualified Data.Text.Lazy as LazyText
+import qualified Data.Text.Lazy.IO as LazyText
 
 -- mtl
 import           Control.Monad.Trans.Maybe
@@ -465,9 +481,10 @@ progression numVars cnf = runST $ do
         False -> return $ Just i
       | otherwise = return $ Nothing
     
-    progress i = findNextUnvisited i >>= \case
+    progress = findNextUnvisited >=> \case
       Just i' -> do
-        (:) <$> propergateToSatisfy visited clauses cl ([i], IS.empty) <*> progress (i' + 1)
+        p <- propergateToSatisfy visited clauses cl ([i'], IS.empty) 
+        (p:) <$> progress (i' + 1)
       Nothing -> 
         return []
 
@@ -482,7 +499,7 @@ weightedProgression cost (IPF cnf vars facts) =
   . fmap unmap
   $ progression (V.length back) (V.fromList . S.toList . cnfClauses $ cnf')
  where
-  unmap = foldMap (\i -> back V.! i) . IS.toList
+  unmap = foldMap (\i -> back V.! i) . IS.toList 
   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
 
 
@@ -505,6 +522,53 @@ ipfBinaryReduction ipf' cost ((\p -> lift . p >=> guard) -> p) is =
 
   takeIfSolution a = p a $> a
 
+parsePretty :: Parsec Void LazyText.Text a -> String -> LazyText.Text -> Either String a
+parsePretty parser name bs =
+#if MIN_VERSION_megaparsec(7,0,0)
+  first errorBundlePretty $ parse parser name bs
+#else
+  first parseErrorPretty $ parse parser name bs
+#endif
+
+readCNF :: LazyText.Text -> Either String (CNF, V.Vector Text.Text)
+readCNF =
+  parsePretty (cnfP <* eof) "cnf" 
+
+readCNFFromFile :: FilePath -> IO (CNF, V.Vector Text.Text)
+readCNFFromFile fp = do
+  a <- parsePretty (cnfP <* eof) fp <$> LazyText.readFile fp
+  either fail return a 
+
+cnfP :: Parsec Void LazyText.Text (CNF, V.Vector Text.Text)
+cnfP = do
+  xs <- implicationP `sepEndBy` newline
+  let 
+    vars  = setOf (folded.both.folded) xs
+    there = M.fromList . map swap . V.toList $ V.indexed back
+    back  = V.fromList (S.toList vars)
+  return
+    ( CNF (S.fromList . map (fromJust . LS.joinLiterals . over both (IS.fromList . map (there M.!))) $ xs)
+    , back
+    )
+
+ where
+  itemP = LazyText.toStrict <$> takeWhileP Nothing (\a -> (' ' /= a /\ '\n' /= a))
+  
+  truesP = label "trues" $ choice 
+      [ chunk "true" $> []
+      , itemP `sepBy1` (chunk " /\\ ")
+      ]
+  
+  falsesP = label "falses" $ choice 
+      [ chunk "false" $> []
+      , itemP `sepBy1` (chunk " \\/ ")
+      ]
+  
+  implicationP = do
+    as <- truesP
+    void (chunk " ==> ")
+    bs <- falsesP
+    return (as, bs)
 
 
 

@@ -118,3 +118,14 @@ spec = do
           , IS.fromList [16]
           ])
 
+    it "run it on another real case" $ do
+      (cnf, _) <- readCNFFromFile "test/data/bigbad.cnf"
+      (S.size $ cnfClauses cnf) `shouldBe` 7738
+
+      let (core, prog) = weightedProgression (fromIntegral . IS.size) (fromJust $ fromCNF cnf)
+      
+      core `shouldBe` IS.empty
+      
+      prog `shouldSatisfy` all (not . IS.null)
+
+
