@@ -26,6 +26,7 @@ import           Data.STRef
 import           Control.Monad
 import           Data.Semigroup
 import           Data.Maybe
+import           Data.Either
 import           Data.Foldable
 import           Control.Applicative
 import           Text.Show
@@ -362,18 +363,23 @@ updateSTRef m fn = readSTRef m >>= \a -> do
     Just (x, a') -> Just x <$ writeSTRef m a'
     Nothing -> return Nothing
 
+updateSTRef' :: STRef s a -> (a -> ST s (x, a)) -> ST s x
+updateSTRef' m fn = readSTRef m >>= \a -> do
+  (x, a') <- fn a
+  writeSTRef m a' $> x
 
-updateFactsAndOptions :: STRef s [Int] -> STRef s IS.IntSet -> Clause -> ST s ()
-updateFactsAndOptions factsRef optionsRef (LS.splitLiterals -> (falses, trues)) = do
+
+updateFactsAndOptions :: STRef s [Int] -> STRef s IS.IntSet -> Int -> Clause -> ST s ()
+updateFactsAndOptions factsRef optionsRef i (LS.splitLiterals -> (falses, trues)) = do
   case IS.minView trues of
     Nothing -> error $ "CNF is not IPF, no true variables in clause" 
     Just (x, v) 
       | IS.null v && IS.null falses -> addFact x
-      | IS.null falses -> addOption x 
+      | IS.null falses -> addOption
       | otherwise -> return ()
   where
     addFact x   = modifySTRef factsRef (x:)
-    addOption i = modifySTRef optionsRef (IS.insert i)
+    addOption = modifySTRef optionsRef (IS.insert i)
 
 initializePropergation :: 
     Int 
@@ -385,7 +391,7 @@ initializePropergation numVars cnf = runST $ do
   optionsRef <- newSTRef IS.empty
   
   iforM_ cnf \i c -> do 
-    updateFactsAndOptions factsRef optionsRef c
+    updateFactsAndOptions factsRef optionsRef i c
     forM_ (IS.toList $ LS.variables c)
       (VM.modify clauseLookup (IS.insert i))
 
@@ -405,12 +411,23 @@ propergateToSatisfy visited clauses clauseLookup (facts, options) = do
   
   let
     nextFact = MaybeT $ updateSTRef factsRef (return . uncons)
-    nextOptionVar = MaybeT $ updateSTRef optionsRef (return . IS.minView)
+
+    nextOptionVar = MaybeT $ updateSTRef' optionsRef \s -> do
+      (partitionEithers -> (rm, itms)) <- forM (IS.toList s) $ \i -> do
+        (firstVar <$> VM.read clauses i) <&> \case
+          Just v -> Right v
+          Nothing -> Left i
+      return 
+        ( maybe Nothing (Just . minimum) (NE.nonEmpty itms) 
+        , IS.difference s (IS.fromList rm)
+        )
+     where 
+       firstVar mc = mc >>= fmap fst . IS.minView . LS.variables
 
     propergate a = forM_ (clauseLookup V.! a) \cidx -> do 
       updateV clauses cidx \case 
         Just (LS.conditionClause (tt a) -> mclause) -> do
-          (,mclause) <$> traverse_ (updateFactsAndOptions factsRef optionsRef) mclause
+          (,mclause) <$> traverse_ (updateFactsAndOptions factsRef optionsRef cidx) mclause
         Nothing -> return ((), Nothing)
     
     minimize vs = runMaybeT (nextFact <|> nextOptionVar) >>= \case
@@ -439,7 +456,6 @@ progression numVars cnf = runST $ do
   clauses <- V.thaw (V.map Just cnf) 
   visited <- VM.replicate numVars False  
   
-
   let
     (cl, x) = initializePropergation numVars cnf
 
@@ -469,56 +485,6 @@ weightedProgression cost (IPF cnf vars facts) =
   unmap = foldMap (\i -> back V.! i) . IS.toList
   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
 
-
-
--- | Caluclate a list of variabels that statisifies the cnf from left to
--- rigth.
-subDisjunctions :: IS.IntSet -> CNF -> NE.NonEmpty (IS.IntSet, V.Vector Clause)
-subDisjunctions vs' (fromJust . removeSingletons -> (t, cnf))  =
-  let (IS.union (snd . LS.splitLiterals $ t) -> m, clauses) = 
-        findMinimum (V.fromList . S.toList . cnfClauses $ cnf)
-  in (m, clauses) NE.:| go (vs' `IS.difference` m) clauses
- where
-  {-# SCC go #-}
-  go vs clauses = case IS.minView vs of
-    Just (p, _) ->
-      let 
-        (term,  clauses') = positiveResolution p clauses
-        (term', clauses'') = findMinimum clauses'
-      in (term' `IS.union` term, clauses'') : go (vs `IS.difference` term) clauses''
-    Nothing -> []
-
-  -- Find something that satisfy the results
-  {-# SCC findMinimum #-}
-  findMinimum :: V.Vector Clause -> (IS.IntSet, V.Vector Clause)
-  findMinimum clauses = case IS.minView (freeAgents clauses) of
-    Just (x, _) -> 
-      let (required, rest) = positiveResolution x clauses
-      in over _1 (IS.union required) $ findMinimum rest
-    Nothing     -> (IS.empty, clauses)
-   where
-    freeAgents = foldMap \c ->
-      let (falses, trues) = LS.splitLiterals c
-      in if IS.null falses 
-        then (if IS.size trues == 1 then error "unexpected" else trues) 
-         else IS.empty
-  
-  {-# SCC positiveResolution #-}
-  positiveResolution :: Int -> V.Vector Clause -> (IS.IntSet, V.Vector Clause)
-  positiveResolution target clauses = runST $ do
-    current <- V.thaw (V.map Just clauses)
-    let clauseLookup = clauseLookupMap clauses
-    after' <- unitPropergationM
-      current
-      (\i -> IM.findWithDefault [] (variable . LS.toLiteral $ i) clauseLookup)
-      (LS.singleton (tt target))
-    cnfResult <- V.freeze current
-    return
-      (snd . LS.splitLiterals . fromJust $ after', V.mapMaybe id cnfResult)
-
-binarySearchV :: MonadPlus m => (x -> m ()) -> V.Vector x -> m x
-binarySearchV p as = do
-  (as V.!) <$> binarySearch (p . (as V.!)) 0 (V.length as - 1)
 
 ipfBinaryReduction
   :: (Monad m) => IPF -> (IS.IntSet -> Double) -> Reducer m IS.IntSet
