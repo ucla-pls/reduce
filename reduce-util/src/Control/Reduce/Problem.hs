@@ -72,6 +72,9 @@ module Control.Reduce.Problem
   , toStringified
   , toClosures
 
+  -- * Tree handlers 
+  , hdd
+
   -- * Expectation
 
   , Expectation (..)
@@ -96,6 +99,7 @@ import           Data.Tuple
 import           Text.Printf
 import Prelude hiding (and)
 import qualified Data.List.NonEmpty         as NE
+import qualified Data.List as L
 import           Data.Maybe
 import           Data.Semigroup
 
@@ -538,6 +542,18 @@ toReductionList red =
     ( Just . flip (limiting red) s . (\v i -> maybe False (const True) $ v V.!? i)
     , V.map Just . V.fromList $ toListOf (subelements red) $ s
     )
+
+hdd :: forall m. Monad m => Reducer m [[Int]]
+hdd p x = go 1 x where
+  go :: Int -> [[Int]] -> m (Maybe [[Int]])
+  go n x'
+    | n > maxn = return (Just x') 
+    | otherwise = do
+      ddmin (\a -> p (a ++ rest)) reduce >>= \case
+        Just after -> go (n+1) (after ++ rest)
+        Nothing -> go (n+1) x'
+    where (reduce, rest) = L.partition (\idx -> length idx == n) x'
+  maxn = (maximum (0:map length x))
 
 -- | Get an inde
 toReductionTree' :: Reduction s s -> Problem a s -> Problem a (S.Set (NE.NonEmpty Int))
