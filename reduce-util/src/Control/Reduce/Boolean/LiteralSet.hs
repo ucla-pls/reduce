@@ -75,6 +75,10 @@ litDifference :: IntLiteralSet -> IntLiteralSet -> IntLiteralSet
 litDifference (IntLiteralSet is1) (IntLiteralSet is2) =
   IntLiteralSet (is1 `IS.difference` is2)
 
+litSize :: IntLiteralSet -> Int
+litSize (IntLiteralSet is1) =
+  IS.size is1
+
 litIsSubsetOf :: IntLiteralSet -> IntLiteralSet -> Bool
 litIsSubsetOf (IntLiteralSet is1) (IntLiteralSet is2) =
   is1 `IS.isSubsetOf` is2
@@ -163,6 +167,11 @@ difference :: IsIntLiteralSet a => a -> a -> a
 difference (toLiteralSet -> is1) (toLiteralSet -> is2) = 
   fromLiteralSet (is1 `litDifference` is2)
 {-# INLINE difference #-}
+
+size :: IsIntLiteralSet a => a -> Int
+size (toLiteralSet -> is1) = 
+  litSize is1 
+{-# INLINE size #-}
 
 isSubsetOf :: IsIntLiteralSet a => a -> a -> Bool
 isSubsetOf (toLiteralSet -> is1) (toLiteralSet -> is2) = 

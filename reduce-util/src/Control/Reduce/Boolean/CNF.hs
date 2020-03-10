@@ -98,9 +98,10 @@ maxVariable = cata \case
   _                  -> 0
 
 subsume :: S.Set Clause -> S.Set Clause
-subsume (S.toAscList -> xs) = S.fromList $ case xs of
-  x:rest -> x:L.filter (\c -> Prelude.not (x `LS.isSubsetOf` c)) rest
-  [] -> []
+subsume = S.fromList . go . L.sortOn LS.size . S.toList where
+  go = \case 
+    x:rest -> x:go(L.filter (\c -> Prelude.not (x `LS.isSubsetOf` c)) rest)
+    [] -> []
 
 -- TODO: Tseytin transformation
 toMinimalCNF :: Fixed (NnfF Int) b => Int -> b -> CNF
