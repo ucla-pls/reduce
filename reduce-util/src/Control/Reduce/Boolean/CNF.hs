@@ -74,8 +74,6 @@ import qualified Control.Reduce.Graph          as G
 -- reduce
 import           Control.Reduce
 
--- import Debug.Trace
-
 -- | A CNF is a set of literals. A literal is a variable id, and if it is 
 -- negative it will be substracted 1000.
 newtype CNF = CNF { cnfClauses :: S.Set Clause }
@@ -99,6 +97,11 @@ maxVariable = cata \case
   NLit (Literal _ a) -> a
   _                  -> 0
 
+subsume :: S.Set Clause -> S.Set Clause
+subsume (S.toAscList -> xs) = S.fromList $ case xs of
+  x:rest -> x:L.filter (\c -> Prelude.not (x `LS.isSubsetOf` c)) rest
+  [] -> []
+
 -- TODO: Tseytin transformation
 toMinimalCNF :: Fixed (NnfF Int) b => Int -> b -> CNF
 toMinimalCNF maxvar f = CNF $ runST $ do
@@ -112,7 +115,8 @@ toMinimalCNF maxvar f = CNF $ runST $ do
       y <- b d
       pure (x <> y)
     NOr a b -> \d -> do
-      (xs, xtmps) <- a d
+      (xs', xtmps) <- a d
+      let xs = subsume xs'
       if S.size xs > 1
         then do
           i           <- freshvar
