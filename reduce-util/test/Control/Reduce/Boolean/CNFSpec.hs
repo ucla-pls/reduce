@@ -69,12 +69,11 @@ spec = do
         `shouldBe` Nothing
 
   describe "toMinimalCNF" $ do 
-    it "can handle this example" $ do 
+    it "can should maintain the IPF in this example" $ do 
       let nnf :: Nnf Int = (ff 0 ∨ (tt 1 ∨ ( tt 1 ∧ tt 3 ∨ tt 2 ∧ tt 1)))
       let cnf      = toMinimalCNF 9 nnf
       debugCnf cnf
       (fromCNF cnf) `shouldSatisfy` isJust
-
 
   describe "possitive progression" $ do
     it "caluclate it on a small case" $ do
