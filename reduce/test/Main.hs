@@ -1,7 +1,6 @@
 {-# LANGUAGE RankNTypes #-}
 
 import Test.Tasty
-import Test.Tasty.HUnit
 import Test.Hspec.Expectations.Pretty
 import Test.Tasty.Hspec hiding (shouldBe, shouldSatisfy, shouldMatchList)
 
@@ -9,7 +8,6 @@ import           Control.Monad.Trans.Maybe
 import           Control.Monad.Trans.Writer
 
 import Control.Monad.Identity
-import Control.Monad.Trans.State
 import Control.Monad.IO.Class
 
 import Control.Reduce

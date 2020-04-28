@@ -1,9 +1,10 @@
 {-# LANGUAGE BangPatterns  #-}
 {-# LANGUAGE LambdaCase    #-}
+{-# LANGUAGE RankNTypes    #-}
 {-# LANGUAGE ViewPatterns  #-}
 {-|
 Module      : Control.Reduce
-Copyright   : (c) Christian Gram Kalhauge, 2018
+Copyright   : (c) Christian Gram Kalhauge, 2018-2020
 License     : MIT
 Maintainer  : kalhauge@cs.ucla.edu
 
@@ -44,6 +45,9 @@ module Control.Reduce
   , ISetReducer
   , setBinaryReduction
   , toSetReducer
+  
+  -- *** Genearlized Binary Reduction
+  , generalizedBinaryReduction
 
   -- ** Utils
   , binarySearch
@@ -60,6 +64,7 @@ import           Control.Monad
 import           Data.Functor
 import qualified Data.IntSet                           as IS
 import qualified Data.List                             as L
+import qualified Data.List.NonEmpty                    as NE
 import qualified Data.Vector                           as V
 
 
@@ -185,24 +190,53 @@ type ISetReducer m =
 setBinaryReduction :: Monad m => ISetReducer m
 setBinaryReduction (asMaybeGuard -> pred') =
   runMaybeT . go ([], IS.empty) . map (\a -> (a, a))
-  where
-    go (sol, h) (L.sortOn (IS.size . snd) -> !as) = do
-      let u = V.fromList $ L.scanl (\a -> IS.union a . snd) h as
-      r <- binarySearch (pred' . V.unsafeIndex u)  0 (V.length u - 1)
-      if r > 0
-        then do
-          let
-            (as', (rs, ru):_) = L.splitAt (r - 1) as
-            h' = IS.union h ru
-          cases
-            [ pred' h' >> return (rs:sol)
-            , go (rs:sol, IS.union h ru)
-                [(a, s') | (a, s) <- as', let s' = s IS.\\ ru, not (IS.null s')]
-                <|> return (map fst as' ++ rs:sol)
-            ]
-        else
-          return sol
+ where
+  go (sol, h) (L.sortOn (IS.size . snd) -> !as) = do
+    let u = V.fromList $ L.scanl (\a -> IS.union a . snd) h as
+    r <- binarySearch (pred' . V.unsafeIndex u)  0 (V.length u - 1)
+    if r > 0
+      then do
+        let
+          (as', (rs, ru):_) = L.splitAt (r - 1) as
+          h' = IS.union h ru
+        cases
+          [ pred' h' >> return (rs:sol)
+          , go (rs:sol, IS.union h ru)
+              [(a, s') | (a, s) <- as', let s' = s IS.\\ ru, not (IS.null s')]
+              <|> return (map fst as' ++ rs:sol)
+          ]
+      else
+        return sol
 
+-- * Genearlized Binary Reduction
+
+-- | Genearlized Binary Reduction, is like binary reduction but takes
+-- a progression and learning function instead of sorting on a set.
+generalizedBinaryReduction
+  :: forall m h. (Monad m) 
+  => (h -> IS.IntSet -> NE.NonEmpty IS.IntSet) 
+  -- ^ The progression
+  -> (h -> IS.IntSet -> h) 
+  -- ^ the learn function
+  -> h 
+  -- ^ The initial model
+  -> Reducer m IS.IntSet
+generalizedBinaryReduction progression learn m' (asMaybeGuard -> p) = 
+  runMaybeT . go m' 
+ where
+  go m is = do
+    let 
+      s NE.:| ds = progression m is
+      range r = IS.unions $ s:L.take r ds
+    cases
+      [ takeIfSolution p s
+      , do 
+        guard (not $ L.null ds)
+        r <- binarySearch (p . range) 1 (L.length ds)
+        let (drs, dr:_) = L.splitAt (r - 1) ds
+        go (learn m dr) (is `IS.intersection` IS.unions (s:dr:drs))
+      , return is
+      ]
 -- * Utilities
 
 -- | binarySearch, returns a number between lw and hg that satisfies

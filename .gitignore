@@ -2,3 +2,4 @@
 .dir-locals.el
 .stack-work/
 reduce.cabal
+result
