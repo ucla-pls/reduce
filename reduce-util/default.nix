@@ -1,31 +1,27 @@
-{ mkDerivation, aeson, async, base, binary, bytestring, cassava
-, containers, contravariant, cryptohash-sha256, data-fix, deepseq
-, directory, dirtree, filepath, free, hashable, hashtables, hpack
-, hspec, lens, megaparsec, mtl, optparse-applicative, process
-, profunctors, reduce, stdenv, stm, temporary, text, time
-, transformers, typed-process, unliftio, unordered-containers
-, vector
-}:
-mkDerivation {
-  pname = "reduce-util";
-  version = "0.1.0.0";
-  src = ./.;
-  libraryHaskellDepends = [
-    aeson async base binary bytestring cassava containers contravariant
-    cryptohash-sha256 data-fix deepseq directory dirtree filepath free
-    hashable hashtables lens megaparsec mtl optparse-applicative
-    process profunctors reduce stm temporary text time transformers
-    typed-process unliftio unordered-containers vector
-  ];
-  libraryToolDepends = [ hpack ];
-  testHaskellDepends = [
-    aeson async base binary bytestring cassava containers contravariant
-    cryptohash-sha256 data-fix deepseq directory dirtree filepath free
-    hashable hashtables hspec lens megaparsec mtl optparse-applicative
-    process profunctors reduce stm temporary text time transformers
-    typed-process unliftio unordered-containers vector
-  ];
-  prePatch = "hpack";
-  homepage = "https://github.com/kalhauge/reduce#readme";
-  license = stdenv.lib.licenses.bsd3;
-}
+{ pkgs ? import ./nix/nixpkgs.nix {}
+, compiler ? "default"
+}: 
+let 
+  haskellPackages = 
+    if compiler == "default" 
+    then pkgs.haskellPackages 
+    else pkgs.haskell.packages."${compiler}";
+in
+  haskellPackages.developPackage {
+    root = ./.;
+    name = "reduce-util";
+    source-overrides = {
+      reduce = ../reduce;
+    };
+    overrides = hsuper: hself: {
+      dirtree = haskellPackages.callHackageDirect { 
+        pkg = "dirtree";
+        ver = "0.1.3";
+        sha256 = "sha256:0kl31l2ip856saq5lhfjr4wv04i2pyj6sf3lkzk9bj7w1m9v0klz";
+      } {};
+    };
+    modifier = drv:
+      with pkgs.haskell.lib;
+      addBuildTools drv (with haskellPackages; [ cabal-install ghcid ])
+    ;
+  }
