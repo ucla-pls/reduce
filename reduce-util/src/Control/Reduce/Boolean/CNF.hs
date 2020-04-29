@@ -358,18 +358,41 @@ learnClauseIPF is ipf
 --   unmap = foldMap (\i -> back V.! i) . IS.toList
 --   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
 -- 
--- fasterLWCC :: 
---   IPF 
---   -> IS.IntSet
---   -> IS.IntSet
--- fasterLWCC (IPF cnf vars facts) = \input -> 
---   input `IS.union` facts `IS.union` 
---     unmap (minimizeCNF' lp (f ++ mapMaybe (there IM.!?) (IS.toList input), o) (V.length back) clauses)
---  where
---   unmap = foldMap (\i -> IS.singleton $ back V.! i) . IS.toList
---   (cnf', there, back) = shrinkCNF (vars `IS.difference` facts) cnf
---   (lp, (f, o)) = initializePropergation (V.length back) clauses
---   clauses = (V.fromList . S.toList . cnfClauses $ cnf')
+
+-- | Calculate the Logical Closure from an set.
+logicalClosure :: 
+  IPF 
+  -- ^ the ipf
+  -> IS.IntSet
+  -- ^ valid variables
+  -> IS.IntSet
+  -- ^ input set
+  -> IS.IntSet
+logicalClosure (IPF cnf facts) vars = \input -> IS.unions 
+  [ input
+  , facts
+  , let 
+      requiredItems = mapMaybe (there IM.!?) $ IS.toList input
+      closure = minimizeCNF' 
+        lookupC 
+        (facts' ++ requiredItems, options') 
+        (V.length back) 
+        clauses
+    in unmap closure
+  ]
+
+ where
+  unmap = 
+    foldMap (\i -> IS.singleton $ back V.! i) . IS.toList
+  
+  (cnf', there, back) = 
+    shrinkCNF (vars `IS.difference` facts) cnf
+  
+  (lookupC, (facts', options')) = 
+    initializePropergation (V.length back) clauses
+  
+  clauses = 
+    (V.fromList . S.toList . cnfClauses $ cnf')
 
 updateV :: VM.MVector s a -> Int -> (a -> ST s (x, a)) -> ST s x
 updateV m i fn = VM.read m i >>= \a -> do
