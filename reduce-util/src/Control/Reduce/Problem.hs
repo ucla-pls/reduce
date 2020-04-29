@@ -62,7 +62,7 @@ module Control.Reduce.Problem
   , toReductionDeep
   , toGraphReductionDeep
   , toGraphReductionDeepM
-  , toLogicReductionM
+  -- , toLogicReductionM
 
   , meassure
 
@@ -141,7 +141,7 @@ import           Control.Reduce
 import           Control.Reduce.Command
 import           Control.Reduce.Graph
 import           Control.Reduce.Boolean hiding (not)
-import           Control.Reduce.Boolean.CNF
+-- import           Control.Reduce.Boolean.CNF
 import           Control.Reduce.Metric
 import           Control.Reduce.Reduction
 import qualified Control.Reduce.Util.Logger as L
@@ -622,39 +622,39 @@ toGraphReductionDeepM keyfn red = refineProblemA' refined where
     pure ((grph, core, _targets), (fromClosures, _targets))
 
 
--- | Generate an IPF problem
-toLogicReductionM :: 
-  (Monad m, Ord k) 
-  => (s -> m (k, Stmt k))
-  -> PartialReduction s s 
-  -> Problem a s
-  -> m ((CNF, V.Vector [Int]), Problem a IPF)
-toLogicReductionM keyfn red = refineProblemA' refined where
-  refined s = do
-    (M.fromList -> revlookup, stmts) <- 
-      fmap unzip 
-      . mapM (\(i, a) -> keyfn a <&> \(k, st) -> ((k, i), st)) 
-      . itoListOf (deepSubelements red) 
-      $ s
-
-    let 
-      renamed = stmts & traverse.traverseVariables %~ maybe true tt . flip M.lookup revlookup
-      stmt = and renamed /\ and 
-        [ tt k ==> tt pk
-        | k@(_:pk) <- M.elems revlookup
-        ]
-
-    let 
-      (nnf, v) = memorizeNnf (flattenNnf . nnfFromStmt . fromStmt $ stmt)
-      
-      cnf = toMinimalCNF (maxVariable nnf) nnf
-
-      ipf = fromJust . fromCNF $ cnf
-
-      fromIpf ipf' = limit (deepReduction red) (`S.member` varset) s
-        where varset = S.fromList . mapMaybe (v V.!?) . IS.toList $ ipfVars ipf'
-
-    return ((cnf, v), (fromIpf, ipf))
+-- -- | Generate an IPF problem
+-- toLogicReductionM :: 
+--   (Monad m, Ord k) 
+--   => (s -> m (k, Stmt k))
+--   -> PartialReduction s s 
+--   -> Problem a s
+--   -> m ((CNF, V.Vector [Int]), Problem a IPF)
+-- toLogicReductionM keyfn red = refineProblemA' refined where
+--   refined s = do
+--     (M.fromList -> revlookup, stmts) <- 
+--       fmap unzip 
+--       . mapM (\(i, a) -> keyfn a <&> \(k, st) -> ((k, i), st)) 
+--       . itoListOf (deepSubelements red) 
+--       $ s
+-- 
+--     let 
+--       renamed = stmts & traverse.traverseVariables %~ maybe true tt . flip M.lookup revlookup
+--       stmt = and renamed /\ and 
+--         [ tt k ==> tt pk
+--         | k@(_:pk) <- M.elems revlookup
+--         ]
+-- 
+--     let 
+--       (nnf, v) = memorizeNnf (flattenNnf . nnfFromStmt . fromStmt $ stmt)
+--       
+--       cnf = toMinimalCNF (maxVariable nnf) nnf
+-- 
+--       ipf = fromJust . fromCNF $ cnf
+-- 
+--       fromIpf ipf' = limit (deepReduction red) (`S.member` varset) s
+--         where varset = S.fromList . mapMaybe (v V.!?) . IS.toList $ ipfVars ipf'
+-- 
+--     return ((cnf, v), (fromIpf, ipf))
 
 restrictGraph ::
   PartialReduction s s
