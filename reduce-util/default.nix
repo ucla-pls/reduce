@@ -1,5 +1,7 @@
 { pkgs ? import ./nix/nixpkgs.nix {}
 , compiler ? "default"
+, dirtree ? import ./nix/dirtree.nix
+, reduce ? ../reduce
 }: 
 let 
   haskellPackages = 
@@ -8,18 +10,12 @@ let
     else pkgs.haskell.packages."${compiler}";
 in
   haskellPackages.developPackage {
-    root = ./.;
+    root = builtins.filterSource 
+      (path: type: baseNameOf path != ".nix") 
+      ./.;
     name = "reduce-util";
-    source-overrides = {
-      reduce = ../reduce;
-    };
-    overrides = hsuper: hself: {
-      dirtree = haskellPackages.callHackageDirect { 
-        pkg = "dirtree";
-        ver = "0.1.3";
-        sha256 = "sha256:0kl31l2ip856saq5lhfjr4wv04i2pyj6sf3lkzk9bj7w1m9v0klz";
-      } {};
-    };
+    source-overrides = { inherit dirtree reduce; };
+    overrides = hsuper: hself: { };
     modifier = drv:
       with pkgs.haskell.lib;
       addBuildTools drv (with haskellPackages; [ cabal-install ghcid ])
