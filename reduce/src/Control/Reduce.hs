@@ -237,6 +237,7 @@ generalizedBinaryReduction progression learn m' (asMaybeGuard -> p) =
         go (learn m dr) (is `IS.intersection` IS.unions (s:dr:drs))
       , return is
       ]
+
 -- * Utilities
 
 -- | binarySearch, returns a number between lw and hg that satisfies

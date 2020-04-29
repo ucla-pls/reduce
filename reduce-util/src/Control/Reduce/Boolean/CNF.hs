@@ -1,14 +1,14 @@
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ViewPatterns #-}
-{-# LANGUAGE DerivingVia #-}
-{-# LANGUAGE BlockArguments #-}
-{-# LANGUAGE FlexibleContexts #-}
 module Control.Reduce.Boolean.CNF where
 
 -- lens
@@ -57,7 +57,6 @@ import qualified Data.Text.Lazy.IO as LazyText
 
 -- mtl
 import           Control.Monad.Trans.Maybe
-import           Control.Monad.Trans
 
 -- reduce-util
 import           Control.Reduce.Boolean
@@ -274,7 +273,6 @@ cnfDependencies =
 -- All singleton positive variables are split from the set.
 data IPF = IPF 
   { ipfClauses :: CNF
-  , ipfVars    :: IS.IntSet 
   , ipfFacts   :: IS.IntSet
   } deriving (Show)
 
@@ -282,8 +280,7 @@ debugIpf :: IPF -> IO ()
 debugIpf = debugIpfWith shows
 
 debugIpfWith :: (Int -> ShowS) -> IPF -> IO ()
-debugIpfWith fn (IPF cnf vars facts) = do
-  putStrLn $ "Vars:  " ++ showListWith fn (IS.toList vars) ""
+debugIpfWith fn (IPF cnf facts) = do
   putStrLn $ "Facts: " ++ showListWith fn (IS.toList facts) ""
   forM_ (cnfClauses cnf) \a -> putStrLn (LS.displayImplication fn a "")
 
@@ -299,7 +296,7 @@ fromCNF :: CNF -> Maybe IPF
 fromCNF cnf 
   | any (IS.null . snd . LS.splitLiterals) $ cnfClauses cnf = Nothing
   | otherwise = removeSingletons cnf <&> \(LS.splitLiterals -> (_, trues), cnf') -> 
-      (IPF cnf' (cnfVariables cnf) trues)
+      (IPF cnf' trues)
 
 conditionCNF :: IS.IntSet -> CNF -> CNF
 conditionCNF is = CNF
@@ -311,31 +308,31 @@ conditionCNF is = CNF
 -- 
 -- | Conditioning an IPF with positive literals produce a IPF.
 conditionIPF :: IS.IntSet -> IPF -> IPF
-conditionIPF is (IPF cnf vars facts) = 
+conditionIPF is (IPF cnf facts) = 
   if IS.null falses 
-  then IPF cnf' vars (facts `IS.union` trues)
+  then IPF cnf' (facts `IS.union` trues)
   else error $ "unexpected: " ++ show is ++ " " ++ show falses
   where 
     -- unit propergation on ipfs are safe
     (LS.splitLiterals . fromJust -> (falses, trues), cnf') 
       = unitPropergation (LS.joinLiterals' (IS.empty, is)) cnf
 
--- | Given a set of positive varaibles that is a true assignent to the
--- problem we can create an IPF that is limted to only those variables.
-limitIPF' :: IS.IntSet -> IPF -> IPF
-limitIPF' is (IPF cnf _ facts) =
-  IPF 
-    (CNF . S.fromList . mapMaybe (LS.limitClause is) . S.toList $ cnfClauses cnf)
-    (is `IS.union` facts)
-    facts
-
-limitIPF'' :: IS.IntSet -> IPF -> Maybe IPF
-limitIPF'' is (IPF cnf _ facts) =
-  let cnf' = CNF . S.fromList . mapMaybe (LS.limitClause is) . S.toList $ cnfClauses cnf
-  in removeSingletons cnf' <&> \(t, cnf'') -> 
-    IPF cnf''
-    (is `IS.union` facts)
-    (facts `IS.union` snd (LS.splitLiterals t))
+-- -- | Given a set of positive varaibles that is a true assignent to the
+-- -- problem we can create an IPF that is limted to only those variables.
+-- limitIPF' :: IS.IntSet -> IPF -> IPF
+-- limitIPF' is (IPF cnf facts) =
+--   IPF 
+--     (CNF . S.fromList . mapMaybe (LS.limitClause is) . S.toList $ cnfClauses cnf)
+--     (is `IS.union` facts)
+--     facts
+-- 
+-- limitIPF'' :: IS.IntSet -> IPF -> Maybe IPF
+-- limitIPF'' is (IPF cnf _ facts) =
+--   let cnf' = CNF . S.fromList . mapMaybe (LS.limitClause is) . S.toList $ cnfClauses cnf
+--   in removeSingletons cnf' <&> \(t, cnf'') -> 
+--     IPF cnf''
+--     (is `IS.union` facts)
+--     (facts `IS.union` snd (LS.splitLiterals t))
 
 learnClauseIPF :: IS.IntSet -> IPF -> IPF
 learnClauseIPF is ipf 
@@ -348,30 +345,30 @@ learnClauseIPF is ipf
       ) 
     }
 
-fastLWCC :: 
-  (IS.IntSet -> Double) 
-  -> IPF 
-  -> IS.IntSet
-  -> IS.IntSet
-fastLWCC cost ipf input =
-  facts `IS.union` unmap (minimizeCNF (V.length back) (V.fromList . S.toList . cnfClauses $ cnf'))
- where
-  (IPF cnf vars facts) = conditionIPF input ipf
-  unmap = foldMap (\i -> back V.! i) . IS.toList
-  (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
-
-fasterLWCC :: 
-  IPF 
-  -> IS.IntSet
-  -> IS.IntSet
-fasterLWCC (IPF cnf vars facts) = \input -> 
-  input `IS.union` facts `IS.union` 
-    unmap (minimizeCNF' lp (f ++ mapMaybe (there IM.!?) (IS.toList input), o) (V.length back) clauses)
- where
-  unmap = foldMap (\i -> IS.singleton $ back V.! i) . IS.toList
-  (cnf', there, back) = shrinkCNF (vars `IS.difference` facts) cnf
-  (lp, (f, o)) = initializePropergation (V.length back) clauses
-  clauses = (V.fromList . S.toList . cnfClauses $ cnf')
+-- fastLWCC :: 
+--   (IS.IntSet -> Double) 
+--   -> IPF 
+--   -> IS.IntSet
+--   -> IS.IntSet
+-- fastLWCC cost ipf input =
+--   facts `IS.union` unmap (minimizeCNF (V.length back) (V.fromList . S.toList . cnfClauses $ cnf'))
+--  where
+--   (IPF cnf facts) = conditionIPF input ipf
+--   unmap = foldMap (\i -> back V.! i) . IS.toList
+--   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
+-- 
+-- fasterLWCC :: 
+--   IPF 
+--   -> IS.IntSet
+--   -> IS.IntSet
+-- fasterLWCC (IPF cnf vars facts) = \input -> 
+--   input `IS.union` facts `IS.union` 
+--     unmap (minimizeCNF' lp (f ++ mapMaybe (there IM.!?) (IS.toList input), o) (V.length back) clauses)
+--  where
+--   unmap = foldMap (\i -> IS.singleton $ back V.! i) . IS.toList
+--   (cnf', there, back) = shrinkCNF (vars `IS.difference` facts) cnf
+--   (lp, (f, o)) = initializePropergation (V.length back) clauses
+--   clauses = (V.fromList . S.toList . cnfClauses $ cnf')
  
 updateV :: VM.MVector s a -> Int -> (a -> ST s (x, a)) -> ST s x
 updateV m i fn = VM.read m i >>= \a -> do
@@ -498,9 +495,10 @@ progression numVars cnf = runST $ do
 weightedProgression :: 
   (IS.IntSet -> Double) 
   -> IPF 
-  -> (IS.IntSet, [IS.IntSet])
-weightedProgression cost (IPF cnf vars facts) =
-  (\(a NE.:| x) -> (a <> facts, x))
+  -> IS.IntSet
+  -> NE.NonEmpty IS.IntSet
+weightedProgression cost (IPF cnf facts) vars =
+  (\(a NE.:| x) -> a <> facts NE.:| x)
   . fmap unmap
   $ progression (V.length back) (V.fromList . S.toList . cnfClauses $ cnf')
  where
@@ -510,22 +508,10 @@ weightedProgression cost (IPF cnf vars facts) =
 
 ipfBinaryReduction
   :: (Monad m) => IPF -> (IS.IntSet -> Double) -> Reducer m IS.IntSet
-ipfBinaryReduction ipf' cost ((\p -> lift . p >=> guard) -> p) is = 
-  runMaybeT $ go (limitIPF' is ipf')
- where
-  {-# SCC go #-}
-  go ipf@(weightedProgression cost -> (a, as)) = msum
-    [ takeIfSolution (a `IS.union` ipfFacts ipf)
-    , if Prelude.not $ L.null as then do
-         i <- binarySearch (p . range) 1 (L.length as)
-         let (as', r:_) = L.splitAt (i - 1) as
-         go (fromJust . limitIPF'' (IS.unions (r:a:as')) $ learnClauseIPF r ipf)
-      else mzero
-    , return (ipfVars ipf)
-    ]
-    where range i = IS.unions $ ipfFacts ipf:a:L.take i as
-
-  takeIfSolution a = p a $> a
+ipfBinaryReduction ipf cost = generalizedBinaryReduction 
+  (weightedProgression cost)
+  (flip learnClauseIPF)
+  ipf
 
 parsePretty :: Parsec Void LazyText.Text a -> String -> LazyText.Text -> Either String a
 parsePretty parser name bs =

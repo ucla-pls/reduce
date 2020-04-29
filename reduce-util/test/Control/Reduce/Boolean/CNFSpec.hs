@@ -11,7 +11,7 @@ import           Prelude                 hiding ( or
                                                 , not
                                                 )
 import           Data.Maybe
-import qualified Data.List.NonEmpty as NE
+import qualified Data.List.NonEmpty            as NE
 --import           Text.Show
 --import           Data.Foldable hiding (or, and)
 --import Data.Foldable hiding (or, and)
@@ -23,7 +23,7 @@ import qualified Data.Text                     as Text
 import           Data.Aeson
 
 -- vector
-import qualified Data.Vector as V
+import qualified Data.Vector                   as V
 
 -- bytestring
 import qualified Data.ByteString.Lazy          as BL
@@ -31,7 +31,7 @@ import qualified Data.ByteString.Lazy.Char8    as BLC
 
 -- containers
 import qualified Data.IntSet                   as IS
-import qualified Data.Set                   as S
+import qualified Data.Set                      as S
 
 import           Control.Reduce.Boolean
 import           Control.Reduce.Boolean.CNF
@@ -109,9 +109,10 @@ spec = do
       weightedProgression 
         (fromIntegral . IS.size)
         (fromJust $ fromCNF cnf)
+        (cnfVariables cnf)
         `shouldBe` 
-        ( IS.fromList []
-        , [ IS.fromList [18]
+        ( (IS.fromList [] NE.:|)
+          [ IS.fromList [18]
           , IS.fromList [24]
           , IS.fromList [17]
           , IS.fromList [8]
@@ -139,7 +140,11 @@ spec = do
       (cnf, _) <- readCNFFromFile "test/data/bigbad.cnf"
       (S.size $ cnfClauses cnf) `shouldBe` 7738
 
-      let (core, prog) = weightedProgression (fromIntegral . IS.size) (fromJust $ fromCNF cnf)
+      let core NE.:| prog = 
+            weightedProgression 
+              (fromIntegral . IS.size) 
+              (fromJust $ fromCNF cnf)
+              (cnfVariables cnf)
       
       core `shouldBe` IS.empty
       
