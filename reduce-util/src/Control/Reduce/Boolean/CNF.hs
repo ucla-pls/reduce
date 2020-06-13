@@ -18,7 +18,7 @@ import           Data.Set.Lens
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
 
--- vector 
+-- vector
 import qualified Data.Vector                   as V
 import qualified Data.Vector.Mutable           as VM
 
@@ -49,7 +49,7 @@ import qualified Data.IntMap.Strict            as IM
 import qualified Data.Map.Strict               as M
 import qualified Data.Set                      as S
 
--- text 
+-- text
 import qualified Data.Text                     as Text
 import qualified Data.Text.Lazy                as LazyText
 import qualified Data.Text.Lazy.IO             as LazyText
@@ -72,8 +72,7 @@ import qualified Control.Reduce.Graph          as G
 -- reduce
 import           Control.Reduce
 
--- | A CNF is a set of literals. A literal is a variable id, and if it is 
--- negative it will be substracted 1000.
+-- | A CNF is a set of clauses.
 newtype CNF = CNF { cnfClauses :: S.Set Clause }
   deriving (Show)
 
@@ -217,7 +216,7 @@ vmapCNF fn = CNF . S.fromList . mapMaybe (LS.vmap fn) . S.toList . cnfClauses
 -- | Compress a CNF
 -- Given a cnf, compute the closures of the sure units, then compress those
 -- into single variables. This will both reduce the number of variables in
--- CNF, and it will also sort the variables accendingly after cost. 
+-- CNF, and it will also sort the variables accendingly after cost.
 compressCNF
   :: IS.IntSet
   -- ^ Variables
@@ -265,7 +264,7 @@ cnfDependencies =
     _                          -> Nothing
 
 
--- | Implicative Positive Form, 
+-- | Implicative Positive Form,
 -- The requirements is that all clauses contain at least one possitive
 -- varaible.
 -- All singleton positive variables are split from the set.
@@ -306,7 +305,7 @@ conditionCNF is =
     . S.toList
     . cnfClauses
 
--- 
+--
 -- | Conditioning an IPF with positive literals produce a IPF.
 conditionIPF :: IS.IntSet -> IPF -> IPF
 conditionIPF is (IPF cnf facts) = if IS.null falses
@@ -321,15 +320,15 @@ conditionIPF is (IPF cnf facts) = if IS.null falses
 -- -- problem we can create an IPF that is limted to only those variables.
 -- limitIPF' :: IS.IntSet -> IPF -> IPF
 -- limitIPF' is (IPF cnf facts) =
---   IPF 
+--   IPF
 --     (CNF . S.fromList . mapMaybe (LS.limitClause is) . S.toList $ cnfClauses cnf)
 --     (is `IS.union` facts)
 --     facts
--- 
+--
 -- limitIPF'' :: IS.IntSet -> IPF -> Maybe IPF
 -- limitIPF'' is (IPF cnf _ facts) =
 --   let cnf' = CNF . S.fromList . mapMaybe (LS.limitClause is) . S.toList $ cnfClauses cnf
---   in removeSingletons cnf' <&> \(t, cnf'') -> 
+--   in removeSingletons cnf' <&> \(t, cnf'') ->
 --     IPF cnf''
 --     (is `IS.union` facts)
 --     (facts `IS.union` snd (LS.splitLiterals t))
@@ -346,9 +345,9 @@ learnClauseIPF is ipf
         )
     }
 
--- fastLWCC :: 
---   (IS.IntSet -> Double) 
---   -> IPF 
+-- fastLWCC ::
+--   (IS.IntSet -> Double)
+--   -> IPF
 --   -> IS.IntSet
 --   -> IS.IntSet
 -- fastLWCC cost ipf input =
@@ -357,41 +356,41 @@ learnClauseIPF is ipf
 --   (IPF cnf facts) = conditionIPF input ipf
 --   unmap = foldMap (\i -> back V.! i) . IS.toList
 --   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
--- 
+--
 
 -- | Calculate the Logical Closure from an set.
-logicalClosure :: 
-  IPF 
+logicalClosure ::
+  IPF
   -- ^ the ipf
   -> IS.IntSet
   -- ^ valid variables
   -> IS.IntSet
   -- ^ input set
   -> IS.IntSet
-logicalClosure (IPF cnf facts) vars = \input -> IS.unions 
+logicalClosure (IPF cnf facts) vars = \input -> IS.unions
   [ input
   , facts
-  , let 
+  , let
       requiredItems = mapMaybe (there IM.!?) $ IS.toList input
-      closure = minimizeCNF' 
-        lookupC 
-        (facts' ++ requiredItems, options') 
-        (V.length back) 
+      closure = minimizeCNF'
+        lookupC
+        (facts' ++ requiredItems, options')
+        (V.length back)
         clauses
     in unmap closure
   ]
 
  where
-  unmap = 
+  unmap =
     foldMap (\i -> IS.singleton $ back V.! i) . IS.toList
-  
-  (cnf', there, back) = 
+
+  (cnf', there, back) =
     shrinkCNF (vars `IS.difference` facts) cnf
-  
-  (lookupC, (facts', options')) = 
+
+  (lookupC, (facts', options')) =
     initializePropergation (V.length back) clauses
-  
-  clauses = 
+
+  clauses =
     (V.fromList . S.toList . cnfClauses $ cnf')
 
 updateV :: VM.MVector s a -> Int -> (a -> ST s (x, a)) -> ST s x
@@ -538,17 +537,17 @@ weightedProgression cost (IPF cnf facts) vars =
 ipfBinaryReduction
   :: (Monad m) => IPF -> (IS.IntSet -> Double) -> Reducer m IS.IntSet
 ipfBinaryReduction ipf cost = generalizedBinaryReduction
-  (weightedProgression cost)
+  (\ipf is-> pure $ weightedProgression cost ipf is)
   (flip learnClauseIPF)
   ipf
 
 -- | Like 'ipfBinaryReduction' instead it only learns a single item in the
--- learned set. It is This makes it not produce a local minima, but it 
+-- learned set. It is This makes it not produce a local minima, but it
 -- will be polynomial time.
 ipfSingleBinaryReduction
   :: (Monad m) => IPF -> (IS.IntSet -> Double) -> Reducer m IS.IntSet
 ipfSingleBinaryReduction ipf cost = generalizedBinaryReduction
-  (weightedProgression cost)
+  (\ipf is-> pure $ weightedProgression cost ipf is)
   (\m i -> conditionIPF (IS.singleton . fst . fromJust $ IS.minView i) m)
   ipf
 

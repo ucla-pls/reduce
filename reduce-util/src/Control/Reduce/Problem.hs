@@ -72,7 +72,7 @@ module Control.Reduce.Problem
   , toStringified
   , toClosures
 
-  -- * Tree handlers 
+  -- * Tree handlers
   , hdd
 
   -- * Expectation
@@ -141,6 +141,7 @@ import           Control.Reduce
 import           Control.Reduce.Command
 import           Control.Reduce.Graph
 import           Control.Reduce.Boolean hiding (not)
+import           Control.Reduce.Progression
 -- import           Control.Reduce.Boolean.CNF
 import           Control.Reduce.Metric
 import           Control.Reduce.Reduction
@@ -337,11 +338,11 @@ runReductionProblem start wf reducer p = do
         L.info $ (L.displayString $ showJudgment judgment)
 
         liftIO $ record (MetricRow (Just s) _diff fp judgment result)
-        
+
         let success = judgment == Success
         when (not success) $ writeIORef checkRef doIgnoreFailure
 
-    ee <- readIORef checkRef >>= \case 
+    ee <- readIORef checkRef >>= \case
       True -> do
         goWith (p ^. problemInitial) $ \s -> flip runReaderT env $ do
           (fp, _diff) <- checkTimeouts iterRef opts
@@ -358,8 +359,8 @@ runReductionProblem start wf reducer p = do
             let success = judgment == Success
             when success $ writeIORef succRef s
             return success
-      
-      False -> do 
+
+      False -> do
         return (Left ReductionFailedInitial)
 
     m <- readIORef succRef
@@ -407,17 +408,17 @@ checkSolution fp Problem{..} s = do
       let runCmd = runCommand fp timelimit _problemCommand (_problemDescription a)
       res <- finally
         ( fmap snd <$> L.withLogger runCmd )
-        ( unless keepFolders $ do 
-          if keepOutputs 
+        ( unless keepFolders $ do
+          if keepOutputs
           then withSystemTempDirectory "move" $ \tmp ->  do
             renameFile (fp </> "stdout") (tmp </> "stdout")
             renameFile (fp </> "stderr") (tmp </> "stderr")
-            removePathForcibly fp 
+            removePathForcibly fp
             createDirectory fp
             renameFile (tmp </> "stdout") (fp </> "stdout")
             renameFile (tmp </> "stderr") (fp </> "stderr")
           else
-            removePathForcibly fp 
+            removePathForcibly fp
         )
       let judgment = case resultOutput res of
             Just m
@@ -547,7 +548,7 @@ hdd :: forall m. Monad m => Reducer m [[Int]]
 hdd p x = go 1 x where
   go :: Int -> [[Int]] -> m (Maybe [[Int]])
   go n x'
-    | n > maxn = return (Just x') 
+    | n > maxn = return (Just x')
     | otherwise = do
       ddmin (\a -> p (a ++ rest)) reduce >>= \case
         Just after -> go (n+1) (after ++ rest)
@@ -623,37 +624,37 @@ toGraphReductionDeepM keyfn red = refineProblemA' refined where
 
 
 -- -- | Generate an IPF problem
--- toLogicReductionM :: 
---   (Monad m, Ord k) 
+-- toLogicReductionM ::
+--   (Monad m, Ord k)
 --   => (s -> m (k, Stmt k))
---   -> PartialReduction s s 
+--   -> PartialReduction s s
 --   -> Problem a s
 --   -> m ((CNF, V.Vector [Int]), Problem a IPF)
 -- toLogicReductionM keyfn red = refineProblemA' refined where
 --   refined s = do
---     (M.fromList -> revlookup, stmts) <- 
---       fmap unzip 
---       . mapM (\(i, a) -> keyfn a <&> \(k, st) -> ((k, i), st)) 
---       . itoListOf (deepSubelements red) 
+--     (M.fromList -> revlookup, stmts) <-
+--       fmap unzip
+--       . mapM (\(i, a) -> keyfn a <&> \(k, st) -> ((k, i), st))
+--       . itoListOf (deepSubelements red)
 --       $ s
--- 
---     let 
+--
+--     let
 --       renamed = stmts & traverse.traverseVariables %~ maybe true tt . flip M.lookup revlookup
---       stmt = and renamed /\ and 
+--       stmt = and renamed /\ and
 --         [ tt k ==> tt pk
 --         | k@(_:pk) <- M.elems revlookup
 --         ]
--- 
---     let 
+--
+--     let
 --       (nnf, v) = memorizeNnf (flattenNnf . nnfFromStmt . fromStmt $ stmt)
---       
+--
 --       cnf = toMinimalCNF (maxVariable nnf) nnf
--- 
+--
 --       ipf = fromJust . fromCNF $ cnf
--- 
+--
 --       fromIpf ipf' = limit (deepReduction red) (`S.member` varset) s
 --         where varset = S.fromList . mapMaybe (v V.!?) . IS.toList $ ipfVars ipf'
--- 
+--
 --     return ((cnf, v), (fromIpf, ipf))
 
 restrictGraph ::

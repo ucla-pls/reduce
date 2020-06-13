@@ -45,7 +45,7 @@ module Control.Reduce
   , ISetReducer
   , setBinaryReduction
   , toSetReducer
-  
+
   -- *** Genearlized Binary Reduction
   , generalizedBinaryReduction
 
@@ -213,24 +213,24 @@ setBinaryReduction (asMaybeGuard -> pred') =
 -- | Genearlized Binary Reduction, is like binary reduction but takes
 -- a progression and learning function instead of sorting on a set.
 generalizedBinaryReduction
-  :: forall m h. (Monad m) 
-  => (h -> IS.IntSet -> NE.NonEmpty IS.IntSet) 
+  :: forall m h. (Monad m)
+  => (h -> IS.IntSet -> m (NE.NonEmpty IS.IntSet))
   -- ^ The progression
-  -> (h -> IS.IntSet -> h) 
+  -> (h -> IS.IntSet -> h)
   -- ^ the learn function
-  -> h 
+  -> h
   -- ^ The initial model
   -> Reducer m IS.IntSet
-generalizedBinaryReduction progression learn m' (asMaybeGuard -> p) = 
-  runMaybeT . go m' 
+generalizedBinaryReduction progression learn m' (asMaybeGuard -> p) =
+  runMaybeT . go m'
  where
   go m is = do
-    let 
-      s NE.:| ds = progression m is
+    s NE.:| ds <- lift $ progression m is
+    let
       range r = IS.unions $ s:L.take r ds
     cases
       [ takeIfSolution p s
-      , do 
+      , do
         guard (not $ L.null ds)
         r <- binarySearch (p . range) 1 (L.length ds)
         let (drs, dr:_) = L.splitAt (r - 1) ds
