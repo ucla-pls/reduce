@@ -54,7 +54,7 @@ dependencies:
 - hashtables
 - binary
 - primitive
-    
+
 ghc-options:
   - -Wall
 
@@ -72,3 +72,5 @@ tests:
     dependencies:
     - reduce-util
     - hspec
+    - hspec-hedgehog
+    - hedgehog

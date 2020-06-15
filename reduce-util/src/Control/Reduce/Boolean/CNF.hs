@@ -101,6 +101,10 @@ subsume = S.fromList . go . L.sortOn LS.size . S.toList where
       x : go (L.filter (\c -> Prelude.not (x `LS.isSubsetOf` c)) rest)
     [] -> []
 
+-- | Negate all literals
+transpose :: CNF -> CNF
+transpose = CNF . S.map LS.transpose . cnfClauses
+
 -- TODO: Tseytin transformation
 toMinimalCNF :: Fixed (NnfF Int) b => Int -> b -> CNF
 toMinimalCNF maxvar f = CNF $ runST $ do
@@ -213,6 +217,8 @@ clauseLookupMap clauses =
 vmapCNF :: (Int -> Int) -> CNF -> CNF
 vmapCNF fn = CNF . S.fromList . mapMaybe (LS.vmap fn) . S.toList . cnfClauses
 
+
+
 -- | Compress a CNF
 -- Given a cnf, compute the closures of the sure units, then compress those
 -- into single variables. This will both reduce the number of variables in
@@ -264,6 +270,24 @@ cnfDependencies =
     _                          -> Nothing
 
 
+isIPF :: CNF -> Bool
+isIPF = all LS.hasPositiveClause . cnfClauses
+
+isDualIPF :: CNF -> Bool
+isDualIPF = all LS.hasNegativeClause . cnfClauses
+
+
+nonNegativeClausesVariables :: CNF -> [IS.IntSet]
+nonNegativeClausesVariables =
+  mapMaybe positiveClause . S.toList . cnfClauses
+ where
+  positiveClause c = do
+    let (ff, tt) = LS.splitLiterals c
+    if IS.null ff then Just tt else Nothing
+
+
+
+
 -- | Implicative Positive Form,
 -- The requirements is that all clauses contain at least one possitive
 -- varaible.
@@ -281,8 +305,8 @@ debugIpfWith fn (IPF cnf facts) = do
   putStrLn $ "Facts: " ++ showListWith fn (IS.toList facts) ""
   forM_ (cnfClauses cnf) \a -> putStrLn (LS.displayImplication fn a "")
 
-removeSingletons :: CNF -> Maybe (Term, CNF)
-removeSingletons cnf = do
+unitResolve :: CNF -> Maybe (Term, CNF)
+unitResolve cnf = do
   singletons <- LS.fromList . mapMaybe LS.unSingleton . S.toList $ cnfClauses
     cnf
   let (mterm, cnf') = unitPropergation singletons cnf
@@ -293,7 +317,7 @@ removeSingletons cnf = do
 fromCNF :: CNF -> Maybe IPF
 fromCNF cnf
   | any (IS.null . snd . LS.splitLiterals) $ cnfClauses cnf = Nothing
-  | otherwise =   removeSingletons cnf
+  | otherwise = unitResolve cnf
   <&> \(LS.splitLiterals -> (_, trues), cnf') -> (IPF cnf' trues)
 
 conditionCNF :: IS.IntSet -> CNF -> CNF
@@ -502,54 +526,36 @@ minimizeCNF' cl x numVars cnf = runST $ do
   clauses <- V.thaw (V.map Just cnf)
   propergateToSatisfy visited clauses cl x
 
-progression :: Int -> V.Vector Clause -> NE.NonEmpty IS.IntSet
-progression numVars cnf = runST $ do
-  clauses <- V.thaw (V.map Just cnf)
-  visited <- VM.replicate numVars False
+-- progression :: Int -> V.Vector Clause -> NE.NonEmpty IS.IntSet
+-- progression numVars cnf = runST $ do
+--   clauses <- V.thaw (V.map Just cnf)
+--   visited <- VM.replicate numVars False
+--
+--   let (cl, x) = initializePropergation numVars cnf
+--
+--       findNextUnvisited i
+--         | i < VM.length visited = VM.read visited i >>= \case
+--           True  -> findNextUnvisited (i + 1)
+--           False -> return $ Just i
+--         | otherwise = return $ Nothing
+--
+--       progress = findNextUnvisited >=> \case
+--         Just i' -> do
+--           p <- propergateToSatisfy visited clauses cl ([i'], IS.empty)
+--           (p :) <$> progress (i' + 1)
+--         Nothing -> return []
+--
+--   (NE.:|) <$> propergateToSatisfy visited clauses cl x <*> progress 0
 
-  let (cl, x) = initializePropergation numVars cnf
-
-      findNextUnvisited i
-        | i < VM.length visited = VM.read visited i >>= \case
-          True  -> findNextUnvisited (i + 1)
-          False -> return $ Just i
-        | otherwise = return $ Nothing
-
-      progress = findNextUnvisited >=> \case
-        Just i' -> do
-          p <- propergateToSatisfy visited clauses cl ([i'], IS.empty)
-          (p :) <$> progress (i' + 1)
-        Nothing -> return []
-
-  (NE.:|) <$> propergateToSatisfy visited clauses cl x <*> progress 0
-
-weightedProgression
-  :: (IS.IntSet -> Double) -> IPF -> IS.IntSet -> NE.NonEmpty IS.IntSet
-weightedProgression cost (IPF cnf facts) vars =
-  (\(a NE.:| x) -> a <> facts NE.:| x) . fmap unmap $ progression
-    (V.length back)
-    (V.fromList . S.toList . cnfClauses $ cnf')
- where
-  unmap        = foldMap (\i -> back V.! i) . IS.toList
-  (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
-
-
-ipfBinaryReduction
-  :: (Monad m) => IPF -> (IS.IntSet -> Double) -> Reducer m IS.IntSet
-ipfBinaryReduction ipf cost = generalizedBinaryReduction
-  (\ipf is-> pure $ weightedProgression cost ipf is)
-  (flip learnClauseIPF)
-  ipf
-
--- | Like 'ipfBinaryReduction' instead it only learns a single item in the
--- learned set. It is This makes it not produce a local minima, but it
--- will be polynomial time.
-ipfSingleBinaryReduction
-  :: (Monad m) => IPF -> (IS.IntSet -> Double) -> Reducer m IS.IntSet
-ipfSingleBinaryReduction ipf cost = generalizedBinaryReduction
-  (\ipf is-> pure $ weightedProgression cost ipf is)
-  (\m i -> conditionIPF (IS.singleton . fst . fromJust $ IS.minView i) m)
-  ipf
+-- weightedProgression
+--   :: (IS.IntSet -> Double) -> IPF -> IS.IntSet -> NE.NonEmpty IS.IntSet
+-- weightedProgression cost (IPF cnf facts) vars =
+--   (\(a NE.:| x) -> a <> facts NE.:| x) . fmap unmap $ progression
+--     (V.length back)
+--     (V.fromList . S.toList . cnfClauses $ cnf')
+--  where
+--   unmap        = foldMap (\i -> back V.! i) . IS.toList
+--   (cnf', back) = compressCNF (vars `IS.difference` facts) cost cnf
 
 parsePretty
   :: Parsec Void LazyText.Text a -> String -> LazyText.Text -> Either String a

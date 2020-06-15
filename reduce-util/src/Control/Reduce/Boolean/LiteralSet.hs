@@ -35,19 +35,19 @@ instance BooleanAlgebra IntLiteral where
   ff a = IntLiteral $ a + minBound
 
 toLiteral :: IntLiteral -> Literal Int
-toLiteral (IntLiteral i) 
-  | i < 0 = Literal False (i - minBound) 
+toLiteral (IntLiteral i)
+  | i < 0 = Literal False (i - minBound)
   | otherwise = Literal True i
 {-# INLINE toLiteral #-}
 
 fromLiteral :: Literal Int -> IntLiteral
-fromLiteral (Literal b i) 
-  | b = IntLiteral i 
+fromLiteral (Literal b i)
+  | b = IntLiteral i
   | otherwise = IntLiteral (i + minBound)
 {-# INLINE fromLiteral #-}
 
 negateLiteral :: IntLiteral -> IntLiteral
-negateLiteral (IntLiteral i) 
+negateLiteral (IntLiteral i)
   | i < 0     = IntLiteral $ i - minBound
   | otherwise = IntLiteral $ i + minBound
 
@@ -62,7 +62,7 @@ litMember :: IntLiteral -> IntLiteralSet -> Bool
 litMember (IntLiteral l) (IntLiteralSet is) = l `IS.member` is
 
 litInsert :: IntLiteral -> IntLiteralSet -> Maybe IntLiteralSet
-litInsert l is 
+litInsert l is
   | l' `member` is = Nothing
   | otherwise      = Just . IntLiteralSet $ internalInt l `IS.insert` internalIntSet is
   where l' = negateLiteral l
@@ -90,18 +90,18 @@ litMap fn = litFromList . L.map fn . litToList
 litVmap :: (Int -> Int) -> IntLiteralSet -> Maybe IntLiteralSet
 litVmap fn = litFromList . L.map (fromLiteral . fmap fn . toLiteral) . litToList
 
-litFromList :: [IntLiteral] -> Maybe IntLiteralSet 
+litFromList :: [IntLiteral] -> Maybe IntLiteralSet
 litFromList = foldrM litInsert empty
 
-litToList :: IntLiteralSet -> [IntLiteral] 
+litToList :: IntLiteralSet -> [IntLiteral]
 litToList = coerce . IS.toList . internalIntSet
 
 instance Show IntLiteralSet where
-  showsPrec n c = showParen (n > 9) $ 
+  showsPrec n c = showParen (n > 9) $
     showString "fromList " . (showListWith shows . L.map toLiteral . toList $ c)
 
 class IsIntLiteralSet a where
-  toLiteralSet   :: a -> IntLiteralSet 
+  toLiteralSet   :: a -> IntLiteralSet
   fromLiteralSet :: IntLiteralSet -> a
 
 instance IsIntLiteralSet IntLiteralSet where
@@ -118,7 +118,7 @@ fromList' :: IsIntLiteralSet a => [IntLiteral] -> a
 fromList' = fromJust . fromList
 {-# INLINE fromList' #-}
 
-toList :: IsIntLiteralSet a => a -> [IntLiteral] 
+toList :: IsIntLiteralSet a => a -> [IntLiteral]
 toList = litToList . toLiteralSet
 {-# INLINE toList #-}
 
@@ -134,7 +134,7 @@ map fn = fmap fromLiteralSet . litMap fn . toLiteralSet
 vmap :: IsIntLiteralSet a => (Int -> Int) -> a -> Maybe a
 vmap fn = fmap fromLiteralSet . litVmap fn . toLiteralSet
 {-# INLINE vmap #-}
-  
+
 member :: IsIntLiteralSet a => IntLiteral -> a -> Bool
 member lit (toLiteralSet -> is) = lit `litMember` is
 {-# INLINE member #-}
@@ -148,33 +148,33 @@ insert lit (toLiteralSet -> is) = fromLiteralSet <$> lit `litInsert` is
 {-# INLINE insert #-}
 
 minView :: IsIntLiteralSet a => a -> Maybe (IntLiteral, a)
-minView = 
-  fmap (\(a, b) -> (IntLiteral a, fromLiteralSet (IntLiteralSet  b))) 
+minView =
+  fmap (\(a, b) -> (IntLiteral a, fromLiteralSet (IntLiteralSet  b)))
     . IS.minView . internalIntSet . toLiteralSet
-{-# INLINE minView #-} 
+{-# INLINE minView #-}
 
 null :: IsIntLiteralSet a => a -> Bool
-null (toLiteralSet -> IntLiteralSet is) = 
+null (toLiteralSet -> IntLiteralSet is) =
   IS.null is
 {-# INLINE null #-}
 
 union :: IsIntLiteralSet a => a -> a -> Maybe a
-union (toLiteralSet -> is1) (toLiteralSet -> is2) = 
+union (toLiteralSet -> is1) (toLiteralSet -> is2) =
   fromLiteralSet <$> is1 `litUnion` is2
 {-# INLINE union #-}
 
 difference :: IsIntLiteralSet a => a -> a -> a
-difference (toLiteralSet -> is1) (toLiteralSet -> is2) = 
+difference (toLiteralSet -> is1) (toLiteralSet -> is2) =
   fromLiteralSet (is1 `litDifference` is2)
 {-# INLINE difference #-}
 
 size :: IsIntLiteralSet a => a -> Int
-size (toLiteralSet -> is1) = 
-  litSize is1 
+size (toLiteralSet -> is1) =
+  litSize is1
 {-# INLINE size #-}
 
 isSubsetOf :: IsIntLiteralSet a => a -> a -> Bool
-isSubsetOf (toLiteralSet -> is1) (toLiteralSet -> is2) = 
+isSubsetOf (toLiteralSet -> is1) (toLiteralSet -> is2) =
   is1 `litIsSubsetOf` is2
 {-# INLINE isSubsetOf #-}
 
@@ -184,16 +184,20 @@ singleton (IntLiteral a) = fromLiteralSet (IntLiteralSet (IS.singleton a))
 
 unSingleton :: IsIntLiteralSet a => a -> Maybe IntLiteral
 unSingleton a = case minView a of
-  Just (x, xs) 
+  Just (x, xs)
     | null xs -> Just x
   _ -> Nothing
 {-# INLINE unSingleton #-}
 
+transpose :: IsIntLiteralSet a => a -> a
+transpose (splitLiterals -> (ff, tt)) = fromJust $ joinLiterals (tt, ff)
+{-# INLINE transpose #-}
+
 toNegativeLiterals :: IS.IntSet -> IS.IntSet
-toNegativeLiterals = IS.fromDistinctAscList . L.map (\a -> a + minBound) . IS.toAscList 
+toNegativeLiterals = IS.fromDistinctAscList . L.map (\a -> a + minBound) . IS.toAscList
 
 fromNegativeLiterals :: IS.IntSet -> IS.IntSet
-fromNegativeLiterals = IS.fromDistinctAscList . L.map (\a -> a - minBound) . IS.toAscList 
+fromNegativeLiterals = IS.fromDistinctAscList . L.map (\a -> a - minBound) . IS.toAscList
 
 splitLiterals :: IsIntLiteralSet a => a -> (IS.IntSet, IS.IntSet)
 splitLiterals (toLiteralSet -> IntLiteralSet is) =
@@ -202,7 +206,7 @@ splitLiterals (toLiteralSet -> IntLiteralSet is) =
 {-# INLINE splitLiterals #-}
 
 joinLiterals :: IsIntLiteralSet a => (IS.IntSet, IS.IntSet) -> Maybe a
-joinLiterals (falses, trues) 
+joinLiterals (falses, trues)
   | falses `IS.disjoint` trues = Just (joinLiterals' (falses, trues))
   | otherwise = Nothing
 {-# INLINE joinLiterals #-}
@@ -218,9 +222,9 @@ variables = view both . splitLiterals
 {-# INLINE variables #-}
 
 
--- | A Clause is a disjunction of literals. This can be 
--- represented as an `IS.IntSet` of variable ids. The 
--- negative literals are the variable ids added with the minimum bound.   
+-- | A Clause is a disjunction of literals. This can be
+-- represented as an `IS.IntSet` of variable ids. The
+-- negative literals are the variable ids added with the minimum bound.
 newtype Clause = Clause { clauseSet :: IntLiteralSet }
   deriving Eq  via IntLiteralSet
   deriving Ord via IntLiteralSet
@@ -237,49 +241,56 @@ emptyClause = Clause mempty
 
 conditionClause :: IntLiteral -> Clause -> Maybe Clause
 conditionClause (IntLiteral x) (Clause (IntLiteralSet s)) =
-  if x < 0 
-  then 
+  if x < 0
+  then
     if x `IS.member` s
     then Nothing
-    else Just . Clause . IntLiteralSet $ (x + minBound) `IS.delete` s 
+    else Just . Clause . IntLiteralSet $ (x + minBound) `IS.delete` s
   else
     if x `IS.member` s
     then Nothing
     else Just . Clause . IntLiteralSet $ (x - minBound) `IS.delete` s
 
--- | Limit a clause to only talk about these variables, its the same 
--- as conditioning on the negative inverse.
-limitClause :: IS.IntSet -> Clause -> Maybe Clause
-limitClause x (Clause c)
-  | trues `IS.isSubsetOf` x =
-    Just $ joinLiterals' (trues, falses `IS.intersection` x)
-  | otherwise =
-    Nothing 
-  where (trues, falses) = splitLiterals c
+-- -- | Limit a clause to only talk about these variables, its the same
+-- -- as conditioning on the negative inverse.
+-- limitClause :: IS.IntSet -> Clause -> Maybe Clause
+-- limitClause x (Clause c)
+--   | trues `IS.isSubsetOf` x =
+--     Just $ joinLiterals' (falses, trues `IS.intersection` x)
+--   | otherwise =
+--     Nothing
+--   where (falses, trues) = splitLiterals c
 
+hasPositiveClause :: Clause -> Bool
+hasPositiveClause clause = Prelude.not (IS.null trues)
+  where (_, trues) = splitLiterals clause
+
+hasNegativeClause :: Clause -> Bool
+hasNegativeClause clause = Prelude.not (IS.null falses)
+  where (falses, _) = splitLiterals clause
 
 displayImplication :: (Int -> ShowS) -> Clause -> ShowS
 displayImplication showKey c =
-  if null c 
+  if null c
   then showString "false"
   else showsFalses . showString " ==> " . showsTrues
- where 
-  showsFalses 
-    | IS.null falses = showString "true" 
+ where
+  showsFalses
+    | IS.null falses = showString "true"
     | otherwise = showItems " /\\ " falses
-   
-  showsTrues 
-    | IS.null trues = showString "false" 
+
+  showsTrues
+    | IS.null trues = showString "false"
     | otherwise = showItems " \\/ " trues
 
   (falses, trues) = splitLiterals c
   showItems del =
-    appEndo . foldMap Endo . L.intersperse (showString del) . L.map showKey . IS.toList 
+    appEndo . foldMap Endo . L.intersperse (showString del) . L.map showKey . IS.toList
 
 
--- | A Term is a conjuction of literals. This can be 
--- represented as an `IS.IntSet` of variable ids. The 
--- negative literals are the variable ids added with the minimum bound.   
+-- | A Term is a conjuction of literals. This can be
+-- represented as an `IS.IntSet` of variable ids. The
+-- negative literals are the variable ids added with the minimum bound.
 newtype Term = Term { termSet :: IntLiteralSet }
   deriving Eq  via IntLiteralSet
   deriving Ord via IntLiteralSet
@@ -296,15 +307,15 @@ emptyTerm = Term mempty
 
 termAddLiteral :: Literal Int -> Term -> Maybe Term
 termAddLiteral (Literal b v) (Term (IntLiteralSet is))
-  | b     = 
-    if v `IS.member` is 
+  | b     =
+    if v `IS.member` is
     then Nothing
     else Just $ Term (IntLiteralSet (v `IS.insert` is))
-  | otherwise = 
-    if v' `IS.member` is 
+  | otherwise =
+    if v' `IS.member` is
     then Nothing
     else Just $ Term (IntLiteralSet (v' `IS.insert` is))
-  where 
+  where
     v' = v + minBound
 
 termFromLiterals :: Foldable t => t (Literal Int) -> Maybe Term

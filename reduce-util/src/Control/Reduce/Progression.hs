@@ -11,8 +11,6 @@
 {-# LANGUAGE RankNTypes                #-}
 {-# LANGUAGE RecordWildCards           #-}
 {-# LANGUAGE ScopedTypeVariables       #-}
-{-# LANGUAGE TemplateHaskell           #-}
-{-# LANGUAGE TupleSections             #-}
 {-|
 Module      : Control.Reduce.Progression
 Copyright   : (c) Christian Gram Kalhauge, 2020
@@ -22,14 +20,18 @@ Maintainer  : kalhauge@cs.ucla.edu
 This module defines how to calculate a progression.
 -}
 module Control.Reduce.Progression
-  ( postOrderLogicalClosure
+  ( logicalClosure
   , progression
   , runProgression
+  , optimalProgression
+  , generateGraphOrder
+  , generateProgressionOrder
   ) where
 
 -- base
 import Control.Monad.ST as ST
 import Data.Either
+import qualified Data.List as L
 import Data.STRef as ST
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Set as S
@@ -48,9 +50,11 @@ import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as VM
 
 -- reduce-util
+import Control.Reduce.Graph as G
 import Control.Reduce.Boolean.LiteralSet as LS
 import Control.Reduce.Boolean
-import Control.Reduce.Boolean.CNF hiding (progression)
+import qualified Control.Reduce.Boolean.CNF as CNF
+import Control.Reduce.Boolean.CNF (CNF(..))
 
 data ProgressionState s = ProgressionState
   { progClauses :: VM.MVector s (Maybe Clause)
@@ -61,11 +65,6 @@ data ProgressionState s = ProgressionState
 
 type ProgressionM s = ReaderT (ProgressionState s) (ST s)
 
-isPositive :: Clause -> Bool
-isPositive clause = case LS.minView clause of
-  Just (toLiteral -> Literal True _, _) -> True
-  Nothing -> False
-
 runProgression :: Int -> CNF -> (forall s. ProgressionM s a) -> a
 runProgression numVars (CNF clauses) runM = runST $ do
   let vClauses = V.fromList . S.toList $ clauses
@@ -74,7 +73,7 @@ runProgression numVars (CNF clauses) runM = runST $ do
   positive <- newSTRef IS.empty
   clauseLookup <- VM.replicate numVars IS.empty
 
-  iforM_ vClauses \i c -> do
+  iforM_ vClauses \i c ->
     forM_ (IS.toList $ LS.variables c) do
       VM.modify clauseLookup (IS.insert i)
 
@@ -89,14 +88,14 @@ runProgression numVars (CNF clauses) runM = runST $ do
       }
 
   flip runReaderT initialState do
-    iforM_ vClauses \i c -> when (isPositive c) do
+    iforM_ vClauses \i c -> unless (hasNegativeClause c) do
       addPositiveClause i
     runM
 
 
 progression :: ProgressionM s (NE.NonEmpty [Int])
 progression = do
-  a <- postOrderLogicalClosure
+  a <- logicalClosure
   nv <- numberOfVariables
   (a NE.:|) <$> go 0 nv
  where
@@ -105,9 +104,41 @@ progression = do
         True  -> go (i+1) nv
         False -> do
           conditionTrue i
-          c <- postOrderLogicalClosure
+          c <- logicalClosure
           ((c ++ [ i ]) :) <$> go (i+1) nv
     | otherwise = pure []
+
+optimalProgression :: Int -> CNF -> NE.NonEmpty [Int]
+optimalProgression n cnf =
+  L.map (lookup V.!) <$> runProgression n cnf' progression
+  where
+    cnf' = CNF.vmapCNF (revlookup V.!) cnf
+    lookup = generateGraphOrder n cnf
+    revlookup = inverseOrder lookup
+
+generateProgressionOrder :: Int -> CNF -> V.Vector Int
+generateProgressionOrder n cnf = lookup
+ where
+  Just (_, cnf') = CNF.unitResolve cnf
+  lookup = V.fromList . reverse . concat $
+    runProgression n (CNF.transpose cnf') progression
+
+generateGraphOrder :: Int ->  CNF -> V.Vector Int
+generateGraphOrder n cnf = lookup
+ where
+  Just (_, cnf') = CNF.unitResolve cnf
+
+  (graph, _) = G.buildGraphFromNodesAndEdges
+    (L.map (\a -> (a, a)) [0..n -1])
+    (L.map (\(f, t) -> G.Edge () t f) (CNF.cnfDependencies cnf'))
+
+  lookup = V.fromList . reverse $ G.postOrd graph
+
+inverseOrder :: V.Vector Int -> V.Vector Int
+inverseOrder lookup = V.create do
+  v <- VM.new (V.length lookup)
+  iforM_ lookup (flip $ VM.write v)
+  return v
 
 numberOfVariables :: ProgressionM s Int
 numberOfVariables = ReaderT $ pure . VM.length . progVisited
@@ -120,8 +151,8 @@ markVisited i = ReaderT $ \p -> VM.write (progVisited p) i True
 
 -- | The post-order logical closure visits the variables
 -- in a set of clauses in post-order.
-postOrderLogicalClosure :: ProgressionM s [Int]
-postOrderLogicalClosure = reverse <$> go where
+logicalClosure :: ProgressionM s [Int]
+logicalClosure = go where
   go = nextPositiveVar >>= \case
     Just v -> do
       conditionTrue v
@@ -137,7 +168,7 @@ conditionTrue v = do
   conditionClause :: Int -> ProgressionM s ()
   conditionClause cidx = updateClause cidx \case
     Just (LS.conditionClause (tt v) -> Just clause) -> do
-      when (isPositive clause) $ addPositiveClause cidx
+      unless (hasNegativeClause clause) $ addPositiveClause cidx
       return ((), Just clause)
     _ -> return ((), Nothing)
 
@@ -155,18 +186,17 @@ updateClause i fn = ReaderT \p -> do
   VM.write (progClauses p) i st
   return a
 
-
 clausesOf :: Int -> ProgressionM s [Int]
 clausesOf v = ReaderT \p -> pure $ progReverseLookup p V.! v
 
 nextPositiveVar :: ProgressionM s (Maybe Int)
-nextPositiveVar = ReaderT \ProgressionState { .. } -> updateSTRef' progPositiveClauses \s -> do
-  (partitionEithers -> (rm, itms)) <- forM (IS.toList s) $ \i -> do
+nextPositiveVar = ReaderT \ProgressionState { .. } -> CNF.updateSTRef' progPositiveClauses \s -> do
+  (partitionEithers -> (rm, itms)) <- forM (IS.toList s) $ \i ->
     (firstVar <$> VM.read progClauses i) <&> \case
       Just v  -> Right v
       Nothing -> Left i
   return
-    ( maybe Nothing (Just . minimum) (NE.nonEmpty itms)
+    ( Just . minimum =<< NE.nonEmpty itms
     , IS.difference s (IS.fromList rm)
     )
  where

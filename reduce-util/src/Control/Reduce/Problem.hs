@@ -141,8 +141,6 @@ import           Control.Reduce
 import           Control.Reduce.Command
 import           Control.Reduce.Graph
 import           Control.Reduce.Boolean hiding (not)
-import           Control.Reduce.Progression
--- import           Control.Reduce.Boolean.CNF
 import           Control.Reduce.Metric
 import           Control.Reduce.Reduction
 import qualified Control.Reduce.Util.Logger as L

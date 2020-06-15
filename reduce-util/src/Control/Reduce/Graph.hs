@@ -57,6 +57,9 @@ module Control.Reduce.Graph
   , closure
   , reverseClosure
 
+  -- * PostOrd
+  , postOrd
+
   -- * Reading and writing graphs
 
   , readTGF

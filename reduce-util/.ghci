@@ -1,4 +1,5 @@
-:set -fwarn-unused-binds -fwarn-unused-imports
+:set -fwarn-unused-binds
+-- -fwarn-unused-imports
 :set -isrc
 :set -itest
 :load Main Control.Reduce.Util
