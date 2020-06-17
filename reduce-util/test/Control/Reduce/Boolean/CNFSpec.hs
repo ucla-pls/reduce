@@ -73,16 +73,16 @@ spec = do
       let nnf :: Nnf Int = (ff 0 ∨ (tt 1 ∨ ( tt 1 ∧ tt 3 ∨ tt 2 ∧ tt 1)))
       let cnf      = toMinimalCNF 9 nnf
       debugCnf cnf
-      (fromCNF cnf) `shouldSatisfy` isJust
+      cnf `shouldSatisfy` isIPF
 
     it "can should maintain the IPF in this example" $ do
       let ex :: Nnf [Int] = ((ff [3,16,0] ∨ tt [58] ∧ tt [3] ∧ tt [58] ∧ tt [3] ∧ tt [58] ∧ tt [58] ∧ tt [7] ∧ tt [3] ∧ tt [7] ∧ tt [3] ∧ tt [7] ∧ tt [7] ∧ tt [8] ∧ tt [3] ∧ tt [8] ∧ tt [3] ∧ tt [8] ∧ tt [8] ∧ tt [14] ∧ tt [3] ∧ tt [14] ∧ tt [3] ∧ tt [14] ∧ tt [14] ∧ tt [49] ∧ tt [3] ∧ tt [49] ∧ tt [3] ∧ tt [49] ∧ tt [49] ∧ tt [33] ∧ tt [3] ∧ tt [33] ∧ tt [3] ∧ tt [33] ∧ tt [33] ∧ tt [50] ∧ tt [3] ∧ tt [50] ∧ tt [3] ∧ tt [50]) ∧ (ff [3,16,0] ∨ tt [3,6]) ∧ (ff [3,16,0] ∨ tt [3,6]) ∧ (ff [3,16,0] ∨ (tt [58,0] ∨ (tt [58,0] ∧ tt [10,38] ∨ tt [10,9] ∧ tt [58,0]))) ∧ (ff [3,16,0] ∨ tt [3,2]) ∧ (ff [3,16,0] ∨ tt [3,2]) ∧ (ff [3,16,0] ∨ (tt [7,0] ∨ (tt [7,0] ∧ tt [10,38] ∨ tt [10,9] ∧ tt [7,0]))) ∧ (ff [3,16,0] ∨ tt [3,4]) ∧ (ff [3,16,0] ∨ tt [3,4]) ∧ (ff [3,16,0] ∨ (tt [8,0] ∨ (tt [8,0] ∧ tt [10,38] ∨ (tt [8,32] ∨ tt [10,9] ∧ tt [8,0])))) ∧ (ff [3,16,0] ∨ tt [3,8]) ∧ (ff [3,16,0] ∨ tt [3,8]) ∧ (ff [3,16,0] ∨ (tt [14,0] ∨ (tt [14,0] ∧ tt [10,38] ∨ tt [10,9] ∧ tt [14,0]))) ∧ (ff [3,16,0] ∨ tt [3,7]) ∧ (ff [3,16,0] ∨ tt [3,7]) ∧ (ff [3,16,0] ∨ tt [3,9]) ∧ (ff [3,16,0] ∨ tt [3,9]) ∧ (ff [3,16,0] ∨ (tt [33,0] ∨ (tt [33,0] ∧ tt [10,38] ∨ tt [10,9] ∧ tt [33,0]))) ∧ (ff [3,16,0] ∨ tt [3,10]) ∧ (ff [3,16,0] ∨ tt [3,10]) ∧ (ff [3,16,0] ∨ tt [3,16]))
       let (nnf, _) = memorizeNnf ex
-      fromCNF (toCNF nnf) `shouldSatisfy` isJust
+      toCNF nnf `shouldSatisfy` isIPF
 
       let cnf = toMinimalCNF 100 nnf
       debugCnf cnf
-      fromCNF cnf `shouldSatisfy` isJust
+      cnf `shouldSatisfy` isIPF
 
 
   -- describe "possitive progression" $ do

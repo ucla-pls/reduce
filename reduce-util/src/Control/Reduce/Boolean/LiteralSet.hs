@@ -251,23 +251,25 @@ conditionClause (IntLiteral x) (Clause (IntLiteralSet s)) =
     then Nothing
     else Just . Clause . IntLiteralSet $ (x - minBound) `IS.delete` s
 
--- -- | Limit a clause to only talk about these variables, its the same
--- -- as conditioning on the negative inverse.
--- limitClause :: IS.IntSet -> Clause -> Maybe Clause
--- limitClause x (Clause c)
---   | trues `IS.isSubsetOf` x =
---     Just $ joinLiterals' (falses, trues `IS.intersection` x)
---   | otherwise =
---     Nothing
---   where (falses, trues) = splitLiterals c
+-- | Given a injective mapping of variables to potential new variables,
+-- remap the clause, and set everything to false that does not
+-- exist. Returns Nothing if the clause is satisified.
+limitClause :: (Int -> Maybe Int) -> Clause -> Maybe Clause
+limitClause fn (Clause c) =
+  mapM fn (IS.toList falses) <&> \falses' ->
+    fromMaybe (error "Mapping not injective") $ joinLiterals
+      ( IS.fromList falses'
+      , IS.fromList $ mapMaybe fn (IS.toList trues)
+      )
+ where (falses, trues) = splitLiterals c
 
 hasPositiveClause :: Clause -> Bool
 hasPositiveClause clause = Prelude.not (IS.null trues)
-  where (_, trues) = splitLiterals clause
+ where (_, trues) = splitLiterals clause
 
 hasNegativeClause :: Clause -> Bool
 hasNegativeClause clause = Prelude.not (IS.null falses)
-  where (falses, _) = splitLiterals clause
+ where (falses, _) = splitLiterals clause
 
 displayImplication :: (Int -> ShowS) -> Clause -> ShowS
 displayImplication showKey c =
