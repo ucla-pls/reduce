@@ -263,6 +263,11 @@ limitClause fn (Clause c) =
       )
  where (falses, trues) = splitLiterals c
 
+-- | Build a positive clause from a intset
+-- Does not check that the set is positive integers.
+mkPositiveClause :: IS.IntSet -> Clause
+mkPositiveClause is = Clause (IntLiteralSet is)
+
 hasPositiveClause :: Clause -> Bool
 hasPositiveClause clause = Prelude.not (IS.null trues)
  where (_, trues) = splitLiterals clause

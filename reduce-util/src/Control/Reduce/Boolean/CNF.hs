@@ -316,8 +316,9 @@ limitCNF vars (CNF cnf) =
 
   limitf i = IM.lookup i revlookup
 
-
-
+learnClauseCNF :: Clause -> CNF -> CNF
+learnClauseCNF clause cnf =
+  CNF ( S.insert clause $ cnfClauses cnf)
 
 parsePretty
   :: Parsec Void LazyText.Text a -> String -> LazyText.Text -> Either String a
