@@ -26,8 +26,10 @@ module Control.Reduce.Progression
   , runProgression
   , progression
   , logicalClosure
-  , optimalProgression
+
+  , generateBadOrder
   , generateGraphOrder
+  , generateTotalGraphOrder
   , generateProgressionOrder
   )
 where
@@ -65,12 +67,16 @@ import           Control.Reduce.Boolean.CNF     ( CNF(..) )
 import Debug.Trace
 
 -- | Calculate the progregssion
-calculateProgression :: CNF -> IS.IntSet -> NE.NonEmpty IS.IntSet
-calculateProgression cnf vars =
-  IS.fromList . fmap (lookup V.!) <$>
-    optimalProgression (V.length lookup) cnf'
+calculateProgression :: Order -> CNF -> IS.IntSet -> NE.NonEmpty IS.IntSet
+calculateProgression order cnf vars =
+  IS.fromList . fmap ((lookup V.!) . (lookup' V.!))
+    <$> runProgression n cnf'' progression
  where
-   (cnf', lookup) = CNF.limitCNF vars cnf
+  (cnf', lookup) = CNF.limitCNF vars cnf
+  n = V.length lookup
+  lookup' = order n cnf'
+  revlookup = inverseOrder lookup'
+  cnf'' = CNF.vmapCNF (revlookup V.!) cnf'
 
 -- | Calculate the LogicalClosure
 calculateLogicalClosure :: CNF -> IS.IntSet -> IS.IntSet
@@ -80,15 +86,6 @@ calculateLogicalClosure cnf vars =
     $ runProgression (V.length lookup) cnf' logicalClosure
  where
    (cnf', lookup) = CNF.limitCNF vars cnf
-
--- | Our progression with an the graph variable order.
-optimalProgression :: Int -> CNF -> NE.NonEmpty [Int]
-optimalProgression n cnf =
-  L.map (lookup V.!) <$> runProgression n cnf' progression
-  where
-    cnf' = CNF.vmapCNF (revlookup V.!) cnf
-    lookup = generateGraphOrder n cnf
-    revlookup = inverseOrder lookup
 
 data ProgressionState s = ProgressionState
   { progClauses :: VM.MVector s (Maybe Clause)
@@ -142,21 +139,46 @@ progression = do
           ((c ++ [ i ]) :) <$> go (i+1) nv
     | otherwise = pure []
 
-generateProgressionOrder :: Int -> CNF -> V.Vector Int
+type Order = Int ->  CNF -> V.Vector Int
+
+generateBadOrder :: Order
+generateBadOrder n cnf = V.reverse $ generateGraphOrder n cnf
+
+generateProgressionOrder :: Order
 generateProgressionOrder n cnf = lookup
  where
   Just (_, cnf') = CNF.unitResolve cnf
-  lookup = V.fromList . reverse . concat $
+  lookup = V.reverse . V.fromList . concat $
     runProgression n (CNF.transpose cnf') progression
 
-generateGraphOrder :: Int ->  CNF -> V.Vector Int
+generateGraphOrder :: Order
 generateGraphOrder n cnf = lookup
  where
   Just (splitLiterals -> (_, tt), cnf') = CNF.unitResolve cnf
 
+  -- Make this better, choose free variables first.
   (graph, _) = G.buildGraphFromNodesAndEdges
-    (L.map (\a -> (a, a)) [0..n -1])
-    (L.map (\(f, t) -> G.Edge () t f) (CNF.cnfDependencies cnf'))
+    [ (a, a) | a <- [ 0..n-1 ]]
+    [ G.Edge () t f | (f, t) <- CNF.cnfDependencies cnf']
+
+  lookup = V.fromList
+    . (IS.toList tt ++)
+    . reverse
+    . filter (Prelude.not . (`IS.member` tt)) $ G.postOrd graph
+
+generateTotalGraphOrder :: Order
+generateTotalGraphOrder n cnf = lookup
+ where
+  Just (splitLiterals -> (_, tt), cnf') = CNF.unitResolve cnf
+
+  -- Make this better, choose free variables first.
+  (graph, _) = G.buildGraphFromNodesAndEdges
+    [ (a, a) | a <- [ 0..n-1 ]]
+    [ G.Edge () t f
+    | c <- S.toList $ CNF.cnfClauses cnf'
+    , let (ff, tt) = splitLiterals c
+    , (f, t) <- liftM2 (,) (IS.toList ff) (IS.toList tt)
+    ]
 
   lookup = V.fromList
     . (IS.toList tt ++)

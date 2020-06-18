@@ -80,35 +80,34 @@ spec = do
     it "is a split" . hedgehog $ do
       nv <- forAll $ Gen.int (Range.exponential 1 100)
       ipf <- forAll (genIpf nv)
-      IS.fromList (concat $ optimalProgression nv ipf)
-        === IS.fromList [0..nv-1]
+      let vs = IS.fromList [0..nv-1]
+      IS.unions (calculateProgression generateTotalGraphOrder ipf vs)
+        === vs
 
     it "is all models" . hedgehog $ do
       nv <- forAll $ Gen.int (Range.exponential 1 100)
       ipf <- forAll (genIpf nv)
-      let d = optimalProgression nv ipf
+      let vs = IS.fromList [0..nv-1]
+      let d = calculateProgression generateTotalGraphOrder ipf vs
       forM_ (tail $ L.inits (NE.toList d)) \di -> do
         annotateShow di
-        let ipf' = conditionCNF (IS.unions (Prelude.map IS.fromList di)) ipf
+        let ipf' = conditionCNF (IS.unions di) ipf
         annotateShow ipf'
         assert $ isDualIPF ipf'
 
     closures
 
 closures = it "on graphs it only produce closures" . hedgehog $ do
-  nv <- forAll $ Gen.int (Range.exponential 1 100)
+  nv <- forAll $ Gen.int (Range.linear 1 5)
   (graph, ipf) <- forAll (genIpfFromGraph nv)
-  annotateShow (runProgression nv (CNF.transpose ipf) progression)
-  let d = optimalProgression nv ipf
-  annotate (BS.unpack $ G.writeEmptyCSV graph)
-  annotateShow (generateGraphOrder nv ipf)
-  annotateShow (generateProgressionOrder nv ipf)
-  annotateShow d
+
+  let vs = IS.fromList [0..nv-1]
+  let d  = calculateProgression generateTotalGraphOrder ipf vs
 
   forM_ (NE.tail d) \di ->
-    assert (IS.fromList di `L.elem` S.fromList (G.scc graph))
+    assert (di `L.elem` S.fromList (G.scc graph))
 
-  IS.fromList (NE.head d) === IS.fromList (concatMap T.flatten (G.dfs graph (IS.toList $ IS.unions (nonNegativeClausesVariables ipf))))
+  NE.head d === IS.fromList (concatMap T.flatten (G.dfs graph (IS.toList $ IS.unions (nonNegativeClausesVariables ipf))))
 
 
 
