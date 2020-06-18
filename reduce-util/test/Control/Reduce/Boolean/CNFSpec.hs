@@ -58,6 +58,32 @@ spec = do
       let ex     = and [ff 0 \/ tt 1, ff 1 \/ tt 2, ff 2 \/ tt 3 :: Nnf Int]
       let (a, _) = unitPropergation (LS.fromList' [tt 0]) (toCNF ex)
       a `shouldBe` Just (LS.fromList' [tt 0, tt 1, tt 2, tt 3])
+
+  describe "limitCNF" $ do
+    it "can limiting with everything is fine" $ do
+      let cnf = toCNF $ and [ ff 1
+                      , ff 4
+                      , tt 2 \/ tt 1 \/ tt 3 :: Nnf Int
+                      ]
+      let lim = limitCNF (IS.fromList [1, 2, 3, 4]) cnf
+      (cnfClauses . fst $ lim ) `shouldBe` S.fromList
+        [ LS.fromList' [ff 0]
+        , LS.fromList' [ff 3]
+        , LS.fromList' [tt 1, tt 0, tt 2]
+        ]
+      snd lim `shouldBe` V.fromList [1,2,3,4]
+    it "can limit with something" $ do
+      let cnf = toCNF $ and [ ff 1
+                      , ff 4
+                      , tt 2 \/ tt 1 \/ tt 3 :: Nnf Int
+                      ]
+      let lim = limitCNF (IS.fromList [1, 2]) cnf
+      (cnfClauses . fst $ lim ) `shouldBe` S.fromList
+        [ LS.fromList' [ff 0]
+        , LS.fromList' [tt 1, tt 0]
+        ]
+      snd lim `shouldBe` V.fromList [1,2]
+
   describe "vmap" $ do
     it "works on clauses" $ do
       LS.vmap

@@ -62,11 +62,13 @@ import           Control.Reduce.Boolean
 import qualified Control.Reduce.Boolean.CNF    as CNF
 import           Control.Reduce.Boolean.CNF     ( CNF(..) )
 
+import Debug.Trace
+
 -- | Calculate the progregssion
 calculateProgression :: CNF -> IS.IntSet -> NE.NonEmpty IS.IntSet
 calculateProgression cnf vars =
   IS.fromList . fmap (lookup V.!) <$>
-    optimalProgression (V.length lookup - 1) cnf'
+    optimalProgression (V.length lookup) cnf'
  where
    (cnf', lookup) = CNF.limitCNF vars cnf
 
@@ -75,7 +77,7 @@ calculateLogicalClosure :: CNF -> IS.IntSet -> IS.IntSet
 calculateLogicalClosure cnf vars =
   IS.fromList
     . fmap (lookup V.!)
-    $ runProgression (V.length lookup - 1) cnf' logicalClosure
+    $ runProgression (V.length lookup) cnf' logicalClosure
  where
    (cnf', lookup) = CNF.limitCNF vars cnf
 
