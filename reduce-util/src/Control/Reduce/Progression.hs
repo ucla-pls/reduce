@@ -90,7 +90,6 @@ optimalProgression n cnf =
     lookup = generateGraphOrder n cnf
     revlookup = inverseOrder lookup
 
-
 data ProgressionState s = ProgressionState
   { progClauses :: VM.MVector s (Maybe Clause)
   , progPositiveClauses :: STRef s IS.IntSet
@@ -153,13 +152,16 @@ generateProgressionOrder n cnf = lookup
 generateGraphOrder :: Int ->  CNF -> V.Vector Int
 generateGraphOrder n cnf = lookup
  where
-  Just (_, cnf') = CNF.unitResolve cnf
+  Just (splitLiterals -> (_, tt), cnf') = CNF.unitResolve cnf
 
   (graph, _) = G.buildGraphFromNodesAndEdges
     (L.map (\a -> (a, a)) [0..n -1])
     (L.map (\(f, t) -> G.Edge () t f) (CNF.cnfDependencies cnf'))
 
-  lookup = V.fromList . reverse $ G.postOrd graph
+  lookup = V.fromList
+    . (IS.toList tt ++)
+    . reverse
+    . filter (Prelude.not . (`IS.member` tt)) $ G.postOrd graph
 
 inverseOrder :: V.Vector Int -> V.Vector Int
 inverseOrder lookup = V.create do
