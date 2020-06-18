@@ -43,15 +43,18 @@ dependencies:
 - containers
 - lens
 - vector
-- megaparsec >= 6.5.0 && < 7.1.0
+- megaparsec >= 7.0.0 && < 7.1.0
 - cassava
 - profunctors
-- dirtree >= 0.1.0
+- dirtree >= 0.0.1
 - free
 - aeson
 - unordered-containers
 - hashable
-    
+- hashtables
+- binary
+- primitive
+
 ghc-options:
   - -Wall
 
@@ -60,7 +63,7 @@ library:
 
 tests:
   reduce-util-test:
-    main:                Spec.hs
+    main:                Main.hs
     source-dirs:         test
     ghc-options:
     - -threaded
@@ -69,3 +72,5 @@ tests:
     dependencies:
     - reduce-util
     - hspec
+    - hspec-hedgehog
+    - hedgehog

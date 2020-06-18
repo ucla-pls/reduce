@@ -1,4 +1,7 @@
 {-# LANGUAGE BangPatterns        #-}
+{-# LANGUAGE OverloadedStrings        #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE DeriveFunctor        #-}
 {-# LANGUAGE FlexibleInstances        #-}
 {-# LANGUAGE DeriveGeneric        #-}
 {-# LANGUAGE LambdaCase          #-}
@@ -9,7 +12,7 @@
 Module      : Control.Reduce.Graph
 Description : A module for representing graphs
 Copyright   : (c) Christian Kalhauge
-License     : MIT
+License     : BSD3
 Maintainer  : kalhauge@cs.ucla.edu
 
 A module for handling graphs to do reduction. This module builds on the
@@ -30,6 +33,7 @@ module Control.Reduce.Graph
   , Node (..)
   , buildNode
   , outEdges
+  , Vertex
 
   , Edge (..)
 
@@ -50,11 +54,20 @@ module Control.Reduce.Graph
   , closures
   , closuresN
 
+  , closure
+  , reverseClosure
+
+  -- * PostOrd
+  , postOrd
+
   -- * Reading and writing graphs
 
   , readTGF
   , readCSV
   , readEdgesCSV
+
+  , writeCSV
+  , writeEmptyCSV
 
   ) where
 
@@ -68,8 +81,9 @@ import           Control.Monad.ST
 import           Data.Char
 import           Data.Foldable
 import qualified Data.List                   as L
-import           Data.Maybe                  (catMaybes)
+import           Data.Maybe                  (catMaybes, fromMaybe)
 import           Data.Void
+import           Data.Bifunctor
 
 -- import Debug.Trace
 
@@ -102,15 +116,23 @@ import           Text.Megaparsec.Char
 type Vertex = Int
 
 -- | An `Edge`
-data Edge e n = Edge !n !n !e
-  deriving (Show, Eq, Generic)
+data Edge e n = Edge !e !n !n
+  deriving (Show, Eq, Generic, Functor)
+
+instance Bifunctor Edge where
+  first f (Edge e a b) = (Edge (f e) a b)
+  second = fmap
 
 -- | A `Node` is a label, and a list of edges.
 data Node e n = Node
   { nodeLabel    :: !n
   , edgeVertices :: !(U.Vector Vertex)
   , edgeLabels   :: !(V.Vector e)
-  } deriving (Show, Eq)
+  } deriving (Show, Eq, Functor)
+
+instance Bifunctor Node where
+  first f n = n { edgeLabels = f <$> edgeLabels n }
+  second = fmap
 
 -- | Get the outedges of a node
 outEdges :: Node e n -> V.Vector (Vertex, e)
@@ -126,7 +148,11 @@ buildNode n edges' =
 -- | Graph is a vector of nodes.
 newtype Graph e n = Graph
   { nodes          :: V.Vector (Node e n)
-  } deriving (Show, Eq)
+  } deriving (Show, Eq, Functor)
+
+instance Bifunctor Graph where
+  first f n = Graph (first f <$> nodes n)
+  second = fmap
 
 nodeLabels :: Graph e n -> V.Vector n
 nodeLabels = V.map nodeLabel . nodes
@@ -147,27 +173,36 @@ buildGraph nodes =
     toNodes edges' = catMaybes [(,e') <$> lookupKey k' | (k', e') <- edges']
     lookupKey = binarySearch keyMap
 
-buildGraph' :: Ord n => [(n, [n])] -> (Graph () n, n -> Maybe Vertex)
+buildGraph' ::
+  Ord n
+  => [(n, [n])]
+  -> (Graph () n, n -> Maybe Vertex)
 buildGraph' nodes' =
   buildGraph [(n, n, map (,()) edges') | (n, edges') <- nodes' ]
 
-buildGraphFromNodesAndEdges :: (Ord key) => [(key, n)] -> [Edge e key] -> (Graph e n, key -> Maybe Vertex)
+buildGraphFromNodesAndEdges ::
+  Ord key
+  => [(key, n)]
+  -> [Edge e key]
+  -> (Graph e n, key -> Maybe Vertex)
 buildGraphFromNodesAndEdges keys edges' =
   (graph, lookupKey)
   where
     sortedNodes = V.fromList $ L.sortOn fst keys
-    edges'' = fromEdges (V.length sortedNodes) $ catMaybes (map (lookupEdge lookupKey) edges')
+    edges'' = fromEdges (V.length sortedNodes)
+      . catMaybes
+      $ map (lookupEdge lookupKey) edges'
     graph = Graph $ V.zipWith (buildNode . snd) sortedNodes edges''
     lookupKey = binarySearch (V.map fst sortedNodes)
 
 lookupEdge :: (key -> Maybe Vertex) -> Edge e key -> Maybe (Edge e Vertex)
-lookupEdge fn (Edge k1 k2 e) =
-  Edge <$> fn k1 <*> fn k2 <*> pure e
+lookupEdge fn (Edge e k1 k2) =
+  Edge <$> pure e <*> fn k1 <*> fn k2
 
 fromEdges :: Int -> [Edge e Vertex] -> V.Vector [(Vertex, e)]
 fromEdges s edges' = V.create $ do
   v <- VM.replicate s []
-  forM_ edges' $ \(Edge i j e) -> do
+  forM_ edges' $ \(Edge e i j) -> do
     VM.unsafeWrite v i . ((j, e):) =<< VM.unsafeRead v i
   return v
 
@@ -189,7 +224,8 @@ binarySearch v n =
 -- | Get a list of the edges in the graph.
 edges :: Graph e n -> [Edge e Vertex]
 edges Graph {..} =
-  toListOf (ifolded.to outEdges.folded.withIndex.to (\(i, (j, e)) -> Edge i j e)) nodes
+  toListOf ((ifolded.to outEdges <. folded).withIndex.to (\(i, (j, e)) -> Edge e i j))
+  nodes
 {-# INLINE edges #-}
 
 -- | Transpose a graph
@@ -222,7 +258,7 @@ dff :: Graph e n -> [T.Tree Vertex]
 dff g = dfs g [0..(V.length (nodes g) -1)]
 
 -- | Depth first search
-dfs :: Graph e n -> [Vertex] -> [T.Tree Vertex]
+dfs :: Graph e n -> [Vertex] -> T.Forest Vertex
 dfs Graph{..} =
   prune . map generate
   where
@@ -246,6 +282,14 @@ dfs Graph{..} =
           as <- chop vt ts
           bs <- chop vt us
           return $ T.Node v as : bs
+
+-- | Get a set of the verticies that is pointed to by a set of verticies.
+closure :: Graph e n -> [Vertex] -> IS.IntSet
+closure g vs = foldMap (IS.fromList . toList) $ dfs g vs
+
+-- | Get a set of the verticies that points to a set of verticies.
+reverseClosure :: Graph e n -> [Vertex] -> IS.IntSet
+reverseClosure g vs = foldMap (IS.fromList . toList) $ dfs (transposeG g) vs
 
 -- | The strongly connected components of a graph.
 scc'  :: Graph e n -> T.Forest Vertex
@@ -288,6 +332,7 @@ partition g =
       . map (\n -> IS.fromAscList (U.toList $ edgeVertices $ nodes g V.! n) IS.\\ is)
       $ IS.toList is
 
+
 -- | Partition a graph into closures
 closures :: Graph e n -> [ IS.IntSet ]
 closures g =
@@ -304,10 +349,17 @@ closuresN :: Ord n => Graph e n -> [ S.Set n ]
 closuresN g =
    map (unsafeLabeledSet g . IS.toList) $ closures g
 
+parsePretty :: Parsec Void T.Text a -> String -> T.Text -> Either String a
+parsePretty parser name bs =
+#if MIN_VERSION_megaparsec(7,0,0)
+  first errorBundlePretty $ parse parser name bs
+#else
+  first parseErrorPretty $ parse parser name bs
+#endif
+
 -- | Read TGF
 readTGF :: String -> T.Text -> Either String (Graph T.Text T.Text)
-readTGF name bs =
-  either (Left . errorBundlePretty) Right $ parse parser name bs
+readTGF = parsePretty parser
   where
     parser :: Parsec Void T.Text (Graph T.Text T.Text)
     parser = do
@@ -329,22 +381,53 @@ readTGF name bs =
       t <-  takeWhile1P (Just "edge to") (not . isSpace)
       skipSpace
       lab <- takeWhileP (Just "edge label") (/= '\n')
-      return (Edge f t lab)
+      return (Edge lab f t)
 
     skipSpace =
       void $ takeWhileP Nothing (== ' ')
 
-instance (C.FromField e, C.FromField n) => C.FromRecord (Edge e n) where
+instance (C.FromField e, C.FromField n) => C.FromRecord (Edge (Maybe e) n) where
+  parseRecord v
+    | length v == 2 =
+      Edge <$> pure Nothing <*> v C..! 0 <*> v C..! 1
+    | length v == 3 =
+      Edge <$> (Just <$> v C..! 2) <*> v C..! 0 <*> v C..! 1
+    | otherwise =
+      mzero
 
+instance (C.FromField e, C.FromField n) => C.FromNamedRecord (Edge (Maybe e) n) where
+  parseNamedRecord m =
+    Edge <$> ((Just <$> m C..: "Label") <|> pure Nothing)
+      <*> m C..: "Source" <*> m C..: "Target"
 
-  -- | Read a csv file of edges
-readEdgesCSV :: (C.FromField n, C.FromField e) => BL.ByteString -> Either String [Edge e n]
-readEdgesCSV bs = V.toList <$> C.decode C.HasHeader bs
+instance (C.ToField e, C.ToField n) => C.ToNamedRecord (Edge e n) where
+  toNamedRecord (Edge e f t) = C.namedRecord
+    [ "Source" C..= f
+    , "Target" C..= t
+    , "Label" C..= e
+    ]
+
+-- | Read a csv file of edges, given a default e to load if nothings is found in "label".
+readEdgesCSV :: (C.FromField n, C.FromField e) => e -> BL.ByteString -> Either String [Edge e n]
+readEdgesCSV e bs = V.toList . V.map (first $ fromMaybe e) . snd <$> C.decodeByName bs
 {-# INLINE readEdgesCSV #-}
 
 -- | Read a csv file of edges
-readCSV :: (C.FromField a, C.FromField b, Ord a) => [a] -> BL.ByteString -> Either String (Graph b a)
-readCSV nodes bs = do
-  x <- readEdgesCSV bs
+readCSV :: (C.FromField a, C.FromField b, Ord a) => b -> [a] -> BL.ByteString -> Either String (Graph b a)
+readCSV def nodes bs = do
+  x <- readEdgesCSV def bs
   return . fst $ buildGraphFromNodesAndEdges (map (\a -> (a,a)) nodes) x
 {-# INLINE readCSV #-}
+
+-- | Write a csv file of edges
+writeCSV :: (C.ToField a, C.ToField b) => Graph b a -> BL.ByteString
+writeCSV graph =
+  C.encodeByName (C.header ["Source", "Target", "Label"])
+  . map (second (nodeLabels graph V.!))
+  $ edges graph
+
+writeEmptyCSV :: (C.ToField a) => Graph () a -> BL.ByteString
+writeEmptyCSV graph =
+  C.encodeByName (C.header ["Source", "Target"])
+  . map (bimap (const BL.empty) (nodeLabels graph V.!))
+  $ edges graph

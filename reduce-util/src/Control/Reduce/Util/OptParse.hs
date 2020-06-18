@@ -1,4 +1,5 @@
 {-# LANGUAGE ApplicativeDo       #-}
+{-# LANGUAGE OverloadedStrings       #-}
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE RankNTypes          #-}
@@ -7,7 +8,7 @@
 {-|
 Module      : Control.Reduce.Util.OptParse
 Copyright   : (c) Christian Gram Kalhauge, 2018
-License     : MIT
+License     : BSD3
 Maintainer  : kalhauge@cs.ucla.edu
 
 This module contains the options parsers for the config files of
@@ -22,16 +23,28 @@ import           Options.Applicative
 -- directory
 import           System.Directory
 
+-- text
+import qualified Data.Text as Text
+
+-- cryptohash-sha256
+import           Crypto.Hash.SHA256         as Sha256
+
+-- bytestring
+import qualified Data.ByteString.Lazy            as BL
+
 -- base
 import           Data.Char                        (toLower)
 import qualified Data.List                        as List
 import           Control.Monad
+import           Control.Monad.IO.Class
 
--- temporary
-import           System.IO.Temp
+-- unlifio
+import           UnliftIO.Temporary
+import           UnliftIO
 
 -- reduce-util
 import           Control.Reduce.Util
+import           Control.Reduce.Command
 import           Control.Reduce.Util.Logger
 
 data InputFrom
@@ -39,13 +52,14 @@ data InputFrom
   | FromFile FilePath
   deriving (Show, Eq)
 
-parseCommandTemplate :: Parser (IO (Either String CommandTemplate))
-parseCommandTemplate =
-  createCommandTemplate
+parseCmdTemplate :: Parser (IO (Either String CmdTemplate))
+parseCmdTemplate =
+  createCmdTemplate
   <$> option auto
   ( long "timelimit"
     <> short 'T'
     <> metavar "SECS"
+    <> hidden
     <> value (-1)
     <> showDefault
     <> help (
@@ -59,67 +73,155 @@ parseCommandTemplate =
   ( strArgument (metavar "ARG.." <> help "arguments to the command.")
   )
 
-
-parsePredicateOptions :: Parser PredicateOptions
+parsePredicateOptions :: Parser (IO PredicateOptions)
 parsePredicateOptions = do
-  predOptPreserveExitCode <-
-    not <$> switch (long "no-exitcode" <> help "ignore the exitcode.")
+  input <-
+    option str
+    ( long "preserve"
+      <> short 'p'
+      <> help "a comma separated list of what to preserve. Choose from out, err, and exit. "
+      <> value "exit"
+      <> showDefault
+      <> hidden
+      )
 
-  predOptPreserveStdout <-
-    switch (long "stdout" <> help "preserve stdout.")
+  _predOptPriorExpectationIO <-
+    parseExpectation
 
-  predOptPreserveStderr <-
-    switch (long "stderr" <> help "preserve stderr.")
+  pure $ do
+    _predOptPriorExpectation <- _predOptPriorExpectationIO
+    let ms = map Text.strip . Text.splitOn "," . Text.pack $ input
+    pure $ PredicateOptions
+      { _predOptPreserveExitCode = List.elem "exit" ms || List.elem "exitcode" ms
+      , _predOptPreserveStdout = List.elem "out" ms || List.elem "stdout" ms
+      , _predOptPreserveStderr = List.elem "err" ms || List.elem "stderr" ms
+      , _predOptPriorExpectation = _predOptPriorExpectation
+      }
 
-  pure $ PredicateOptions {..}
+data WorkFolder
+  = TempWorkFolder !String
+  | DefinedWorkFolder !Bool !FilePath
+  deriving (Show, Eq)
 
-parseWorkFolder :: String -> Parser (IO FilePath)
+withWorkFolder :: (MonadUnliftIO m) => WorkFolder -> (FilePath -> m a) -> m a
+withWorkFolder wf fn =
+  case wf of
+    DefinedWorkFolder useForce folder -> do
+      fld <- liftIO $ do
+        when useForce $ removePathForcibly folder
+        createDirectory folder
+        makeAbsolute folder
+      fn fld
+    TempWorkFolder template -> do
+      withSystemTempDirectory template fn
+
+parseWorkFolder :: String -> Parser WorkFolder
 parseWorkFolder template = do
   workFolder <-
     Just <$> strOption
     ( long "work-folder"
       <> short 'W'
       <> help "the work folder."
+      <> hidden
       <> showDefault
     )
     <|> pure Nothing
 
-  useForce <-
-    switch ( long "force" <> short 'f' <> help "delete the work folder if it already exists." )
+  useForce <- switch $
+    long "force"
+    <> short 'f'
+    <> hidden
+    <> help "delete the work folder if it already exists."
 
-  pure $
-    ioWorkFolder workFolder useForce
-  where
-    ioWorkFolder workFolder useForce =
-      makeAbsolute =<< case workFolder of
-        Just folder -> do
-          when useForce $ removePathForcibly folder
-          createDirectory folder
-          return $ folder
-        Nothing -> do
-          createTempDirectory "." template
+  pure $ case workFolder of
+    Just folder -> do
+      DefinedWorkFolder useForce folder
+    Nothing -> do
+      TempWorkFolder $ template
 
+parseExpectation :: Parser (IO Expectation)
+parseExpectation = do
+  _expectedExitCode <-
+    optional . fmap exitCodeFromInt . option auto $
+    long "exit"
+    <> help "require a specific exit code."
+    <> hidden
+
+  _expectedStdoutIO <- 
+    optional . option str $
+    long "out"
+    <> help "require a specific stdout file."
+    <> hidden
+
+  _expectedStderrIO <- 
+    optional . option str $
+    long "err"
+    <> help "require a specific stderr file."
+    <> hidden
+
+  pure $ do
+    _expectedStdout <- traverse findHash _expectedStdoutIO 
+    _expectedStderr <- traverse findHash _expectedStderrIO 
+    pure $ Expectation {..}
+
+ where
+  findHash fp = do
+    Sha256.hashlazyAndLength <$> BL.readFile fp
+       
 
 parseReductionOptions :: Parser (ReductionOptions)
 parseReductionOptions = do
-  redOptTotalTimeout <- option auto $
+  _redTotalTimelimit <- option auto $
     long "total-time"
       <> metavar "SECS"
       <> value (-1)
       <> showDefault
+      <> hidden
       <> help "the maximum seconds to run all predicates, negative means no timelimit."
 
-  redOptMaxIterations <- option auto $
+  _redMaxIterations <- option auto $
     long "max-iterations"
     <> metavar "ITERS"
     <> value (-1)
     <> showDefault
+    <> hidden
     <> help "the maximum number of time to run the predicate, negative means no limit."
 
-  redOptKeepFolders <- switch $
+  _redKeepFolders <- switch $
     long "keep-folders"
-    <> short 'K'
-    <> help "keep the work folders after use?"
+    <> hidden
+    <> help "keep the reduction folders after use?"
+  
+  _redKeepOutputs <- switch $
+    long "keep-outputs"
+    <> hidden
+    <> help "keep the stdout and stderr outputs?"
+
+  _redMetricsFile <- strOption $
+    long "metrics-file"
+    <> hidden
+    <> showDefault
+    <> value "metrics.csv"
+    <> help "an absolute or relative (to the WORKFOLDER/reduction) path of the metric file"
+
+  _redPredicateTimelimit <- option auto $
+    long "predicate-timelimit"
+    <> hidden
+    <> showDefault
+    <> value (-1)
+    <> help "the timelimit of the predicate in seconds, negative means no limit"
+
+  _redTryInitial <- switch $
+    long "try-initial"
+    <> hidden
+    <> showDefault
+    <> help "try the intitial problem, recored as (0000)"
+  
+  _redIgnoreFailure <- switch $
+    long "ignore-failure"
+    <> hidden
+    <> showDefault
+    <> help "ignore the failure of the initial try."
 
   pure $ ReductionOptions {..}
 
@@ -135,33 +237,36 @@ parseReductionOptions = do
   --       <> showDefault)
 
 reducerNameFromString :: String -> Maybe ReducerName
-reducerNameFromString = \case
-  "ddmin" -> Just Ddmin
-  "linear" -> Just Linear
-  "binary" -> Just Binary
-  _ -> Nothing
+reducerNameFromString a
+  | match "ddmin" = Just Ddmin
+  | match "linear" = Just Linear
+  | match "binary" = Just Binary
+  | otherwise = Nothing
+  where
+    match = Text.isPrefixOf (Text.toLower . Text.pack $ a)
 
 parseReducerName :: Parser ReducerName
 parseReducerName =
   option (maybeReader (reducerNameFromString . map toLower))
   ( long "reducer"
     <> short 'R'
-    <> help "the reducing algorithm to use."
+    <> help "the reducing algorithm to use. Choose from ddmin, linear, or binary. (default: \"binary\")"
+    <> metavar "RED"
     <> value Binary
-    <> showDefault
   )
 
 parseLoggerConfig :: Parser LoggerConfig
 parseLoggerConfig =
   mklogger
   <$> ( parseLogLevel
-        <$> (length <$> many (flag' () (short 'v' <> help "make it more verbose.")))
-        <*> (length <$> many (flag' () (short 'q' <> help "make it more quiet.")))
+        <$> (length <$> many (flag' () (short 'v' <> hidden <> help "make it more verbose.")))
+        <*> (length <$> many (flag' () (short 'q' <> hidden <> help "make it more quiet.")))
       )
   <*> option auto
   ( short 'D'
     <> long "log-depth"
     <> help "set the log depth."
+    <> hidden
     <> value (-1)
     <> showDefault
   )
@@ -172,6 +277,14 @@ parseLoggerConfig =
     parseLogLevel lvl quiet =
       boundedToEnum (2 - lvl + quiet)
 
+parseOutputFile :: Parser (Maybe FilePath)
+parseOutputFile =
+  optional . strOption $
+    long "output-file"
+    <> hidden
+    <> metavar "OUTPUT"
+    <> help "specifies where to put the output"
+    <> short 'o'
 
 boundedToEnum :: (Bounded a, Enum a) => Int -> a
 boundedToEnum i =

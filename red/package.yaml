@@ -18,6 +18,9 @@ extra-source-files:
 # complications of embedding Haddock markup inside cabal files, it is
 # common to point users to the README.md file.
 description:         Please see the README on GitHub at <https://github.com/kalhauge/reduce#readme>
+    
+ghc-options:
+  - -Wall
 
 dependencies:
 - base >= 4.7 && < 5
@@ -36,12 +39,10 @@ dependencies:
 - dirtree
 - directory
 - aeson
-  # - bytestring
-  # - typed-process
-  # - cryptohash-sha256
-  # - async
-  # - stm
-  # - mtl
+- language-c
+- pretty
+- containers
+- pretty-simple
 
 library:
   source-dirs: src
@@ -49,7 +50,7 @@ library:
 executables:
   red:
     main:                Main.hs
-    source-dirs:         .
+    source-dirs:         app
     ghc-options:
       - -threaded
       - -rtsopts
@@ -59,3 +60,18 @@ executables:
       - reduce-util
       - reduce
       - optparse-applicative
+
+tests:
+  red-test:
+    main:                Main.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - red
+    - hspec
+    - hspec-core
+    - neat-interpolation >= 0.3
+    - hspec-expectations-pretty-diff

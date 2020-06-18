@@ -5,7 +5,6 @@
 {-# LANGUAGE LambdaCase             #-}
 {-# LANGUAGE MultiParamTypeClasses  #-}
 {-# LANGUAGE RankNTypes             #-}
-{-# LANGUAGE TupleSections          #-}
 {-|
 Module      : Control.Reduce.Reduction
 Description : A module of reducable things
@@ -25,6 +24,7 @@ module Control.Reduce.Reduction
     , all'
     , orNothing
     , subelements
+    , reduceAs
 
     -- * Algorithms
     , Reduct
@@ -47,13 +47,17 @@ module Control.Reduce.Reduction
     , deepSubelements
 
     -- * Implementations
+    , maybeR
     , listR
+    , atleastoneR
     , vectorR
     , hashmapR
     , jsonR
     , treeR
-    , dirtreeR
-
+    , dirTreeR
+    , dirForestR
+    , deepDirTreeR
+    , deepDirForestR
   ) where
 
 -- base
@@ -175,8 +179,7 @@ part' = fmap (fmap Just)
 -- (f :: Reduction a b) . all' (g :: Traversal b c) :: Reduction a c
 -- @
 all' :: Traversal' s a -> PartialReduction s a
-all' t fab s =
-  getCompose . t (Compose . fab) $ s
+all' t fab = getCompose . t (Compose . fab)
 {-# INLINE all' #-}
 
 -- | A 'PartialReduction' can also be cast to a 'Reduction' based on a 'Maybe' of
@@ -209,8 +212,8 @@ treeReduction red pab = go []
     go !lst = indexing red (Indexed fn)
       where
         fn idx a =
-          pure ($>)
-          <*> indexed pab (idx NE.:| lst) a
+          ($>)
+          <$> indexed pab (idx NE.:| lst) a
           <*> go (idx : lst) a
 {-# INLINE treeReduction #-}
 
@@ -234,8 +237,8 @@ boundedDeepening n red pab =
     red' = indexing red
     go 0 fi a = indexed pab fi a
     go n' fi a =
-      pure (*>)
-      <*> indexed pab fi a
+      (*>)
+      <$> indexed pab fi a
       <*> red' (Indexed $ \x -> go (n' - 1) (x:fi)) a
 {-# INLINE boundedDeepening #-}
 
@@ -279,6 +282,13 @@ treeSubelements red =
   getting (treeReduction red)
 {-# INLINE treeSubelements #-}
 
+reduceAs :: Prism' a b -> PartialReduction b a
+reduceAs p f a =
+  f (review p a) <&> \case
+    Just b -> b ^? p
+    Nothing -> Nothing
+{-# INLINE reduceAs #-}
+
 
 -- * Implementations
 
@@ -287,11 +297,18 @@ listR :: Reduction [a] a
 listR pab =
   fmap catMaybes . itraverse (indexed pab)
 
+-- | Like 'listR' but removes the list if empty
+atleastoneR :: PartialReduction [a] a
+atleastoneR f t =
+  listR f t <&> \case
+  [] -> Nothing
+  a  -> Just a
+
 -- | A 'Maybe' is trivially reducable.
 maybeR :: Reduction (Maybe s) s
 maybeR fab s =
   case s of
-    Just s' -> fab $ s'
+    Just s' -> fab s'
     Nothing -> pure Nothing
 
 -- | We can reduce a 'Vector' by turning it into a list and back again.
@@ -309,7 +326,7 @@ jsonR afb = \case
   String t -> pure $ String t
   Number s -> pure $ Number s
   Bool b -> pure $ Bool b
-  Null -> pure $ Null
+  Null -> pure Null
   Object o -> Object <$> (hashmapR . all' _2) afb o
 
 -- | A 'T.Tree' is reducable
@@ -318,10 +335,32 @@ treeR afb = \case
   T.Node a f ->
     T.Node a <$> listR afb f
 
--- | A Dirtree is reductable
-dirtreeR :: Reduction (DirTree a b) (DirTree a b)
-dirtreeR fn n =
+-- | A 'DirTree' is reducable
+dirTreeR :: Reduction (DirTree a) (DirTree a)
+dirTreeR fn n =
   DirTree <$> case dirTreeNode n of
     File b -> pure $ File b
-    Symlink x -> pure $ Symlink x
-    Directory b -> Directory <$> (iso toFileList fromFileList . listR . all' _2) fn b
+    Directory b -> Directory <$> dirForestR fn b
+
+-- | A 'DirForest' is reducable
+dirForestR :: Reduction (DirForest a) (DirTree a)
+dirForestR fn (DirForest b) =
+  DirForest <$> (iso toFileList fromFileList . listR . all' _2) fn b
+
+-- | Reduces the files in a dirtree. Removes directories if empty.
+deepDirTreeR :: PartialReduction (DirTree a) a
+deepDirTreeR f (DirTree tree) = case tree of
+  File a ->
+    fmap file <$> f a
+  Directory b ->
+    fmap directory <$> deepDirForestR f b
+
+-- | Reduces the files in a DirForest. Removes directories if empty.
+deepDirForestR :: PartialReduction (DirForest a) a
+deepDirForestR f (DirForest a) =
+  fmap DirForest <$>
+    ( all' (iso toFileList fromFileList)
+     . atleastoneR
+     . all' _2
+     . deepDirTreeR
+    ) f a
