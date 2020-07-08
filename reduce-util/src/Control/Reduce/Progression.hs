@@ -22,6 +22,7 @@ This module defines how to calculate a progression.
 module Control.Reduce.Progression
   ( calculateProgression
   , calculateLogicalClosure
+  , calculateSimpleProgression
 
   , runProgression
   , progression
@@ -77,6 +78,20 @@ calculateProgression order cnf vars =
   lookup' = order n cnf'
   revlookup = inverseOrder lookup'
   cnf'' = CNF.vmapCNF (revlookup V.!) cnf'
+
+-- | Calculate the progregssion, using the variable order
+-- inheirit in the CNF.
+calculateSimpleProgression ::
+  CNF
+  -> IS.IntSet
+  -> NE.NonEmpty IS.IntSet
+calculateSimpleProgression cnf vars =
+  IS.fromList . fmap (lookup V.!)
+    <$> runProgression n cnf' progression
+ where
+  (cnf', lookup) = CNF.limitCNF vars cnf
+  n = V.length lookup
+
 
 -- | Calculate the LogicalClosure
 calculateLogicalClosure :: CNF -> IS.IntSet -> IS.IntSet
