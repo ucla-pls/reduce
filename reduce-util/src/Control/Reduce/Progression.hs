@@ -32,6 +32,8 @@ module Control.Reduce.Progression
   , generateGraphOrder
   , generateTotalGraphOrder
   , generateProgressionOrder
+
+  , inverseOrder
   )
 where
 
