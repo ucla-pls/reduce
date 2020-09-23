@@ -1,0 +1,145 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.33.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: c1358e91a463a48c27850e69562d502f9b5be3e50929088b6fd073f29f062fa2
+
+name:           reduce-util
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/kalhauge/reduce#readme>
+homepage:       https://github.com/kalhauge/reduce#readme
+bug-reports:    https://github.com/kalhauge/reduce/issues
+author:         Christian Gram Kalhauge
+maintainer:     kalhauge@cs.ucla.edu
+copyright:      MIT
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    ChangeLog.md
+
+source-repository head
+  type: git
+  location: https://github.com/kalhauge/reduce
+
+library
+  exposed-modules:
+      Control.Reduce.Boolean
+      Control.Reduce.Boolean.CNF
+      Control.Reduce.Boolean.LiteralSet
+      Control.Reduce.Boolean.OBDD
+      Control.Reduce.Command
+      Control.Reduce.Graph
+      Control.Reduce.Metric
+      Control.Reduce.Problem
+      Control.Reduce.Progression
+      Control.Reduce.Reduction
+      Control.Reduce.Strategy
+      Control.Reduce.Util
+      Control.Reduce.Util.Logger
+      Control.Reduce.Util.OptParse
+      System.Process.Consume
+  other-modules:
+      Paths_reduce_util
+  hs-source-dirs:
+      src
+  ghc-options: -Wall
+  build-depends:
+      aeson
+    , async
+    , base >=4.7 && <5
+    , binary
+    , bytestring
+    , cassava
+    , containers
+    , contravariant
+    , cryptohash-sha256
+    , data-fix
+    , deepseq
+    , directory
+    , dirtree >=0.0.1
+    , filepath
+    , free
+    , hashable
+    , hashtables
+    , lens
+    , megaparsec >=7.0.0 && <7.1.0
+    , mtl
+    , optparse-applicative
+    , primitive
+    , process
+    , profunctors
+    , reduce
+    , stm
+    , temporary
+    , text
+    , time
+    , transformers
+    , typed-process
+    , unliftio
+    , unordered-containers
+    , vector
+  default-language: Haskell2010
+
+test-suite reduce-util-test
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  other-modules:
+      Control.Reduce.Boolean.CNFSpec
+      Control.Reduce.Boolean.OBDDSpec
+      Control.Reduce.BooleanSpec
+      Control.Reduce.CommandSpec
+      Control.Reduce.GraphSpec
+      Control.Reduce.ProgressionSpec
+      Control.Reduce.ReductionSpec
+      Control.Reduce.UtilSpec
+      Spec
+      SpecHelper
+      System.Process.ConsumeSpec
+      Paths_reduce_util
+  hs-source-dirs:
+      test
+  ghc-options: -Wall -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      aeson
+    , async
+    , base >=4.7 && <5
+    , binary
+    , bytestring
+    , cassava
+    , containers
+    , contravariant
+    , cryptohash-sha256
+    , data-fix
+    , deepseq
+    , directory
+    , dirtree >=0.0.1
+    , filepath
+    , free
+    , hashable
+    , hashtables
+    , hedgehog
+    , hspec
+    , hspec-hedgehog
+    , lens
+    , megaparsec >=7.0.0 && <7.1.0
+    , mtl
+    , optparse-applicative
+    , primitive
+    , process
+    , profunctors
+    , reduce
+    , reduce-util
+    , stm
+    , temporary
+    , text
+    , time
+    , transformers
+    , typed-process
+    , unliftio
+    , unordered-containers
+    , vector
+  default-language: Haskell2010

@@ -1,5 +1,4 @@
 .DS_Store
 .dir-locals.el
 .stack-work/
-reduce.cabal
 result

@@ -1,5 +1,4 @@
 .stack-work/
-reduce-util.cabal
 *~
 failures.txt
 test/outputs/

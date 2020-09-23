@@ -1,0 +1,63 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.33.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: d1352cc46339159806eeb2d112bb68d06453aeba30d08fb94fe3daaa51641af0
+
+name:           reduce
+version:        0.3.0.0
+category:       Web
+homepage:       https://github.com/ucla-pls/reduce#readme
+author:         Christian Gram Kalhauge
+maintainer:     kalhauge@cs.ucla.edu
+copyright:      MIT
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+
+library
+  exposed-modules:
+      Control.Reduce
+  other-modules:
+      Paths_reduce
+  hs-source-dirs:
+      src
+  build-depends:
+      base >=4.7 && <5
+    , containers
+    , mtl
+    , transformers
+    , vector
+  default-language: Haskell2010
+
+test-suite reduce-test
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  other-modules:
+      Control.ReduceSpec
+      Paths_reduce
+  hs-source-dirs:
+      test
+  build-depends:
+      QuickCheck
+    , base >=4.7 && <5
+    , containers
+    , directory
+    , filepath
+    , generic-random
+    , hspec-expectations-pretty-diff
+    , mtl
+    , reduce
+    , tasty
+    , tasty-discover
+    , tasty-hspec
+    , tasty-hunit
+    , tasty-quickcheck
+    , text
+    , transformers
+    , vector
+  default-language: Haskell2010
