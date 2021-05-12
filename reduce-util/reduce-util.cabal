@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: c1358e91a463a48c27850e69562d502f9b5be3e50929088b6fd073f29f062fa2
+-- hash: c03a0b52154a7d1404d0d123db958c4229cc67c35b56b0671f45144368ff1fb3
 
 name:           reduce-util
 version:        0.1.0.0
@@ -66,7 +66,7 @@ library
     , hashable
     , hashtables
     , lens
-    , megaparsec >=7.0.0 && <7.1.0
+    , megaparsec >=9.0.0 && <10.0.0
     , mtl
     , optparse-applicative
     , primitive
@@ -125,7 +125,7 @@ test-suite reduce-util-test
     , hspec
     , hspec-hedgehog
     , lens
-    , megaparsec >=7.0.0 && <7.1.0
+    , megaparsec >=9.0.0 && <10.0.0
     , mtl
     , optparse-applicative
     , primitive
