@@ -43,7 +43,7 @@ dependencies:
 - containers
 - lens
 - vector
-- megaparsec >= 7.0.0 && < 7.1.0
+- megaparsec >= 9.0.0 && < 10.0.0
 - cassava
 - profunctors
 - dirtree >= 0.0.1
