@@ -1,7 +1,7 @@
-resolver: lts-12.26
+resolver: lts-17.11
 packages:
 - reduce
 - reduce-util
 - red
 extra-deps:
-- dirtree-0.1.0
+- dirtree-0.1.3
