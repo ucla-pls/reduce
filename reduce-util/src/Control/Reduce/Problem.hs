@@ -255,7 +255,7 @@ setupProblemFromFile workDir template inputf = do
   setupProblem
     workDir template
     dirtree
-    (inputFromDirTree (takeBaseName inputf) . asRelativeDirTree)
+    (inputFromDirTree (takeFileName inputf) . asRelativeDirTree)
 
 -- | Setup the problem from a command. Might fail if the command is not
 -- satified.
