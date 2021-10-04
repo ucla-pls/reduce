@@ -55,18 +55,7 @@ data InputFrom
 parseCmdTemplate :: Parser (IO (Either String CmdTemplate))
 parseCmdTemplate =
   createCmdTemplate
-  <$> option auto
-  ( long "timelimit"
-    <> short 'T'
-    <> metavar "SECS"
-    <> hidden
-    <> value (-1)
-    <> showDefault
-    <> help (
-        "the maximum number of seconds to run the process,"
-        ++ " negative means no timelimit.")
-  )
-  <*> strArgument
+  <$> strArgument
   ( metavar "CMD" <> help "the command to run"
   )
   <*> many

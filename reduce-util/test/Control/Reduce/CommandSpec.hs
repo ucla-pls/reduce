@@ -51,19 +51,19 @@ spec = do
 
   describe "createCmdTemplate" $ do
     it "finds executable and parses commandline arguments" $ do
-      x <- createCmdTemplate 0 "echo" ["Hello, World"]
+      x <- createCmdTemplate "echo" ["Hello, World"]
       x `shouldSatisfy` isRight
 
     it "returns left if it cannot find executable" $ do
-      x <- createCmdTemplate 0 "not/an/executable" []
+      x <- createCmdTemplate "not/an/executable" []
       x `shouldSatisfy` isLeft
 
     it "returns left if not all files exists" $ do
-      x <- createCmdTemplate 0 "echo" ["%not-a-file.txt"]
+      x <- createCmdTemplate "echo" ["%not-a-file.txt"]
       x `shouldSatisfy` isLeft
 
     it "returns left if it cannot parse the arguments" $ do
-      x <- createCmdTemplate 0 "echo" ["{"]
+      x <- createCmdTemplate "echo" ["{"]
       x `shouldSatisfy` isLeft
 
   describe "evaluateArgument" $ do
@@ -90,13 +90,13 @@ spec = do
 
   describe "evaluateTemplate" $ do
     it "should prefix the command and arguments" $ do
-      evaluateTemplate (CmdTemplate (-1) "/some/prefix/hello.sh" [CAFilePath "/some/prefix/file", CAInput ""]) ("/some/prefix", "$VAR") (Map.singleton "" (CAFilePath "/some/prefix/file2"))
+      evaluateTemplate (CmdTemplate "/some/prefix/hello.sh" [CAFilePath "/some/prefix/file", CAInput ""]) ("/some/prefix", "$VAR") (Map.singleton "" (CAFilePath "/some/prefix/file2"))
       `shouldBe` ("$VAR/hello.sh" :: String, ["$VAR/file", "$VAR/file2" :: String])
 
   describe "templateToString" $ do
     it "should prefix the command and arguments" $ do
       templateToString
-        (CmdTemplate (-1)
+        (CmdTemplate 
          "/some/prefix/hello.sh"
          [CAFilePath "/some/prefix/file", CAInput ""]
         ) ("/some/prefix", "$VAR")

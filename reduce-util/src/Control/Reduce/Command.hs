@@ -193,8 +193,7 @@ data CmdOutputSummary = CmdOutputSummary
 -- | A command template. These templates contains information about how to run
 -- a command given an `CmdInput`.
 data CmdTemplate = CmdTemplate
-  { cmdTimelimit :: !Double
-  , cmdProgram   :: !FilePath
+  { cmdProgram   :: !FilePath
   , cmdArguments :: ![CmdArgument]
   } deriving (Show, Eq)
 
@@ -272,13 +271,13 @@ instance Semigroup CmdArgument where
 -- | Creates a new command from string arguments. Can fail if the executable or
 -- any of the files mentioned in the arguments does not exits, or
 -- if it can't parse the arguments.
-createCmdTemplate :: Double -> String -> [String] -> IO (Either String CmdTemplate)
-createCmdTemplate timelimit cmd args = runExceptT $ do
+createCmdTemplate :: String -> [String] -> IO (Either String CmdTemplate)
+createCmdTemplate cmd args = runExceptT $ do
   exactCmd <- tryL $ getExecutable cmd
   results <-
     mapM (tryL . canonicalizeArgument)
     =<< mapM (liftEither . parseCmdArgument) args
-  return $ CmdTemplate timelimit exactCmd results
+  return $ CmdTemplate exactCmd results
   where
     getExecutable exec =
       findExecutable exec >>=
@@ -313,7 +312,7 @@ evaluateTemplate ::
   -> (FilePath, String)
   -> Map.Map String CmdArgument
   -> (String, [m])
-evaluateTemplate (CmdTemplate _ str args) fp kmap =
+evaluateTemplate (CmdTemplate str args) fp kmap =
   ( replaceRelative str fp
   , map ( argumentToString
          . flip relativeArgument fp
