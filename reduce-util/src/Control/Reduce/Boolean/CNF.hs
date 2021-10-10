@@ -270,6 +270,10 @@ cnfDependencies =
 isIPF :: CNF -> Bool
 isIPF = all LS.hasPositiveClause . cnfClauses
 
+nonIPFClauses :: CNF -> [Clause]
+nonIPFClauses = filter (Prelude.not . LS.hasPositiveClause) 
+  . toList . cnfClauses
+
 isDualIPF :: CNF -> Bool
 isDualIPF = all LS.hasNegativeClause . cnfClauses
 

@@ -143,6 +143,8 @@ compileObdd = cata \case
   TNot a -> not a
   TConst True -> true
   TConst False -> false
+  TWarning _ True -> true
+  TWarning _ False -> false
 
 -- | Print a reducedNnf as a dot graph
 dotObdd :: Obdd -> LazyText.Text
