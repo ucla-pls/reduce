@@ -47,8 +47,8 @@ genPositiveClause :: MonadGen m => Int -> m Clause
 genPositiveClause vars = do
   s <- S.toList <$> Gen.set (Range.exponential 1 (vars -1)) (genVar vars)
   t <- Gen.int (Range.linear 0 (length s -2))
-  (ff,tt) <- splitAt t <$> Gen.shuffle s
-  let Just l = joinLiterals (IS.fromList ff, IS.fromList tt)
+  (ff', tt') <- splitAt t <$> Gen.shuffle s
+  let Just l = joinLiterals (IS.fromList ff', IS.fromList tt')
   return l
 
 
@@ -56,15 +56,15 @@ genVar :: MonadGen m => Int -> m Int
 genVar vars = Gen.int (Range.linear 0 (vars -1))
 
 genGraph :: MonadGen m => Int -> m (G.Graph () Int)
-genGraph size = do
-  fmap (fst . G.buildGraph') . forM [0 .. size -1] $ \n -> do
-    ns <- filterM (const (Gen.bool)) [0 .. size -1]
-    return (n, ns)
+genGraph n = do
+  fmap (fst . G.buildGraph') . forM [0 .. n -1] $ \x -> do
+    xs <- filterM (const (Gen.bool)) [0 .. n -1]
+    return (x, xs)
 
 genIpfFromGraph :: MonadGen m => Int -> m (G.Graph () Int, CNF)
-genIpfFromGraph size = do
-  graph <- genGraph size
-  trues <- filterM (const Gen.bool) [0 .. size -1]
+genIpfFromGraph n = do
+  graph <- genGraph n
+  trues <- filterM (const Gen.bool) [0 .. n -1]
   pure $ (graph, CNF (S.fromList $
     [LS.singleton (tt t) | t <- trues]
     ++ mapMaybe edgeToClause (G.edges graph)

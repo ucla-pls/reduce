@@ -1,4 +1,4 @@
-:set -fwarn-unused-binds
+:set -fwarn-unused-binds -fwarn-name-shadowing -fwarn-unused-matches -fwarn-all
 -- -fwarn-unused-imports
 :set -isrc
 :set -itest

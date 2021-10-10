@@ -226,6 +226,7 @@ data StmtF a f
   | TNot f
   | TVar !a
   | TConst !Bool
+  | TWarning String !Bool
   deriving
     ( Eq, Ord
     , Functor, Foldable, Traversable
@@ -240,6 +241,7 @@ instance Bifunctor StmtF where
     TNot a   -> TNot (s a)
     TVar a   -> TVar (f a)
     TConst b -> TConst b
+    TWarning s' b -> TWarning s' b
 
 -- instance Bifoldable StmtF where
 -- instance Bitraversable StmtF where
@@ -256,6 +258,7 @@ instance Functor Stmt where
     TNot a -> TNot a
     TVar l -> TVar (f l)
     TConst b -> TConst b
+    TWarning s b -> TWarning s b
 
 instance Foldable Stmt where
   foldMap f = cata \case
@@ -264,6 +267,7 @@ instance Foldable Stmt where
     TNot a -> a
     TVar l -> f l
     TConst _ -> mempty
+    TWarning _ _ -> mempty
 
 instance Traversable Stmt where
   traverse f = cata $ fmap liftF . \case
@@ -272,8 +276,18 @@ instance Traversable Stmt where
     TNot a -> TNot <$> a
     TVar l -> TVar <$> f l
     TConst b -> pure $ TConst b
+    TWarning s' b -> pure $ TWarning s' b
 
 instance Fixed (StmtF a) (Stmt a)
+
+stmtWarnings :: Stmt a -> [String]
+stmtWarnings = (`appEndo` []) . cata \case
+  TAnd a b -> a <> b
+  TOr a b -> a <> b
+  TNot a -> a
+  TVar _ -> mempty 
+  TConst _ -> mempty
+  TWarning s _ -> Endo (s:)
 
 instance Boolean (Stmt a) where
   (/\) a b = liftF (TAnd a b)
@@ -298,8 +312,13 @@ showsPrecStmtF = \case
   TOr a b  -> \n -> showParen (n > 2) (a 2 . showString " ∨ " . b 3)
   TNot a -> \n -> showParen (n > 9) (showString "not " . a 10)
   TVar i -> \n -> showParen (n > 9) (showString "tt " . showsPrec 10 i)
-  TConst True -> const $ showString "true"
-  TConst False -> const $ showString "false"
+  TConst b -> const $ showBool b
+  TWarning s b -> const $ showBool b
+    . showString "[WARN:" . showString s . showString "]"
+ where
+  showBool = \case
+    True -> showString "true"
+    False -> showString "false"
 
 showsStmtWith :: (a -> ShowS) -> Stmt a -> ShowS
 showsStmtWith showsVar = ($ (0::Int)) . cata \case
@@ -307,8 +326,13 @@ showsStmtWith showsVar = ($ (0::Int)) . cata \case
   TOr a b  -> \n -> showParen (n > 2) (a 2 . showString " ∨ " . b 3)
   TNot a -> \n -> showParen (n > 9) (showString "not " . a 10)
   TVar i -> \n -> showParen (n > 9) (showString "tt " . showsVar i)
-  TConst True -> const $ showString "true"
-  TConst False -> const $ showString "false"
+  TConst b -> const $ showBool b
+  TWarning s b -> const $ showBool b
+    . showString "[WARN:" . showString s . showString "]"
+ where
+  showBool = \case
+    True -> showString "true"
+    False -> showString "false"
 
 instance Show a => Show (Stmt a) where
   showsPrec n f = cata showsPrecStmtF f n
@@ -331,6 +355,7 @@ assignVars fn = cata \case
   TNot a   -> liftF (TNot a)
   TVar a   -> liftF (fn a)
   TConst b -> liftF (TConst b)
+  TWarning s b -> liftF (TWarning s b)
 
 -- | A Traversal over all variables in a term
 traverseVariables :: Applicative m => (a -> m (Stmt b)) -> Stmt a -> m (Stmt b)
@@ -340,6 +365,7 @@ traverseVariables fn = cata \case
   TNot a   -> liftF <$> (TNot <$> a)
   TVar a   -> fn a
   TConst b -> pure $ liftF (TConst b)
+  TWarning s b -> pure $ liftF (TWarning s b)
 
 
 -- | A literal is either true or false.
@@ -423,6 +449,8 @@ instance Fixed (StmtF a) (NnfAsStmt a) where
       TVar a ->
         NLit (Literal n a)
       TConst b ->
+        NConst (if n then b else not b)
+      TWarning _ b ->
         NConst (if n then b else not b)
 
 instance Show a => Show (Nnf a) where

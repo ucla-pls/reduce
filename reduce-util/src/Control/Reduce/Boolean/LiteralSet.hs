@@ -190,7 +190,7 @@ unSingleton a = case minView a of
 {-# INLINE unSingleton #-}
 
 transpose :: IsIntLiteralSet a => a -> a
-transpose (splitLiterals -> (ff, tt)) = fromJust $ joinLiterals (tt, ff)
+transpose (splitLiterals -> (ff', tt')) = fromJust $ joinLiterals (tt', ff')
 {-# INLINE transpose #-}
 
 toNegativeLiterals :: IS.IntSet -> IS.IntSet

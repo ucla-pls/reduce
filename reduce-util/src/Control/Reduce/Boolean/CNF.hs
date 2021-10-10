@@ -278,8 +278,8 @@ nonNegativeClausesVariables =
   mapMaybe nonNegativeClause . S.toList . cnfClauses
  where
   nonNegativeClause c = do
-    let (ff, tt) = LS.splitLiterals c
-    if IS.null ff then Just tt else Nothing
+    let (ff', tt') = LS.splitLiterals c
+    if IS.null ff' then Just tt' else Nothing
 
 unitResolve :: CNF -> Maybe (Term, CNF)
 unitResolve cnf = do

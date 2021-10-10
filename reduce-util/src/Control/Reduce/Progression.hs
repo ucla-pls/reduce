@@ -38,6 +38,7 @@ module Control.Reduce.Progression
 where
 
 -- base
+import           Prelude hiding (lookup)
 import           Control.Monad.ST              as ST
 import           Data.Either
 import           Data.Functor
@@ -171,7 +172,7 @@ generateProgressionOrder n cnf = lookup
 generateGraphOrder :: Order
 generateGraphOrder n cnf = lookup
  where
-  Just (splitLiterals -> (_, tt), cnf') = CNF.unitResolve cnf
+  Just (splitLiterals -> (_, tt'), cnf') = CNF.unitResolve cnf
 
   -- Make this better, choose free variables first.
   (graph, _) = G.buildGraphFromNodesAndEdges
@@ -179,28 +180,28 @@ generateGraphOrder n cnf = lookup
     [ G.Edge () t f | (f, t) <- CNF.cnfDependencies cnf']
 
   lookup = V.fromList
-    . (IS.toList tt ++)
+    . (IS.toList tt' ++)
     . reverse
-    . filter (Prelude.not . (`IS.member` tt)) $ G.postOrd graph
+    . filter (Prelude.not . (`IS.member` tt')) $ G.postOrd graph
 
 generateTotalGraphOrder :: Order
 generateTotalGraphOrder n cnf = lookup
  where
-  Just (splitLiterals -> (_, tt), cnf') = CNF.unitResolve cnf
+  Just (splitLiterals -> (_, tt'), cnf') = CNF.unitResolve cnf
 
   -- Make this better, choose free variables first.
   (graph, _) = G.buildGraphFromNodesAndEdges
     [ (a, a) | a <- [ 0..n-1 ]]
     [ G.Edge () t f
     | c <- S.toList $ CNF.cnfClauses cnf'
-    , let (ff, tt) = splitLiterals c
-    , (f, t) <- liftM2 (,) (IS.toList ff) (IS.toList tt)
+    , let (ff', tt'') = splitLiterals c
+    , (f, t) <- liftM2 (,) (IS.toList ff') (IS.toList tt'')
     ]
 
   lookup = V.fromList
-    . (IS.toList tt ++)
+    . (IS.toList tt' ++)
     . reverse
-    . filter (Prelude.not . (`IS.member` tt)) $ G.postOrd graph
+    . filter (Prelude.not . (`IS.member` tt')) $ G.postOrd graph
 
 inverseOrder :: V.Vector Int -> V.Vector Int
 inverseOrder lookup = V.create do
@@ -230,11 +231,11 @@ logicalClosure = go where
 
 conditionTrue :: Int -> ProgressionM s ()
 conditionTrue v = do
-  mapM_ conditionClause =<< clausesOf v
+  mapM_ conditionClause' =<< clausesOf v
   markVisited v
  where
-  conditionClause :: Int -> ProgressionM s ()
-  conditionClause cidx = updateClause cidx \case
+  conditionClause' :: Int -> ProgressionM s ()
+  conditionClause' cidx = updateClause cidx \case
     Just (LS.conditionClause (tt v) -> Just clause) -> do
       unless (hasNegativeClause clause) $ addPositiveClause cidx
       return ((), Just clause)
